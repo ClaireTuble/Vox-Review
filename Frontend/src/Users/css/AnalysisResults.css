@@ -1,0 +1,545 @@
+/* ============================================================
+   AnalysisResults — Light Theme
+   Blue (#2563EB) & White (#F8FAFC / #FFFFFF)
+   ============================================================ */
+
+/* ── Emotion icon animations (Emotion section ONLY) ──────── */
+@keyframes emotionPulse {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.12); }
+}
+
+@keyframes emotionBounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  40%       { transform: translateY(-4px) scale(1.08); }
+  70%       { transform: translateY(2px) scale(0.96); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.emotion-icon-animated {
+  display: inline-block;
+  animation: emotionPulse 2.8s ease-in-out infinite;
+  will-change: transform;
+}
+
+.emotion-icon-sm {
+  display: inline-block;
+  animation: emotionBounce 3.2s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* ── Skeleton loading ────────────────────────────────────── */
+.skeleton-box {
+  background: linear-gradient(90deg, #E2E8F0 25%, #F1F5F9 50%, #E2E8F0 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 8px;
+}
+
+.skeleton-circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+}
+
+.skeleton-line {
+  height: 12px;
+  width: 100%;
+}
+
+.skeleton-line.short {
+  width: 60%;
+}
+
+/* ── Base Layout ─────────────────────────────────────────── */
+.analysis-section {
+  padding: 0 2px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* White card — light theme base */
+.analysis-glass-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  animation: popupFadeIn 220ms ease-out;
+}
+
+.analysis-glass-card:hover {
+  border-color: rgba(37, 99, 235, 0.25);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.07);
+  transform: translateY(-1px);
+}
+
+/* ── Hero Emotion Banner ─────────────────────────────────── */
+.hero-emotion-banner.compact {
+  background: linear-gradient(135deg, #F8FBFF 0%, #F1F5F9 100%);
+  border: 1px solid #E2E8F0;
+  border-left: 3px solid #2563EB;
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+}
+
+.hero-emotion-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero-emoji {
+  font-size: 22px;
+}
+
+.hero-tag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #2563EB;
+}
+
+.hero-emotion-body {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.hero-emotion-name {
+  font-size: 18px;
+  font-weight: 800;
+  color: #1E293B;
+}
+
+.hero-emotion-metrics {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero-emotion-score {
+  font-size: 18px;
+  font-weight: 800;
+  color: #1E293B;
+}
+
+.hero-confidence-badge {
+  font-size: 9px;
+  font-weight: 700;
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563EB;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+
+/* ── Action Toolbar ──────────────────────────────────────── */
+.productivity-action-bar {
+  display: flex;
+  gap: 8px;
+}
+
+.action-tool-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.action-tool-btn:hover {
+  transform: translateY(-1px);
+}
+
+.action-tool-btn.secondary-clear {
+  background: #F1F5F9;
+  border: 1px solid #CBD5E1;
+  color: #475569;
+}
+
+.action-tool-btn.secondary-clear:hover {
+  background: #E2E8F0;
+  color: #1E293B;
+}
+
+.action-tool-btn.primary-save {
+  background: #2563EB;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
+}
+
+.action-tool-btn.primary-save:hover {
+  background: #1D4ED8;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+  transform: translateY(-1px);
+}
+
+/* ── Guest Lock Banner ───────────────────────────────────── */
+.guest-lock-banner {
+  background: #fffbeb;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #92400e;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.guest-lock-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.guest-unlock-btn {
+  background: #f59e0b;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ── Donut Chart ─────────────────────────────────────────── */
+.donut-chart-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+.donut-svg-container {
+  position: relative;
+  width: 130px;
+  height: 130px;
+}
+
+.donut-svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.donut-segment {
+  transition: stroke-width 0.2s ease;
+  cursor: pointer;
+}
+
+.donut-segment:hover {
+  stroke-width: 17;
+}
+
+.donut-center-info {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  pointer-events: none;
+}
+
+.donut-center-emoji {
+  font-size: 18px;
+}
+
+.donut-center-score {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1E293B;
+  line-height: 1.1;
+}
+
+.donut-center-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: #64748B;
+}
+
+/* ── Legend Grid ─────────────────────────────────────────── */
+.donut-legend-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  width: 100%;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  font-size: 10px;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.legend-item:hover,
+.legend-item.active {
+  background: #FFFFFF;
+  border-color: #2563EB;
+  color: #1E293B;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+}
+
+.legend-label-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Emotion Intelligence Card ───────────────────────────── */
+.emotion-intelligence-card {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.intel-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.intel-emotion-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.intel-confidence-box {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #64748B;
+  flex-shrink: 0;
+}
+
+.confidence-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+.intel-keywords-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.intel-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.keywords-tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.keyword-tag {
+  background: #EFF6FF;
+  border: 1px solid rgba(37, 99, 235, 0.15);
+  color: #1d4ed8;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+/* ── Aspects / Emotion Drivers ───────────────────────────── */
+.aspects-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.aspect-card {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 9px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+
+.aspect-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.aspect-title-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.aspect-icon {
+  color: #2563EB;
+  display: flex;
+}
+
+.aspect-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.aspect-emotion-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748B;
+}
+
+.aspect-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.aspect-bar-track {
+  flex: 1;
+  height: 5px;
+  background: #E2E8F0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.aspect-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.aspect-score-text {
+  font-size: 10px;
+  font-weight: 700;
+  color: #334155;
+  width: 28px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ── Quote / AI Insights Section ─────────────────────────── */
+.quotes-filter-bar {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.quotes-filter-bar::-webkit-scrollbar { display: none; }
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #F1F5F9;
+  border: 1px solid #E2E8F0;
+  color: #64748B;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.filter-chip.active {
+  background: #2563EB;
+  border-color: #2563EB;
+  color: #ffffff;
+}
+
+.quote-bubble {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quote-text {
+  font-size: 11px;
+  color: #1E293B;
+  line-height: 1.45;
+  margin: 0;
+  font-style: italic;
+}
+
+.quote-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #64748B;
+  font-weight: 600;
+}

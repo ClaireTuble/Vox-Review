@@ -1,0 +1,110 @@
+/* VoxReview Header — Compact Popup Style */
+
+.vox-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: #FFFFFF;
+  border-bottom: 1px solid #EAF0F8;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.vox-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+}
+
+.vox-logo-badge {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vox-title-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.vox-brand-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0F172A;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.vox-brand-tag {
+  font-size: 9px;
+  font-weight: 700;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.vox-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vox-login-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  border: 1px solid #DBEAFE;
+  background: #F8FAFC;
+  color: #2563EB;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.vox-login-btn:hover {
+  background: #EFF6FF;
+  border-color: #BFDBFE;
+  color: #1D4ED8;
+}
+
+.vox-user-profile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.vox-user-profile:hover {
+  background: #F1F5F9;
+  border-color: #CBD5E1;
+}
+
+.vox-user-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vox-user-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+}

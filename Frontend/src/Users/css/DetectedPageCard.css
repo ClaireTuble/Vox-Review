@@ -1,0 +1,243 @@
+/* DetectedPageCard — Compact Popup Card */
+
+.detected-page-card-container {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  padding: 12px;
+  margin: 0;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.2s ease;
+  box-sizing: border-box;
+  width: 100%;
+  animation: popupFadeIn 220ms ease-out;
+}
+
+.detected-page-card-container:hover {
+  border-color: #BFDBFE;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.07);
+  transform: translateY(-1px);
+}
+
+.detected-page-card-container.completed {
+  border-color: #DCFCE7;
+  background: #F0FDF4;
+}
+
+.card-status-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #BBF7D0;
+}
+
+.completed-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rating-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.status-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #16A34A;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── IDLE / ANALYZING STATE ──────────────────────────────── */
+.page-main-info {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.page-img-wrapper {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.page-img-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  color: #64748B;
+}
+
+.page-img-placeholder svg {
+  width: 20px;
+  height: 20px;
+  stroke: #2563EB;
+}
+
+.img-subtext {
+  font-size: 8px;
+  font-weight: 600;
+  color: #64748B;
+}
+
+.page-details {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+
+.platform-badge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.platform-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.platform-badge.amazon {
+  background: #FFFBEB;
+  color: #D97706;
+  border: 1px solid #FDE68A;
+}
+
+.platform-badge.shopee {
+  background: #FEF2F2;
+  color: #DC2626;
+  border: 1px solid #FECACA;
+}
+
+.platform-badge.lazada {
+  background: #EFF6FF;
+  color: #2563EB;
+  border: 1px solid #BFDBFE;
+}
+
+.page-category-tag {
+  font-size: 9px;
+  font-weight: 600;
+  color: #64748B;
+  background: #F1F5F9;
+  border: 1px solid #E2E8F0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.page-title-text {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1E293B;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.rating-stars-inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748B;
+}
+
+.rating-num {
+  color: #D97706;
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.rating-dot-sep, .review-count-bullet {
+  color: #94A3B8;
+  font-size: 10px;
+}
+
+.review-count-tag {
+  color: #64748B;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.card-bottom-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.review-source-chip {
+  font-size: 9px;
+  font-weight: 600;
+  color: #2563EB;
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.change-target-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 8px;
+  border-top: 1px dashed #E2E8F0;
+}
+
+.change-target-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #F1F5F9;
+  border: 1px solid #CBD5E1;
+  color: #2563EB;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 9px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.change-target-btn:hover {
+  background: #2563EB;
+  border-color: #2563EB;
+  color: #ffffff;
+}

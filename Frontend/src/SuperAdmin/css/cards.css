@@ -1,0 +1,77 @@
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.stat-card {
+  background: rgba(30, 41, 59, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 18px;
+  padding: 18px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.18);
+}
+
+.stat-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.stat-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.stat-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.12);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.loading-state,
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 180px;
+  text-align: center;
+  color: #94a3b8;
+}
+
+.loading-spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid rgba(148, 163, 184, 0.22);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

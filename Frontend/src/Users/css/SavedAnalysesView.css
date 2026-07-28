@@ -1,0 +1,124 @@
+/* SavedAnalysesView — Compact Popup Theme */
+
+.saved-view-container {
+  padding: 0 2px 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.saved-view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.saved-view-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1E293B;
+}
+
+.saved-search-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 9px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  color: #1E293B;
+  font-size: 11px;
+  outline: none;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+
+.saved-search-input:focus {
+  border-color: #2563EB;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+}
+
+.saved-search-input::placeholder {
+  color: #94A3B8;
+}
+
+.saved-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.saved-card {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.03);
+}
+
+.saved-card:hover {
+  border-color: #2563EB;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.1);
+  transform: translateY(-1px);
+}
+
+.saved-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.saved-card-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1E293B;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saved-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #64748B;
+}
+
+.saved-score-tag {
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.saved-action-btn {
+  width: 100%;
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: none;
+  background: linear-gradient(135deg, #2563EB, #3B82F6);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22);
+  transition: all 0.2s ease;
+  margin-top: 4px;
+}
+
+.saved-action-btn:hover {
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+  transform: translateY(-1px);
+}

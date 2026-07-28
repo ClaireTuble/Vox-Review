@@ -1,0 +1,95 @@
+.superadmin-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 24px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 20px;
+  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.24);
+}
+
+.topbar-content-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.topbar-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.breadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.breadcrumb-current {
+  color: #e2e8f0;
+}
+
+.topbar-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.topbar-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0;
+}
+
+.topbar-subtitle {
+  font-size: 13px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.6;
+  max-width: 640px;
+}
+
+.topbar-profile-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(30, 41, 59, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 16px;
+  padding: 10px 12px;
+  min-width: 220px;
+}
+
+.avatar-circle {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.15);
+  color: #93c5fd;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.user-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.user-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.user-email {
+  font-size: 11px;
+  color: #94a3b8;
+}

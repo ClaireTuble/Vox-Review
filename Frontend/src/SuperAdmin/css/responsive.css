@@ -1,0 +1,36 @@
+@media (max-width: 1100px) {
+  .stats-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .split-panels-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .superadmin-page-container {
+    flex-direction: column;
+  }
+
+  .superadmin-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+    position: relative;
+    height: auto;
+  }
+
+  .superadmin-viewport {
+    margin-left: 0;
+  }
+
+  .superadmin-topbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .topbar-profile-card {
+    width: 100%;
+  }
+}
