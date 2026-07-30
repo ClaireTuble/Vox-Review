@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+
+  "name": "VoxReview",
+  "version": "1.0.0",
+
+  "description": "AI-powered review analysis extension",
+
+  "action": {
+    "default_title": "VoxReview",
+    "default_popup": "popup.html"
+  },
+
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ]
+}
