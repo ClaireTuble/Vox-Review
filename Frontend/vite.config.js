@@ -10,8 +10,11 @@ export default defineConfig({
    outDir: "extension",
   emptyOutDir: false,
 
-    rollupOptions: {
-      input: "./src/extension.jsx",
+   rollupOptions: {
+  input: {
+    popup: "./src/extension.jsx",
+    content: "./extension/content.js",
+  },
 
       output: {
         assetFileNames: "assets/[name]-[hash][extname]",

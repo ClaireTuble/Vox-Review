@@ -24,11 +24,46 @@
   "content_scripts": [
     {
       "matches": [
-        "<all_urls>"
+        "https://shopee.ph/*",
+        "https://*.shopee.ph/*"
       ],
       "js": [
+        "scraper/detector.js",
+        "scraper/platforms/shopee.js",
+        "scraper/scraperManager.js",
         "content.js"
-      ]
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.lazada.com.ph/*",
+        "https://*.lazada.com.ph/*",
+        "https://www.lazada.com/*",
+        "https://*.lazada.com/*"
+      ],
+      "js": [
+        "scraper/detector.js",
+        "scraper/platforms/lazada.js",
+        "scraper/scraperManager.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.google.com/maps/*",
+        "https://maps.google.com/*",
+        "https://www.google.com.ph/maps/*",
+        "https://maps.google.com.ph/*"
+      ],
+      "js": [
+        "scraper/detector.js",
+        "scraper/platforms/google.js",
+        "scraper/scraperManager.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
     }
   ]
 }

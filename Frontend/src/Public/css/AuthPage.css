@@ -26,6 +26,7 @@
   pointer-events: none;
   z-index: 0;
 }
+
 .ap-page-glow-purple {
   width: 600px;
   height: 600px;
@@ -33,6 +34,7 @@
   top: -140px;
   left: -100px;
 }
+
 .ap-page-glow-blue {
   width: 650px;
   height: 650px;
@@ -87,7 +89,7 @@
   position: relative;
   z-index: 2;
   transition: transform 0.55s cubic-bezier(0.65, 0, 0.35, 1),
-              opacity   0.4s ease;
+    opacity 0.4s ease;
 }
 
 .ap-brand-panel {
@@ -97,18 +99,22 @@
   overflow: hidden;
   /* Blue gradient matching landing page CTA blue */
   background: linear-gradient(145deg,
-    #1E40AF 0%,
-    #1D4ED8 22%,
-    #2563EB 45%,
-    #3B82F6 70%,
-    #1D4ED8 100%
-  );
+      #1E40AF 0%,
+      #1D4ED8 22%,
+      #2563EB 45%,
+      #3B82F6 70%,
+      #1D4ED8 100%);
   transition: transform 0.55s cubic-bezier(0.65, 0, 0.35, 1);
 }
 
 /* Register mode — swap order */
-.ap-mode-register .ap-form-panel { order: 2; }
-.ap-mode-register .ap-brand-panel { order: 1; }
+.ap-mode-register .ap-form-panel {
+  order: 2;
+}
+
+.ap-mode-register .ap-brand-panel {
+  order: 1;
+}
 
 /* ── Forms Track ───────────────────────────────────────── */
 .ap-forms-track {
@@ -126,27 +132,30 @@
   flex-direction: column;
   justify-content: center;
   transition:
-    opacity    0.42s cubic-bezier(0.65, 0, 0.35, 1),
-    transform  0.42s cubic-bezier(0.65, 0, 0.35, 1),
+    opacity 0.42s cubic-bezier(0.65, 0, 0.35, 1),
+    transform 0.42s cubic-bezier(0.65, 0, 0.35, 1),
     visibility 0s linear 0.42s;
   will-change: transform, opacity;
 }
+
 .ap-form-slide.ap-slide-active {
   opacity: 1;
   transform: translateX(0) scale(1);
   visibility: visible;
   pointer-events: auto;
   transition:
-    opacity    0.42s cubic-bezier(0.65, 0, 0.35, 1) 0.1s,
-    transform  0.42s cubic-bezier(0.65, 0, 0.35, 1) 0.1s,
+    opacity 0.42s cubic-bezier(0.65, 0, 0.35, 1) 0.1s,
+    transform 0.42s cubic-bezier(0.65, 0, 0.35, 1) 0.1s,
     visibility 0s linear 0s;
 }
+
 .ap-form-slide.ap-slide-hidden-right {
   opacity: 0;
   transform: translateX(32px) scale(0.97);
   visibility: hidden;
   pointer-events: none;
 }
+
 .ap-form-slide.ap-slide-hidden-left {
   opacity: 0;
   transform: translateX(-32px) scale(0.97);
@@ -155,9 +164,13 @@
 }
 
 /* ── Form Body ─────────────────────────────────────────── */
-.ap-form-body { width: 100%; }
+.ap-form-body {
+  width: 100%;
+}
 
-.ap-form-header { margin-bottom: 20px; }
+.ap-form-header {
+  margin-bottom: 20px;
+}
 
 .ap-form-title {
   font-size: 22px;
@@ -166,6 +179,7 @@
   letter-spacing: -0.03em;
   margin: 0 0 5px;
 }
+
 .ap-form-subtitle {
   font-size: 13.5px;
   color: #64748B;
@@ -178,6 +192,7 @@
   gap: 8px;
   margin-bottom: 14px;
 }
+
 .ap-quick-btn {
   display: inline-flex;
   align-items: center;
@@ -193,6 +208,7 @@
   transition: background 0.18s, border-color 0.18s;
   font-family: inherit;
 }
+
 .ap-quick-btn:hover {
   background: rgba(37, 99, 235, 0.12);
   border-color: rgba(37, 99, 235, 0.32);
@@ -207,6 +223,7 @@
   border-radius: 12px;
   padding: 4px;
 }
+
 .ap-role-btn {
   flex: 1;
   display: inline-flex;
@@ -224,6 +241,7 @@
   transition: background 0.2s, color 0.2s, box-shadow 0.2s;
   font-family: inherit;
 }
+
 .ap-role-btn.active {
   background: #FFFFFF;
   color: #1E293B;
@@ -251,27 +269,32 @@
   flex-direction: column;
   gap: 13px;
 }
+
 .ap-field {
   display: flex;
   flex-direction: column;
   gap: 5px;
 }
+
 .ap-label {
   font-size: 12.5px;
   font-weight: 600;
   color: #374151;
 }
+
 .ap-input-wrap {
   position: relative;
   display: flex;
   align-items: center;
 }
+
 .ap-icon {
   position: absolute;
   left: 12px;
   color: #94A3B8;
   pointer-events: none;
 }
+
 .ap-input {
   width: 100%;
   height: 42px;
@@ -286,12 +309,16 @@
   font-family: inherit;
   box-sizing: border-box;
 }
+
 .ap-input:focus {
   border-color: #2563EB;
   background: #FFFFFF;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
-.ap-input::placeholder { color: #CBD5E1; }
+
+.ap-input::placeholder {
+  color: #CBD5E1;
+}
 
 .ap-eye {
   position: absolute;
@@ -305,7 +332,10 @@
   padding: 0;
   transition: color 0.15s;
 }
-.ap-eye:hover { color: #475569; }
+
+.ap-eye:hover {
+  color: #475569;
+}
 
 /* Password strength */
 .ap-strength {
@@ -314,11 +344,13 @@
   gap: 10px;
   margin-top: 4px;
 }
+
 .ap-strength-bar {
   display: flex;
   gap: 4px;
   flex: 1;
 }
+
 .ap-seg {
   flex: 1;
   height: 3px;
@@ -326,10 +358,22 @@
   background: #E2E8F0;
   transition: background 0.2s;
 }
-.ap-seg.weak   { background: #EF4444; }
-.ap-seg.fair   { background: #F59E0B; }
-.ap-seg.good   { background: #10B981; }
-.ap-seg.strong { background: #2563EB; }
+
+.ap-seg.weak {
+  background: #EF4444;
+}
+
+.ap-seg.fair {
+  background: #F59E0B;
+}
+
+.ap-seg.good {
+  background: #10B981;
+}
+
+.ap-seg.strong {
+  background: #2563EB;
+}
 
 .ap-strength-text {
   font-size: 11px;
@@ -343,6 +387,7 @@
   align-items: center;
   justify-content: space-between;
 }
+
 .ap-check-label {
   display: inline-flex;
   align-items: center;
@@ -351,16 +396,22 @@
   color: #475569;
   cursor: pointer;
 }
+
 .ap-check-label.terms {
   align-items: flex-start;
   font-size: 12px;
 }
+
 .ap-check-label a {
   color: #2563EB;
   text-decoration: none;
   font-weight: 600;
 }
-.ap-check-label a:hover { text-decoration: underline; }
+
+.ap-check-label a:hover {
+  text-decoration: underline;
+}
+
 .ap-check {
   accent-color: #2563EB;
   width: 14px;
@@ -368,6 +419,7 @@
   cursor: pointer;
   flex-shrink: 0;
 }
+
 .ap-text-link {
   background: none;
   border: none;
@@ -379,7 +431,10 @@
   font-family: inherit;
   transition: color 0.15s;
 }
-.ap-text-link:hover { color: #1D4ED8; }
+
+.ap-text-link:hover {
+  color: #1D4ED8;
+}
 
 /* Submit button — matches landing page .cta-primary / .nav-link.register-btn */
 .ap-submit-btn {
@@ -398,11 +453,13 @@
   box-shadow: 0 6px 20px rgba(37, 99, 235, 0.28);
   margin-top: 2px;
 }
+
 .ap-submit-btn:hover:not(:disabled) {
   background: #1D4ED8;
   transform: translateY(-1px);
   box-shadow: 0 8px 25px rgba(37, 99, 235, 0.38);
 }
+
 .ap-submit-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -415,12 +472,15 @@
   gap: 10px;
   margin: 14px 0 10px;
 }
-.ap-divider::before, .ap-divider::after {
+
+.ap-divider::before,
+.ap-divider::after {
   content: '';
   flex: 1;
   height: 1px;
   background: #E2E8F0;
 }
+
 .ap-divider span {
   font-size: 11.5px;
   color: #94A3B8;
@@ -446,6 +506,7 @@
   font-family: inherit;
   transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
 }
+
 .ap-google-btn:hover {
   border-color: #BFDBFE;
   background: #F8FAFC;
@@ -460,10 +521,12 @@
   gap: 5px;
   margin-top: 18px;
 }
+
 .ap-footer-text {
   font-size: 13px;
   color: #64748B;
 }
+
 .ap-footer-link {
   background: none;
   border: none;
@@ -475,6 +538,7 @@
   font-family: inherit;
   transition: color 0.15s;
 }
+
 .ap-footer-link:hover {
   color: #1D4ED8;
   text-decoration: underline;
@@ -500,33 +564,54 @@
   pointer-events: none;
   animation: apBlob 10s ease-in-out infinite alternate;
 }
+
 .ap-blob-1 {
-  width: 300px; height: 300px;
+  width: 300px;
+  height: 300px;
   background: rgba(191, 219, 254, 0.4);
-  top: -60px; right: -60px;
+  top: -60px;
+  right: -60px;
   animation-delay: 0s;
 }
+
 .ap-blob-2 {
-  width: 220px; height: 220px;
+  width: 220px;
+  height: 220px;
   background: rgba(147, 197, 253, 0.35);
-  bottom: 10px; left: -50px;
+  bottom: 10px;
+  left: -50px;
   animation-delay: 3.5s;
 }
+
 .ap-blob-3 {
-  width: 180px; height: 180px;
+  width: 180px;
+  height: 180px;
   background: rgba(96, 165, 250, 0.28);
-  top: 50%; left: 50%;
+  top: 50%;
+  left: 50%;
   transform: translate(-50%, -50%);
   animation-delay: 6s;
   animation-name: apBlobCenter;
 }
+
 @keyframes apBlob {
-  from { transform: translate(0, 0) scale(1); }
-  to   { transform: translate(18px, 14px) scale(1.08); }
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+
+  to {
+    transform: translate(18px, 14px) scale(1.08);
+  }
 }
+
 @keyframes apBlobCenter {
-  from { transform: translate(-50%, -50%) scale(1); }
-  to   { transform: translate(-50%, -50%) scale(1.15); }
+  from {
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  to {
+    transform: translate(-50%, -50%) scale(1.15);
+  }
 }
 
 /* Grid overlay on brand panel — white lines on blue bg */
@@ -566,11 +651,13 @@
   text-decoration: none;
   margin-bottom: 28px;
 }
+
 .ap-brand-logo-img {
   width: 30px;
   height: 30px;
   object-fit: contain;
 }
+
 .ap-brand-logo-name {
   font-size: 18px;
   font-weight: 800;
@@ -587,6 +674,7 @@
   letter-spacing: -0.04em;
   margin: 0 0 12px;
 }
+
 /* Accent text — lighter blue shimmer to stand out on blue bg */
 .ap-brand-accent {
   background: linear-gradient(90deg, #BFDBFE, #E0F2FE, #BAE6FD);
@@ -594,6 +682,7 @@
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+
 .ap-brand-sub {
   font-size: 13.5px;
   color: rgba(255, 255, 255, 0.72);
@@ -608,10 +697,22 @@
   display: inline-block;
   animation: apSparkleSpin 6s linear infinite;
 }
+
 @keyframes apSparkleSpin {
-  0%   { transform: rotate(0deg)   scale(1);    opacity: 0.8; }
-  50%  { transform: rotate(180deg) scale(1.12); opacity: 1;   }
-  100% { transform: rotate(360deg) scale(1);    opacity: 0.8; }
+  0% {
+    transform: rotate(0deg) scale(1);
+    opacity: 0.8;
+  }
+
+  50% {
+    transform: rotate(180deg) scale(1.12);
+    opacity: 1;
+  }
+
+  100% {
+    transform: rotate(360deg) scale(1);
+    opacity: 0.8;
+  }
 }
 
 /* Feature pills */
@@ -620,6 +721,7 @@
   flex-direction: column;
   gap: 10px;
 }
+
 .ap-feature-pill {
   display: flex;
   align-items: center;
@@ -631,11 +733,13 @@
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
+
 .ap-feature-pill span {
   font-size: 13px;
   font-weight: 600;
   color: #FFFFFF;
 }
+
 .ap-feature-icon {
   width: 32px;
   height: 32px;
@@ -657,34 +761,44 @@
     border-radius: 0;
     min-height: 100vh;
   }
+
   .ap-brand-panel {
     order: 0 !important;
     flex: none;
     min-height: 220px;
   }
+
   .ap-form-panel {
     order: 1 !important;
     flex: 1;
     padding: 32px 24px;
   }
+
   .ap-forms-track {
     max-width: 100%;
     min-height: unset;
   }
+
   .ap-form-slide {
     position: relative;
     inset: unset;
   }
+
   .ap-form-slide.ap-slide-hidden-right,
   .ap-form-slide.ap-slide-hidden-left {
     display: none;
   }
+
   .ap-brand-content {
     padding: 28px 24px;
   }
+
   .ap-glass-card {
     padding: 24px 20px;
     max-width: 100%;
   }
-  .ap-brand-title { font-size: 26px; }
+
+  .ap-brand-title {
+    font-size: 26px;
+  }
 }

@@ -21,7 +21,7 @@
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background-image: 
+  background-image:
     linear-gradient(to right, rgba(99, 102, 241, 0.06) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(99, 102, 241, 0.06) 1px, transparent 1px);
   background-size: 36px 36px;
@@ -114,7 +114,8 @@
   transition: color 0.2s ease;
 }
 
-.nav-link:hover, .nav-link.active {
+.nav-link:hover,
+.nav-link.active {
   color: #2563EB;
 }
 
@@ -298,10 +299,21 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-.plat-icon.amazon { color: #FF9900; }
-.plat-icon.shopee { color: #EE4D2D; }
-.plat-icon.lazada { color: #0F146D; }
-.plat-icon.maps { color: #4285F4; }
+.plat-icon.amazon {
+  color: #FF9900;
+}
+
+.plat-icon.shopee {
+  color: #EE4D2D;
+}
+
+.plat-icon.lazada {
+  color: #0F146D;
+}
+
+.plat-icon.maps {
+  color: #4285F4;
+}
 
 /* ── "Why VoxReview?" Section ─────────────────────────────── */
 .landing-why-section {
@@ -365,10 +377,25 @@
   margin-bottom: 20px;
 }
 
-.why-card-icon-wrapper.purple { background: rgba(168, 85, 247, 0.1); color: #9333EA; }
-.why-card-icon-wrapper.blue { background: rgba(59, 130, 246, 0.1); color: #2563EB; }
-.why-card-icon-wrapper.indigo { background: rgba(99, 102, 241, 0.1); color: #4F46E5; }
-.why-card-icon-wrapper.sky { background: rgba(14, 165, 233, 0.1); color: #0284C7; }
+.why-card-icon-wrapper.purple {
+  background: rgba(168, 85, 247, 0.1);
+  color: #9333EA;
+}
+
+.why-card-icon-wrapper.blue {
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563EB;
+}
+
+.why-card-icon-wrapper.indigo {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4F46E5;
+}
+
+.why-card-icon-wrapper.sky {
+  background: rgba(14, 165, 233, 0.1);
+  color: #0284C7;
+}
 
 .why-card-title {
   font-size: 18px;
@@ -422,9 +449,18 @@
   height: 11px;
   border-radius: 50%;
 }
-.dot.red { background: #FF5F56; }
-.dot.yellow { background: #FFBD2E; }
-.dot.green { background: #27C93F; }
+
+.dot.red {
+  background: #FF5F56;
+}
+
+.dot.yellow {
+  background: #FFBD2E;
+}
+
+.dot.green {
+  background: #27C93F;
+}
 
 .browser-address-bar {
   flex: 1;
@@ -498,10 +534,26 @@
   background: #E2E8F0;
   border-radius: 6px;
 }
-.mock-line.title { width: 70%; height: 18px; background: #CBD5E1; }
-.mock-line.price { width: 35%; height: 22px; background: #94A3B8; }
-.mock-line.paragraph { width: 100%; }
-.mock-line.paragraph.short { width: 50%; }
+
+.mock-line.title {
+  width: 70%;
+  height: 18px;
+  background: #CBD5E1;
+}
+
+.mock-line.price {
+  width: 35%;
+  height: 22px;
+  background: #94A3B8;
+}
+
+.mock-line.paragraph {
+  width: 100%;
+}
+
+.mock-line.paragraph.short {
+  width: 50%;
+}
 
 .mock-reviews-list {
   margin-top: 16px;
@@ -528,8 +580,15 @@
 }
 
 @keyframes floatWidget {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-6px); }
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-6px);
+  }
 }
 
 .widget-header {
@@ -639,10 +698,22 @@
   height: 7px;
   border-radius: 50%;
 }
-.em-dot.green { background: #10B981; }
-.em-dot.gray { background: #94A3B8; }
-.em-dot.blue { background: #3B82F6; }
-.em-dot.red { background: #EF4444; }
+
+.em-dot.green {
+  background: #10B981;
+}
+
+.em-dot.gray {
+  background: #94A3B8;
+}
+
+.em-dot.blue {
+  background: #3B82F6;
+}
+
+.em-dot.red {
+  background: #EF4444;
+}
 
 .em-name {
   color: #475569;

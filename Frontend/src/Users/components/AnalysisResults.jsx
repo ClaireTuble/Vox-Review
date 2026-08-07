@@ -7,52 +7,106 @@ import '../css/AnalysisResults.css';
 
 /* ── Driver ID → Lucide icon ──────────────────────────────────── */
 const DRIVER_ICON_MAP = {
-  battery:  BatteryFull,
-  price:    Banknote,
+  battery: BatteryFull,
+  price: Banknote,
   delivery: Package,
-  sound:    Headphones,
-  comfort:  Heart,
-  build:    Wrench,
+  sound: Headphones,
+  comfort: Heart,
+  build: Wrench,
 };
 
-export default function AnalysisResults({ status = 'idle', isLoggedIn = false, onSaveRedirect, emotionData, onClearAnalysis }) {
-  const [hoveredEmotion, setHoveredEmotion]           = useState(null);
+export default function AnalysisResults({ status = 'idle', isLoggedIn = false, onSaveRedirect, emotionData, scrapedReviews = [], onClearAnalysis, platform = '' }) {
+  const [hoveredEmotion, setHoveredEmotion] = useState(null);
   const [selectedQuoteFilter, setSelectedQuoteFilter] = useState('all');
-  const [guestNotice, setGuestNotice]                 = useState('');
-  const [userToast, setUserToast]                     = useState('');
+  const [guestNotice, setGuestNotice] = useState('');
+  const [userToast, setUserToast] = useState('');
+
+  const getPlatformName = (review, fallbackPlatform = '') => {
+    const candidatePlatform = typeof review === 'object' && review !== null
+      ? (review.platform || '').toLowerCase()
+      : '';
+    const resolvedPlatform = candidatePlatform || (fallbackPlatform || '').toLowerCase();
+    if (resolvedPlatform === 'google') return 'Google';
+    if (resolvedPlatform === 'lazada') return 'Lazada';
+    return 'Shopee';
+  };
+
+  const getReviewLabel = (review, fallbackPlatform = '') => {
+    const platformName = getPlatformName(review, fallbackPlatform);
+    return `${platformName} Review`;
+  };
+
+  const getReviewerName = (review, fallbackPlatform = '') => {
+    const reviewerName = typeof review === 'object' && review !== null
+      ? (review.reviewer || review.author || review.userName || review.reviewerName || '')
+      : '';
+    if (reviewerName) return reviewerName;
+    const platformName = getPlatformName(review, fallbackPlatform);
+    return `${platformName} Reviewer`;
+  };
+
+  const getReviewText = (review) => {
+    if (typeof review === 'string') return review;
+    if (typeof review === 'object' && review !== null) {
+      return review.text || review.reviewText || review.comment || review.review || '';
+    }
+    return '';
+  };
+
+  const normalizedReviews = Array.isArray(scrapedReviews)
+    ? scrapedReviews
+    : Array.isArray(scrapedReviews?.reviews)
+      ? scrapedReviews.reviews
+      : [];
+
+  console.log('Popup reviews:', normalizedReviews);
+  console.log('Popup platform:', platform);
 
   /* ── Emotion dataset (driver icons resolved via DRIVER_ICON_MAP) ── */
   const defaultData = {
-    totalReviews: 1420,
+    totalReviews: normalizedReviews.length > 0 ? normalizedReviews.length : 1420,
     dominantEmotion: { label: 'Happy', emoji: '😊', percentage: 45, confidence: '98.4%' },
     emotions: [
-      { id: 'angry',    label: 'Angry',    emoji: '😠', percentage: 18, count: 255, confidence: '96.7%', keywords: ['"terrible"',            '"waste of money"',        '"very disappointed"', '"muffled mic"'], color: '#EF4444' },
-      { id: 'happy',    label: 'Happy',    emoji: '😊', percentage: 45, count: 639, confidence: '98.4%', keywords: ['"amazing ANC"',          '"super comfortable"',     '"battery lasts forever"', '"worth it"'], color: '#EAB308' },
-      { id: 'sarcastic',label: 'Sarcastic',emoji: '😒', percentage: 10, count: 142, confidence: '91.2%', keywords: ['"great if you love bricks"','"brilliant case design"', '"sure why not"'],        color: '#A855F7' },
-      { id: 'disgust',  label: 'Disgust',  emoji: '🤢', percentage: 12, count: 170, confidence: '94.5%', keywords: ['"sweaty ear pads"',      '"smells like plastic"',   '"sticky cushion"'],         color: '#16A34A' },
-      { id: 'sad',      label: 'Sad',      emoji: '😢', percentage: 8,  count: 113, confidence: '89.6%', keywords: ['"headache after 1 hr"',  '"squeezes too tight"',    '"wanted to love these"'],  color: '#3B82F6' },
-      { id: 'envy',     label: 'Envy',     emoji: '😔', percentage: 7,  count: 101, confidence: '87.1%', keywords: ['"friend got black version"','"looks way sleeker"',  '"wish I bought dark"'],    color: '#EC4899' },
+      { id: 'angry', label: 'Angry', emoji: '😠', percentage: 18, count: 255, confidence: '96.7%', keywords: ['"terrible"', '"waste of money"', '"very disappointed"', '"muffled mic"'], color: '#EF4444' },
+      { id: 'happy', label: 'Happy', emoji: '😊', percentage: 45, count: 639, confidence: '98.4%', keywords: ['"amazing ANC"', '"super comfortable"', '"battery lasts forever"', '"worth it"'], color: '#EAB308' },
+      { id: 'sarcastic', label: 'Sarcastic', emoji: '😒', percentage: 10, count: 142, confidence: '91.2%', keywords: ['"great if you love bricks"', '"brilliant case design"', '"sure why not"'], color: '#A855F7' },
+      { id: 'disgust', label: 'Disgust', emoji: '🤢', percentage: 12, count: 170, confidence: '94.5%', keywords: ['"sweaty ear pads"', '"smells like plastic"', '"sticky cushion"'], color: '#16A34A' },
+      { id: 'sad', label: 'Sad', emoji: '😢', percentage: 8, count: 113, confidence: '89.6%', keywords: ['"headache after 1 hr"', '"squeezes too tight"', '"wanted to love these"'], color: '#3B82F6' },
+      { id: 'envy', label: 'Envy', emoji: '😔', percentage: 7, count: 101, confidence: '87.1%', keywords: ['"friend got black version"', '"looks way sleeker"', '"wish I bought dark"'], color: '#EC4899' },
     ],
     drivers: [
-      { id: 'battery',  name: 'Battery Performance',   score: 92, emotion: 'Happy',    emoji: '😊', color: '#EAB308' },
-      { id: 'price',    name: 'Price & Value',          score: 68, emotion: 'Sarcastic',emoji: '😒', color: '#A855F7' },
-      { id: 'delivery', name: 'Packaging & Delivery',  score: 88, emotion: 'Happy',    emoji: '😊', color: '#EAB308' },
-      { id: 'sound',    name: 'Audio & Sound Quality', score: 96, emotion: 'Happy',    emoji: '😊', color: '#EAB308' },
-      { id: 'comfort',  name: 'Comfort & Ergonomics',  score: 76, emotion: 'Sad',      emoji: '😢', color: '#3B82F6' },
-      { id: 'build',    name: 'Build & Materials',     score: 84, emotion: 'Happy',    emoji: '😊', color: '#EAB308' },
+      { id: 'battery', name: 'Battery Performance', score: 92, emotion: 'Happy', emoji: '😊', color: '#EAB308' },
+      { id: 'price', name: 'Price & Value', score: 68, emotion: 'Sarcastic', emoji: '😒', color: '#A855F7' },
+      { id: 'delivery', name: 'Packaging & Delivery', score: 88, emotion: 'Happy', emoji: '😊', color: '#EAB308' },
+      { id: 'sound', name: 'Audio & Sound Quality', score: 96, emotion: 'Happy', emoji: '😊', color: '#EAB308' },
+      { id: 'comfort', name: 'Comfort & Ergonomics', score: 76, emotion: 'Sad', emoji: '😢', color: '#3B82F6' },
+      { id: 'build', name: 'Build & Materials', score: 84, emotion: 'Happy', emoji: '😊', color: '#EAB308' },
     ],
-    quotes: [
-      { id: 1, emotion: 'Happy',    emoji: '😊', driver: 'Battery',   text: 'Battery easily lasts 30+ hours of continuous travel ANC!',                         author: 'Review Source' },
-      { id: 2, emotion: 'Angry',    emoji: '😠', driver: 'Microphone',text: 'Microphone is terrible and picks up every background noise during Zoom calls.',    author: 'Review Source' },
-      { id: 3, emotion: 'Sarcastic',emoji: '😒', driver: 'Case',      text: 'Love carrying a giant suitcase just to store my headphones.',                      author: 'Review Source' },
-      { id: 4, emotion: 'Disgust',  emoji: '🤢', driver: 'Cushions',  text: 'Ear cushion leather gets hot and sticky after 20 minutes.',                        author: 'Review Source' },
-      { id: 5, emotion: 'Sad',      emoji: '😢', driver: 'Comfort',   text: 'Headband squeezes a bit too tight for long listening sessions.',                   author: 'Review Source' },
-    ],
+    quotes: normalizedReviews.length > 0
+      ? normalizedReviews.map((r, idx) => {
+          const reviewText = getReviewText(r);
+          console.log('Rendering review:', r);
+          return {
+            id: idx + 1,
+            emotion: 'Pending',
+            emoji: '💬',
+            driver: getReviewLabel(r, platform),
+            text: reviewText,
+            author: getReviewerName(r, platform),
+          };
+        })
+      : [
+          { id: 1, emotion: 'Happy', emoji: '😊', driver: 'Battery', text: 'Battery easily lasts 30+ hours of continuous travel ANC!', author: 'Review Source' },
+          { id: 2, emotion: 'Angry', emoji: '😠', driver: 'Microphone', text: 'Microphone is terrible and picks up every background noise during Zoom calls.', author: 'Review Source' },
+          { id: 3, emotion: 'Sarcastic', emoji: '😒', driver: 'Case', text: 'Love carrying a giant suitcase just to store my headphones.', author: 'Review Source' },
+          { id: 4, emotion: 'Disgust', emoji: '🤢', driver: 'Cushions', text: 'Ear cushion leather gets hot and sticky after 20 minutes.', author: 'Review Source' },
+          { id: 5, emotion: 'Sad', emoji: '😢', driver: 'Comfort', text: 'Headband squeezes a bit too tight for long listening sessions.', author: 'Review Source' },
+        ],
   };
 
-  const data          = emotionData || defaultData;
-  const activeHover   = hoveredEmotion || data.emotions[1];
-  const radius        = 50;
+  const data = emotionData || defaultData;
+  const activeHover = hoveredEmotion || data.emotions[1];
+  const radius = 50;
   const circumference = 2 * Math.PI * radius;
 
   const filteredQuotes = selectedQuoteFilter === 'all'
@@ -181,7 +235,7 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
           <div className="donut-svg-container">
             <svg className="donut-svg" viewBox="0 0 120 120">
               {data.emotions.map((item, index) => {
-                const prevPercent     = data.emotions.slice(0, index).reduce((acc, e) => acc + e.percentage, 0);
+                const prevPercent = data.emotions.slice(0, index).reduce((acc, e) => acc + e.percentage, 0);
                 const strokeDasharray = `${(item.percentage / 100) * circumference} ${circumference}`;
                 const strokeDashoffset = -((prevPercent / 100) * circumference);
                 return (

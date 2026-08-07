@@ -5,6 +5,7 @@ const PLATFORM_LABELS = {
   amazon: { label: 'Amazon', cls: 'amazon' },
   shopee: { label: 'Shopee', cls: 'shopee' },
   lazada: { label: 'Lazada', cls: 'lazada' },
+  google: { label: 'Google', cls: 'google' },
 };
 
 export default function DetectedPageCard({
@@ -12,6 +13,7 @@ export default function DetectedPageCard({
   pageTitle = 'Sony WH-1000XM5 Wireless Noise Canceling Headphones',
   category = 'Electronics / Audio',
   rating = '4.7',
+  productImage = null,
   reviewsCount = '1,420',
   reviewSource = 'Product Reviews',
   status = 'idle',             // 'idle' | 'analyzing' | 'completed'
@@ -31,29 +33,44 @@ export default function DetectedPageCard({
           <span className="status-label">Analysis Complete</span>
         </div>
 
-        {/* Row 2: Platform & Rating */}
-        <div className="completed-info-row">
-          <span className={`platform-badge ${plat.cls}`}>
-            <Globe size={11} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
-            {plat.label}
-          </span>
-          <div className="rating-group">
-            <Star size={12} color="#fbbf24" fill="#fbbf24" style={{ marginRight: '3px', verticalAlign: 'middle' }} />
-            <span className="rating-num">{rating}</span>
-            <span className="rating-dot-sep">·</span>
-            <span className="review-count-tag">{reviewsCount} reviews</span>
+        <div className="page-main-info" style={{ marginTop: '6px' }}>
+          {/* Product Image */}
+          <div className="page-img-wrapper">
+            {productImage ? (
+              <img src={productImage} alt={pageTitle} className="page-img-src" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }} />
+            ) : (
+              <div className="page-img-placeholder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                  <line x1="8" y1="21" x2="16" y2="21" />
+                  <line x1="12" y1="17" x2="12" y2="21" />
+                </svg>
+                <span className="img-subtext">Product Image</span>
+              </div>
+            )}
           </div>
-        </div>
 
-        {/* Row 3: Product Title */}
-        <h2 className="page-title-text" title={pageTitle}>
-          {pageTitle}
-        </h2>
+          {/* Product Details */}
+          <div className="page-details">
+            <div className="platform-badge-row">
+              <span className={`platform-badge ${plat.cls}`}>
+                <Globe size={11} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
+                {plat.label}
+              </span>
+              <span className="page-category-tag">{category}</span>
+            </div>
 
-        {/* Row 4: Category + Review Source */}
-        <div className="card-bottom-row">
-          <span className="page-category-tag">{category}</span>
-          <span className="review-source-chip">{reviewSource}</span>
+            <h2 className="page-title-text" title={pageTitle}>
+              {pageTitle}
+            </h2>
+
+            <div className="rating-stars-inline">
+              <Star size={12} color="#fbbf24" fill="#fbbf24" style={{ marginRight: '3px', verticalAlign: 'middle' }} />
+              <span className="rating-num">{rating}</span>
+              <span className="review-count-bullet">·</span>
+              <span className="review-count-tag">{reviewsCount} Reviews</span>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -63,16 +80,20 @@ export default function DetectedPageCard({
   return (
     <div className="detected-page-card-container">
       <div className="page-main-info">
-        {/* Product Image Placeholder */}
+        {/* Product Image Placeholder or Image */}
         <div className="page-img-wrapper">
-          <div className="page-img-placeholder">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-              <line x1="8" y1="21" x2="16" y2="21" />
-              <line x1="12" y1="17" x2="12" y2="21" />
-            </svg>
-            <span className="img-subtext">Product Image</span>
-          </div>
+          {productImage ? (
+            <img src={productImage} alt={pageTitle} className="page-img-src" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }} />
+          ) : (
+            <div className="page-img-placeholder">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+              <span className="img-subtext">Product Image</span>
+            </div>
+          )}
         </div>
 
         {/* Product Details */}
