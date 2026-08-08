@@ -1,0 +1,134 @@
+/* ═══════════════════════════════════════════════════════════════
+   NoReviewsView.css
+   Shown when on a supported site, but no product reviews are found
+   ═══════════════════════════════════════════════════════════════ */
+
+.no-reviews-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 24px 20px 20px;
+  text-align: center;
+  animation: no-reviews-fade-in 0.35s ease both;
+}
+
+@keyframes no-reviews-fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Icon ring ── */
+.no-reviews-icon-ring {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+  border: 2px solid rgba(217, 119, 6, 0.2);
+  box-shadow: 0 4px 20px rgba(245, 158, 11, 0.15);
+  flex-shrink: 0;
+}
+
+.no-reviews-main-icon {
+  color: #D97706;
+}
+
+/* ── Heading ── */
+.no-reviews-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1E293B;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+/* ── Body text ── */
+.no-reviews-body {
+  font-size: 12px;
+  color: #64748B;
+  line-height: 1.55;
+  margin: 0;
+  max-width: 290px;
+  font-weight: 500;
+}
+
+/* ── Guidance card ── */
+.no-reviews-guidance-card {
+  width: 100%;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-top: 2px;
+  text-align: left;
+}
+
+.guidance-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.guidance-steps-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  color: #64748B;
+  line-height: 1.45;
+}
+
+.guidance-steps-list li strong {
+  color: #1E293B;
+}
+
+/* ── Action button ── */
+.no-reviews-rescan-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+  color: #FFFFFF;
+  border: none;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.25);
+  transition: all 0.2s ease;
+  margin-top: 4px;
+}
+
+.no-reviews-rescan-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #1D4ED8 0%, #1E40AF 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+}
+
+.no-reviews-rescan-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.no-reviews-rescan-btn .spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

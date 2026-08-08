@@ -566,3 +566,30 @@
     font-size: 24px;
   }
 }
+
+/* ── Success Toast Notification ──────────────────────────── */
+@keyframes authToastIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.auth-success-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #ECFDF5;
+  border: 1px solid #6EE7B7;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #065F46;
+  line-height: 1.45;
+  animation: authToastIn 280ms ease-out;
+}
+
+.auth-success-toast svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}

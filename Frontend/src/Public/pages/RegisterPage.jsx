@@ -1,12 +1,11 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { User, Mail, Lock, ShieldCheck, Zap, AlertTriangle, Eye, EyeOff, Globe, Cpu, BookmarkCheck, Sparkles, Shield } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { User, Mail, Lock, ShieldCheck, Zap, AlertTriangle, Eye, EyeOff, Globe, BookmarkCheck, Sparkles, Shield } from 'lucide-react';
 import logo from '../../assets/VRLogo.png';
 import authService from '../../services/authService.js';
 import '../css/AuthModern.css';
 
 export default function RegisterPage() {
-  const navigate = useNavigate();
   const [fullName, setFullName]               = useState('');
   const [email, setEmail]                     = useState('');
   const [password, setPassword]               = useState('');
@@ -17,6 +16,7 @@ export default function RegisterPage() {
   const [agreeTerms, setAgreeTerms]           = useState(true);
   const [isSubmitting, setIsSubmitting]       = useState(false);
   const [errorMessage, setErrorMessage]       = useState('');
+  const [successMessage, setSuccessMessage]   = useState('');
 
   const getPasswordStrength = (pwd) => {
     if (!pwd) return { strength: 0, label: '' };
@@ -50,11 +50,15 @@ export default function RegisterPage() {
     }
 
     setIsSubmitting(true);
-    await authService.login(email, password);
+    const res = await authService.login(email, password);
     setIsSubmitting(false);
 
-    // After registration, send user to login to sign in properly
-    navigate('/login');
+    if (res?.success) {
+      // Session synced to chrome.storage.local — show success toast.
+      // Do NOT redirect to /login or any dashboard.
+      setSuccessMessage('Sign-up successful! Your account is now connected to VoxReview. Open the extension to continue.');
+      setTimeout(() => setSuccessMessage(''), 8000);
+    }
   };
 
   return (
@@ -141,6 +145,16 @@ export default function RegisterPage() {
                 <Zap size={14} /> SuperAdmin
               </button>
             </div>
+
+            {/* Success Toast */}
+            {successMessage && (
+              <div className="auth-success-toast">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>{successMessage}</span>
+              </div>
+            )}
 
             {/* Error Message */}
             {errorMessage && (

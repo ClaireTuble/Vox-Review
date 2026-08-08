@@ -10,7 +10,6 @@ import '../css/AuthPage.css';
 
 /* ─── LOGIN FORM ─────────────────────────────────────────── */
 function LoginForm({ onSwitchToRegister }) {
-  const navigate = useNavigate();
   const [role, setRole]             = useState('user');
   const [email, setEmail]           = useState('');
   const [password, setPassword]     = useState('');
@@ -18,22 +17,24 @@ function LoginForm({ onSwitchToRegister }) {
   const [rememberMe, setRememberMe] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError]           = useState('');
+  const [success, setSuccess]       = useState('');
 
   const fillQuick = (e, p) => { setEmail(e); setPassword(p); setError(''); };
 
   const handleSubmit = async (ev) => {
     ev.preventDefault();
     setError('');
+    setSuccess('');
     if (!email || !password) { setError('Please fill in both fields.'); return; }
     setSubmitting(true);
     try {
       const res = await authService.login(email, password);
       setSubmitting(false);
       if (res.success) {
-        const userRole = res.session.user.role;
-        navigate(userRole === 'superadmin' || role === 'superadmin'
-          ? '/superadmin/dashboard'
-          : '/user/dashboard');
+        // Session is synced to chrome.storage.local via authService.
+        // Stay on this page and show a toast — do NOT redirect to dashboard.
+        setSuccess('Login successful! Your VoxReview account is now connected to the extension.');
+        setTimeout(() => setSuccess(''), 8000);
       }
     } catch (err) {
       setSubmitting(false);
@@ -67,6 +68,15 @@ function LoginForm({ onSwitchToRegister }) {
           <Zap size={14} /> SuperAdmin
         </button>
       </div>
+
+      {success && (
+        <div className="ap-success-toast">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <span>{success}</span>
+        </div>
+      )}
 
       {error && (
         <div className="ap-error">
@@ -133,7 +143,6 @@ function LoginForm({ onSwitchToRegister }) {
 
 /* ─── REGISTER FORM ─────────────────────────────────────── */
 function RegisterForm({ onSwitchToLogin }) {
-  const navigate = useNavigate();
   const [selectedRole, setSelectedRole] = useState('user');
   const [fullName, setFullName]         = useState('');
   const [email, setEmail]               = useState('');
@@ -144,6 +153,7 @@ function RegisterForm({ onSwitchToLogin }) {
   const [agreeTerms, setAgreeTerms]     = useState(true);
   const [submitting, setSubmitting]     = useState(false);
   const [error, setError]               = useState('');
+  const [success, setSuccess]           = useState('');
 
   const getStrength = (pwd) => {
     if (!pwd) return { s: 0, label: '' };
@@ -163,9 +173,13 @@ function RegisterForm({ onSwitchToLogin }) {
     if (password !== confirmPwd) { setError('Passwords do not match.'); return; }
     if (!agreeTerms) { setError('You must agree to the terms.'); return; }
     setSubmitting(true);
-    await authService.login(email, password);
+    const res = await authService.login(email, password);
     setSubmitting(false);
-    navigate('/login');
+    if (res?.success) {
+      // Session synced to chrome.storage.local — show toast, do NOT navigate away.
+      setSuccess('Sign-up successful! Your account is now connected to VoxReview. Open the extension to continue.');
+      setTimeout(() => setSuccess(''), 8000);
+    }
   };
 
   return (
@@ -184,6 +198,15 @@ function RegisterForm({ onSwitchToLogin }) {
           <Zap size={14} /> SuperAdmin
         </button>
       </div>
+
+      {success && (
+        <div className="ap-success-toast">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <span>{success}</span>
+        </div>
+      )}
 
       {error && (
         <div className="ap-error">

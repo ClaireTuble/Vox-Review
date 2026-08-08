@@ -802,3 +802,30 @@
     font-size: 26px;
   }
 }
+
+/* ── Success Toast Notification ──────────────────────────── */
+@keyframes apToastIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.ap-success-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: #ECFDF5;
+  border: 1px solid #6EE7B7;
+  border-radius: 10px;
+  padding: 11px 13px;
+  margin-bottom: 4px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #065F46;
+  line-height: 1.45;
+  animation: apToastIn 280ms ease-out;
+}
+
+.ap-success-toast svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}

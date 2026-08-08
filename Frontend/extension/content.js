@@ -24,22 +24,48 @@ async function safeSendMessage(message) {
   }
 }
 
+// ── Auth Session Sync ────────────────────────────────────────────────────────
+// Reuses voxreview_auth_session + userAuthSync mechanism to synchronize the
+// web application's authentication session back to the extension background/popup.
+function syncUserAuthSession() {
+  try {
+    const raw = localStorage.getItem("voxreview_auth_session");
+    const session = raw ? JSON.parse(raw) : null;
+    safeSendMessage({
+      type: "userAuthSync",
+      session: session,
+    });
+  } catch (err) {
+    console.warn("VoxReview: Auth sync error", err.message);
+  }
+}
+
+// Automatically sync when on the web application domain (localhost / 127.0.0.1)
+if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+  syncUserAuthSession();
+  window.addEventListener("storage", (e) => {
+    if (e.key === "voxreview_auth_session") {
+      syncUserAuthSession();
+    }
+  });
+}
+
 // ── Platform ─────────────────────────────────────────────────────────────────
 const platform = detectPlatform();
 console.log("VoxReview detected platform:", platform);
 
-if (platform === "lazada") {
-  console.log("[Lazada] Platform detected, starting scrape flow.");
-}
-
-if (platform === "googleplay") {
-  console.log("Detected platform: googleplay");
-  console.log("[Google Play] Platform detected, starting scrape flow.");
-}
-
+// ── Unsupported site handling ─────────────────────────────────────────────────
+// When the current page is NOT a supported platform:
+//   1. Do NOT attempt to scrape anything.
+//   2. Do NOT modify the page in any way.
+//   3. Notify background.js so the popup can display a clean message.
 if (platform === "unknown") {
-  // Nothing to do on non-supported pages
-  console.log("VoxReview: Unsupported platform, exiting.");
+  console.log("VoxReview: Unsupported platform — sending unsupportedSite signal.");
+  safeSendMessage({
+    type: "unsupportedSite",
+    url:  window.location.href,
+  });
+
 } else {
   // ── State tracking ─────────────────────────────────────────────────────────
   let lastSentSignature = ""; // tracks last sent (url + filter + reviewCount)
@@ -69,18 +95,19 @@ if (platform === "unknown") {
       if (!raw) { return; }
 
       // Normalise: scraper may return array or {reviews, ...metadata}
-      const reviews      = Array.isArray(raw) ? raw         : (raw.reviews      || []);
-      const productTitle = Array.isArray(raw) ? ""          : (raw.productTitle  || "");
-      const productImage = Array.isArray(raw) ? null        : (raw.productImage  || null);
-      const rating       = Array.isArray(raw) ? null        : (raw.rating        || null);
-      const category     = Array.isArray(raw) ? null        : (raw.category      || null);
-      const ratingFilter = Array.isArray(raw) ? "all"       : (raw.ratingFilter  || "all");
-      const productUrl   = Array.isArray(raw) ? window.location.href
-                                               : (raw.productUrl || window.location.href);
+      const reviews       = Array.isArray(raw) ? raw          : (raw.reviews       || []);
+      const isProductPage = Array.isArray(raw) ? true         : (raw.isProductPage ?? true);
+      const productTitle  = Array.isArray(raw) ? ""           : (raw.productTitle  || "");
+      const productImage  = Array.isArray(raw) ? null         : (raw.productImage  || null);
+      const rating        = Array.isArray(raw) ? null         : (raw.rating        || null);
+      const category      = Array.isArray(raw) ? null         : (raw.category      || null);
+      const ratingFilter  = Array.isArray(raw) ? "all"        : (raw.ratingFilter  || "all");
+      const productUrl    = Array.isArray(raw) ? window.location.href
+                                                : (raw.productUrl || window.location.href);
 
       // Build a lightweight signature of the current visible state.
       // Only send a message to background when something actually changed.
-      const signature = `${productUrl}|${ratingFilter}|${reviews.length}`;
+      const signature = `${productUrl}|${ratingFilter}|${isProductPage}|${reviews.length}`;
 
       if (signature === lastSentSignature) {
         return; // DOM fired but nothing meaningful changed — skip
@@ -89,40 +116,29 @@ if (platform === "unknown") {
       lastSentSignature = signature;
 
       if (platform === "lazada") {
-        console.log("[Lazada] Reviews found:", reviews.length);
-        console.log("[Lazada] Sending to background", {
-          platform,
-          productTitle,
-          reviewsCount: reviews.length,
-          url: productUrl,
-        });
+        console.log("[Lazada] Product page:", isProductPage, "Reviews found:", reviews.length);
       }
 
       if (platform === "googleplay") {
-        console.log("[Google Play] Reviews found:", reviews.length);
-        console.log("[Google Play] Sending to background", {
-          platform,
-          productTitle,
-          reviewsCount: reviews.length,
-          url: productUrl,
-        });
+        console.log("[Google Play] Product page:", isProductPage, "Reviews found:", reviews.length);
       }
 
       console.log(
-        `VoxReview: Sending scrape — filter:"${ratingFilter}" ` +
+        `VoxReview: Sending scrape — isProductPage:${isProductPage} filter:"${ratingFilter}" ` +
         `reviews:${reviews.length} url:${productUrl.slice(-40)}`
       );
 
       await safeSendMessage({
-        type:         "reviewsScraped",
-        platform:     platform,
-        productTitle: productTitle,
-        productImage: productImage,
-        rating:       rating,
-        category:     category,
-        ratingFilter: ratingFilter,
-        url:          productUrl,
-        reviews:      reviews,   // always the FULL current visible set
+        type:          "reviewsScraped",
+        platform:      platform,
+        isProductPage: isProductPage,
+        productTitle:  productTitle,
+        productImage:  productImage,
+        rating:        rating,
+        category:      category,
+        ratingFilter:  ratingFilter,
+        url:           productUrl,
+        reviews:       reviews,   // always the FULL current visible set
       });
 
     } catch (err) {

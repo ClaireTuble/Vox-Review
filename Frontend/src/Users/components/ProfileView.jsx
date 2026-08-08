@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { User, Bookmark, FileText, Cloud, Lock, LogOut, LogIn } from 'lucide-react';
+import { User, Bookmark, FileText, Cloud, Lock, LogOut, LogIn, UserPlus } from 'lucide-react';
 import '../css/ProfileView.css';
 
-export default function ProfileView({ isLoggedIn = false, currentUser, onLoginClick, onLogout }) {
+export default function ProfileView({ isLoggedIn = false, currentUser, onLoginClick, onRegisterClick, onLogout }) {
   const [autoAnalyze, setAutoAnalyze] = useState(true);
 
   if (!isLoggedIn) {
@@ -15,12 +15,18 @@ export default function ProfileView({ isLoggedIn = false, currentUser, onLoginCl
           </div>
           <span className="profile-name">Guest Mode</span>
           <span className="profile-email" style={{ maxWidth: '240px', whiteSpace: 'normal' }}>
-            Sign in to unlock cloud sync, Saved Analyses, and data exports.
+            Sign in or create an account on the web application to unlock cloud sync, Saved Analyses, and data exports.
           </span>
-          <button className="profile-action-btn primary" onClick={onLoginClick}>
-            <LogIn size={14} />
-            Log In / Register
-          </button>
+          <div style={{ display: 'flex', gap: '8px', width: '100%', marginTop: '4px' }}>
+            <button className="profile-action-btn primary" onClick={() => onLoginClick('/login')} style={{ flex: 1 }}>
+              <LogIn size={14} />
+              Log In
+            </button>
+            <button className="profile-action-btn secondary" onClick={() => onRegisterClick('/register')} style={{ flex: 1 }}>
+              <UserPlus size={14} />
+              Sign Up
+            </button>
+          </div>
         </div>
 
         {/* Locked Features */}

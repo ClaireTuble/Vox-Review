@@ -1,24 +1,72 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import authService from '../../services/authService.js';
+import authService, { openWebAppAuth } from '../../services/authService.js';
 import Header from '../components/Header.jsx';
 import DetectedPageCard from '../components/DetectedPageCard.jsx';
 import AnalysisResults from '../components/AnalysisResults.jsx';
 import SavedAnalysesView from '../components/SavedAnalysesView.jsx';
 import ProfileView from '../components/ProfileView.jsx';
 import BottomNavBar from '../components/BottomNavBar.jsx';
+import UnsupportedSiteView from '../components/UnsupportedSiteView.jsx';
+import NoReviewsView from '../components/NoReviewsView.jsx';
 import '../css/PopupPage.css';
+
+/**
+ * General URL rule for website support detection.
+ * Evaluates the hostname/URL of the active tab.
+ * If the hostname is NOT in the supported list -> returns 'unknown'.
+ */
+function detectPlatformFromUrl(urlStr) {
+  if (!urlStr) return 'unknown';
+  try {
+    const url = new URL(urlStr);
+    const host = url.hostname.toLowerCase();
+    const path = url.pathname.toLowerCase();
+
+    // Google Play Store
+    if (host === 'play.google.com' || host.startsWith('play.google.')) {
+      return 'googleplay';
+    }
+
+    // Shopee
+    if (host.includes('shopee')) {
+      return 'shopee';
+    }
+
+    // Lazada
+    if (host.includes('lazada')) {
+      return 'lazada';
+    }
+
+    // Google Maps
+    if (
+      (host === 'www.google.com' || host === 'maps.google.com' || host.endsWith('.google.com') || host.endsWith('.google.com.ph')) &&
+      (path.startsWith('/maps') || host.startsWith('maps.'))
+    ) {
+      return 'google';
+    }
+
+    return 'unknown';
+  } catch (err) {
+    return 'unknown';
+  }
+}
 
 export default function PopupPage() {
   const navigate = useNavigate();
-  const currentUser = authService.getCurrentUser();
+
+  // Synchronized authenticated user state
+  const [currentUser, setCurrentUser] = useState(() => authService.getCurrentUser());
   const isLoggedIn = !!currentUser;
 
+  const [authToastMessage, setAuthToastMessage] = useState('');
   const [activeTab, setActiveTab] = useState('analyze');
+  const [isSiteUnsupported, setIsSiteUnsupported] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState('idle');
 
   // Scrape data read from chrome.storage.local (set by background.js)
   const [detectedPlatform, setDetectedPlatform] = useState('');
+  const [scrapedIsProductPage, setScrapedIsProductPage] = useState(false);
   const [scrapedProductTitle, setScrapedProductTitle] = useState(null);
   const [scrapedCategory, setScrapedCategory] = useState(null);
   const [scrapedRating, setScrapedRating] = useState(null);
@@ -34,6 +82,7 @@ export default function PopupPage() {
       setCurrentSessionId(data.sessionId);
       setAnalysisStatus('idle');
       setDetectedPlatform('');
+      setScrapedIsProductPage(false);
       setScrapedProductTitle(null);
       setScrapedCategory(null);
       setScrapedRating(null);
@@ -41,6 +90,7 @@ export default function PopupPage() {
       setScrapedReviews([]);
     }
     if (data.platform) setDetectedPlatform(data.platform);
+    if (data.isProductPage !== undefined) setScrapedIsProductPage(data.isProductPage);
     if (data.productTitle) setScrapedProductTitle(data.productTitle);
     if (data.category) setScrapedCategory(data.category);
     if (data.rating) setScrapedRating(data.rating);
@@ -49,20 +99,73 @@ export default function PopupPage() {
   };
 
   useEffect(() => {
+    // 1. Check active tab URL directly — general rule for ANY website opened
+    if (typeof chrome !== 'undefined' && chrome.tabs?.query) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const activeTabObj = tabs?.[0];
+        const activeUrl = activeTabObj?.url || '';
+        const platformFromUrl = detectPlatformFromUrl(activeUrl);
+
+        if (platformFromUrl === 'unknown') {
+          setIsSiteUnsupported(true);
+        } else {
+          setIsSiteUnsupported(false);
+        }
+      });
+    }
+
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      // 1. Initial load from storage on popup mount
-      chrome.storage.local.get(['voxreviewLastScrape'], (result) => {
+      // 2. Initial load from storage on popup mount
+      chrome.storage.local.get(['voxreviewLastScrape', 'voxreviewSiteStatus', 'voxreview_auth_session'], (result) => {
         console.log('Popup loaded storage:', result?.voxreviewLastScrape);
-        console.log('Popup current sessionId:', currentSessionId);
         syncScrapeData(result?.voxreviewLastScrape);
+
+        const siteStatus = result?.voxreviewSiteStatus;
+        if (siteStatus?.unsupported === true) {
+          setIsSiteUnsupported(true);
+        }
+
+        // Synchronize auth session from chrome.storage.local
+        if (result?.voxreview_auth_session) {
+          const authSession = result.voxreview_auth_session;
+          if (authSession?.user) {
+            authService.setSession(authSession);
+            setCurrentUser(authSession.user);
+          }
+        } else if (result?.voxreview_auth_session === null) {
+          authService.logout();
+          setCurrentUser(null);
+        }
       });
 
-      // 2. Real-time listener: sync UI automatically when background.js updates storage
+      // 3. Real-time listener: sync UI automatically when background.js or web app updates storage
       const handleStorageChange = (changes, areaName) => {
-        if (areaName === 'local' && changes.voxreviewLastScrape) {
-          console.log('Popup storage changed:', changes.voxreviewLastScrape.newValue);
-          console.log('Popup current sessionId before sync:', currentSessionId);
+        if (areaName !== 'local') return;
+
+        // Synchronize auth session state automatically in real-time
+        if (changes.voxreview_auth_session) {
+          const newSession = changes.voxreview_auth_session.newValue;
+          if (newSession && newSession.user) {
+            authService.setSession(newSession);
+            setCurrentUser(newSession.user);
+            setAuthToastMessage("You're now signed in.");
+            setTimeout(() => setAuthToastMessage(''), 4000);
+          } else {
+            authService.logout();
+            setCurrentUser(null);
+            setAuthToastMessage('');
+          }
+        }
+
+        if (changes.voxreviewLastScrape) {
           syncScrapeData(changes.voxreviewLastScrape.newValue);
+        }
+
+        if (changes.voxreviewSiteStatus) {
+          const newStatus = changes.voxreviewSiteStatus.newValue;
+          if (newStatus?.unsupported === true) {
+            setIsSiteUnsupported(true);
+          }
         }
       };
 
@@ -91,13 +194,15 @@ export default function PopupPage() {
 
   const handleClearAnalysis = () => setAnalysisStatus('idle');
 
-  // Guest tries to save — redirect to login
-  const handleSaveRedirect = () => navigate('/login');
+  // Log in / Sign up redirects to the existing Web Application authentication routes
+  const handleOpenLogin = () => openWebAppAuth('/login');
+  const handleOpenRegister = () => openWebAppAuth('/register');
 
-  // Logout and go back to landing
+  // Logout clears session and notifies extension to return to Guest Mode
   const handleLogout = () => {
     authService.logout();
-    navigate('/');
+    setCurrentUser(null);
+    setAuthToastMessage('');
   };
 
   const handleSelectSavedItem = () => {
@@ -125,14 +230,24 @@ export default function PopupPage() {
           isLoggedIn={isLoggedIn}
           userName={currentUser?.name}
           onLogout={handleLogout}
-          onLoginClick={() => navigate('/login')}
+          onLoginClick={handleOpenLogin}
         />
 
         {/* Guest Notice Bar */}
         {!isLoggedIn && (
           <div className="popup-guest-bar">
             <span>Guest Mode — AI Analysis Active</span>
-            <button onClick={() => navigate('/login')}>Sign In to Save</button>
+            <button onClick={handleOpenLogin}>Sign In to Save</button>
+          </div>
+        )}
+
+        {/* Signed In Success Notification Toast */}
+        {authToastMessage && (
+          <div className="popup-auth-toast">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <span>{authToastMessage}</span>
           </div>
         )}
 
@@ -140,89 +255,104 @@ export default function PopupPage() {
         <div className="popup-stage">
           {activeTab === 'analyze' && (
             <>
-              <DetectedPageCard
-                platform={detectedPlatform}
-                pageTitle={scrapedProductTitle || 'Detecting Product...'}
-                category={scrapedCategory || 'Product Reviews'}
-                rating={scrapedRating ? String(scrapedRating) : '4.8'}
-                productImage={scrapedProductImage}
-                reviewsCount={scrapedReviews.length > 0 ? String(scrapedReviews.length) : '0'}
-                status={analysisStatus}
-              />
+              {/* ── 1. Website Not Supported (FIRST CHECK) ── */}
+              {isSiteUnsupported ? (
+                <UnsupportedSiteView />
+              ) : /* ── 2. Supported site, but No Product Reviews / Non-product page ── */
+              !scrapedIsProductPage || scrapedReviews.length === 0 ? (
+                <NoReviewsView
+                  platform={detectedPlatform}
+                  onRescan={handleRescanPage}
+                  isRescanning={isRescanning}
+                />
+              ) : (
+                /* ── 3. Supported site + Product Page with customer reviews ── */
+                <>
+                  <DetectedPageCard
+                    platform={detectedPlatform}
+                    pageTitle={scrapedProductTitle || 'Detecting Product...'}
+                    category={scrapedCategory || 'Product Reviews'}
+                    rating={scrapedRating ? String(scrapedRating) : null}
+                    productImage={scrapedProductImage}
+                    reviewsCount={scrapedReviews.length > 0 ? String(scrapedReviews.length) : '0'}
+                    status={analysisStatus}
+                  />
 
-              <div className="action-controls-container">
-                <button
-                  className="analyze-main-btn"
-                  onClick={handleAnalyzeClick}
-                  disabled={analysisStatus === 'analyzing'}
-                >
-                  {analysisStatus === 'analyzing' ? (
-                    <>
-                      <svg className="analyze-btn-icon spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="12" y1="2" x2="12" y2="6" />
-                        <line x1="12" y1="18" x2="12" y2="22" />
-                        <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
-                        <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
-                        <line x1="2" y1="12" x2="6" y2="12" />
-                        <line x1="18" y1="12" x2="22" y2="12" />
-                        <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
-                        <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
-                      </svg>
-                      <span>Evaluating Reviews...</span>
-                    </>
-                  ) : analysisStatus === 'completed' ? (
-                    <>
-                      <svg className="analyze-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                      <span>Analyze Again</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="analyze-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="11" cy="11" r="8" />
-                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                      </svg>
-                      <span>Analyze Reviews</span>
-                    </>
-                  )}
-                </button>
+                  <div className="action-controls-container">
+                    <button
+                      className="analyze-main-btn"
+                      onClick={handleAnalyzeClick}
+                      disabled={analysisStatus === 'analyzing'}
+                    >
+                      {analysisStatus === 'analyzing' ? (
+                        <>
+                          <svg className="analyze-btn-icon spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="12" y1="2" x2="12" y2="6" />
+                            <line x1="12" y1="18" x2="12" y2="22" />
+                            <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+                            <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+                            <line x1="2" y1="12" x2="6" y2="12" />
+                            <line x1="18" y1="12" x2="22" y2="12" />
+                            <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+                            <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+                          </svg>
+                          <span>Evaluating Reviews...</span>
+                        </>
+                      ) : analysisStatus === 'completed' ? (
+                        <>
+                          <svg className="analyze-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                          <span>Analyze Again</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className="analyze-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="11" cy="11" r="8" />
+                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                          </svg>
+                          <span>Analyze Reviews</span>
+                        </>
+                      )}
+                    </button>
 
-                <div className="secondary-toolbar">
-                  <div className="detected-platform-pill">
-                    <span className="platform-active-dot">●</span>
-                    <span>Detected: <strong>{platformLabel}</strong></span>
+                    <div className="secondary-toolbar">
+                      <div className="detected-platform-pill">
+                        <span className="platform-active-dot">●</span>
+                        <span>Detected: <strong>{platformLabel}</strong></span>
+                      </div>
+                      <button
+                        className={`rescan-btn${isRescanning ? ' rescan-btn--scanning' : ''}`}
+                        onClick={handleRescanPage}
+                        disabled={isRescanning}
+                        title="Re-run the scraper on this page without reloading"
+                      >
+                        <svg className={`rescan-icon${isRescanning ? ' spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="23 4 23 10 17 10" />
+                          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                        </svg>
+                        <span>{isRescanning ? 'Scanning…' : 'Rescan'}</span>
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    className={`rescan-btn${isRescanning ? ' rescan-btn--scanning' : ''}`}
-                    onClick={handleRescanPage}
-                    disabled={isRescanning}
-                    title="Re-run the scraper on this page without reloading"
-                  >
-                    <svg className={`rescan-icon${isRescanning ? ' spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="23 4 23 10 17 10" />
-                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                    </svg>
-                    <span>{isRescanning ? 'Scanning…' : 'Rescan'}</span>
-                  </button>
-                </div>
-              </div>
 
-              <AnalysisResults
-                status={analysisStatus}
-                isLoggedIn={isLoggedIn}
-                scrapedReviews={scrapedReviews}
-                onSaveRedirect={handleSaveRedirect}
-                onClearAnalysis={handleClearAnalysis}
-                platform={detectedPlatform}
-              />
+                  <AnalysisResults
+                    status={analysisStatus}
+                    isLoggedIn={isLoggedIn}
+                    scrapedReviews={scrapedReviews}
+                    onSaveRedirect={handleOpenLogin}
+                    onClearAnalysis={handleClearAnalysis}
+                    platform={detectedPlatform}
+                  />
+                </>
+              )}
             </>
           )}
 
           {activeTab === 'saved' && (
             <SavedAnalysesView
               isLoggedIn={isLoggedIn}
-              onLoginClick={() => navigate('/login')}
+              onLoginClick={handleOpenLogin}
               onSelectSaved={handleSelectSavedItem}
             />
           )}
@@ -231,7 +361,8 @@ export default function PopupPage() {
             <ProfileView
               isLoggedIn={isLoggedIn}
               currentUser={currentUser}
-              onLoginClick={() => navigate('/login')}
+              onLoginClick={handleOpenLogin}
+              onRegisterClick={handleOpenRegister}
               onLogout={handleLogout}
             />
           )}

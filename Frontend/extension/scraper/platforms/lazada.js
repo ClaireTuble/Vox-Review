@@ -1,7 +1,22 @@
-console.log("Lazada scraper started");
+console.log("Lazada scraper loaded");
+
+function isLazadaProductPage() {
+  const href = window.location.href;
+  const path = window.location.pathname;
+
+  const hasProductUrl = /-i\d+-s\d+\.html/i.test(href) || /\.html$/i.test(path) || /\/products\//i.test(path);
+  const hasProductDom = !!document.querySelector(
+    "#module_product_detail, .pdp-block, .pdp-product-title, #module_product_review, .mod-reviews, .pdp-mod-review, [class*='mod-review']"
+  );
+
+  if (path === "/" || path === "" || path.includes("/catalog") || path.includes("/tag") || path.includes("/cart") || path.includes("/customer") || path.includes("/shop/")) {
+    if (!hasProductDom) return false;
+  }
+
+  return hasProductUrl || hasProductDom;
+}
 
 function getLazadaProductMetadata() {
-  // Product title
   const titleEl = document.querySelector(
     ".pdp-product-title, [class*='product-title'], h1"
   );
@@ -10,15 +25,11 @@ function getLazadaProductMetadata() {
     productTitle = document.title.split("|")[0].split("-")[0].trim();
   }
 
-  // Product image (main gallery image only)
   const imgEl = document.querySelector(
     "[class*='gallery'] img, [class*='pdp'] img, [class*='product-image'] img, [class*='preview'] img"
   );
   const productImage = imgEl ? (imgEl.src || imgEl.getAttribute("src")) : null;
 
-  console.log("[Lazada] Image:", productImage);
-
-  // Overall rating (review summary rating)
   const ratingCandidates = Array.from(
     document.querySelectorAll(
       "[class*='rating-average'], [class*='rating-score'], [class*='review-summary'] [class*='rating'], [class*='pdp-review-summary-overall-rating'], [class*='pdp-review-summary']"
@@ -29,14 +40,11 @@ function getLazadaProductMetadata() {
   for (const el of ratingCandidates) {
     const text = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
     const match = text.match(/(\d+(?:\.\d+)?)/);
-
     if (!match) continue;
 
     const value = parseFloat(match[1]);
-    if (Number.isNaN(value)) continue;
-    if (value < 0 || value > 5) continue;
+    if (Number.isNaN(value) || value < 0 || value > 5) continue;
 
-    const label = (el.getAttribute("aria-label") || "").toLowerCase();
     const className = (el.className || "").toLowerCase();
     const textLower = text.toLowerCase();
 
@@ -50,9 +58,6 @@ function getLazadaProductMetadata() {
     }
   }
 
-  console.log("[Lazada] Product rating:", rating);
-
-  // Category from breadcrumb
   const breadcrumbEls = document.querySelectorAll(
     "[class*='breadcrumb'] a, [class*='breadCrumb'] a"
   );
@@ -64,7 +69,6 @@ function getLazadaProductMetadata() {
     category = parts.join(" / ");
   }
 
-  // Active rating filter (e.g. "3 Stars", "All")
   const activeFilterEl = document.querySelector(
     "[class*='rate-filter'] [class*='active'], " +
     "[class*='rating-filter'] [class*='active']"
@@ -94,10 +98,22 @@ function shouldIgnoreLazadaText(line) {
   if (lower === "recommendations") return true;
   if (lower.startsWith("if this review was helpful")) return true;
   if (/^\(\d+\)$/.test(lower)) return true;
+  if (/^\d+\s*stars?\s*$/i.test(lower)) return true;
+  if (/^[★☆\s\d\.\/]+$/i.test(lower)) return true;
   return false;
 }
 
 function scrapeLazadaReviews() {
+  const isProduct = isLazadaProductPage();
+  if (!isProduct) {
+    console.log("Lazada: Not a product detail page.");
+    return {
+      isProductPage: false,
+      productTitle: "",
+      reviews: [],
+    };
+  }
+
   let cards = Array.from(
     document.querySelectorAll(
       ".mod-reviews .item, .pdp-mod-review .item, [class*='mod-review'] .item, #module_product_review .item, [class*='pdp-review'] .item"
@@ -105,34 +121,22 @@ function scrapeLazadaReviews() {
   );
 
   if (cards.length === 0) {
-    cards = Array.from(document.querySelectorAll(".item"));
-  }
-
-  if (cards.length === 0) {
-    console.log("Lazada: Review content not ready yet; waiting for buyer review DOM.");
-    return {
-      ...getLazadaProductMetadata(),
-      reviews: [],
-    };
+    cards = Array.from(document.querySelectorAll(".pdp-mod-review .item, [class*='mod-review'] .item"));
   }
 
   console.log("Lazada: Found review cards:", cards.length);
 
   const reviews = [];
+  const seenTexts = new Set();
 
   cards.forEach((card, index) => {
-    // 1. Reviewer
     const reviewerEl = card.querySelector(
       ".user-name, .reviewer, [class*='user-name'], [class*='reviewer'], [class*='author'], .middle span, .middle"
     );
     let reviewer = reviewerEl
       ? (reviewerEl.innerText || reviewerEl.textContent || "").replace(/\s+/g, " ").trim()
-      : "";
-    if (!reviewer) {
-      reviewer = "Anonymous";
-    }
+      : "Anonymous";
 
-    // 2. Date
     const dateEl = card.querySelector(
       ".title.right, [class*='title'][class*='right'], .time, [class*='time'], [class*='date'], [class*='review-time']"
     );
@@ -140,22 +144,8 @@ function scrapeLazadaReviews() {
       ? (dateEl.innerText || dateEl.textContent || "").replace(/\s+/g, " ").trim()
       : "";
 
-    // 3. Merge all review lines into one review text (preserving order & line breaks)
     const lines = [];
 
-    // Extract SKU / attribute lines (e.g. Material: ..., Size: ..., Style: ...)
-    const skuContainer = card.querySelector(".item-content-sku-item, [class*='sku-item']");
-    if (skuContainer) {
-      const rawSkuText = skuContainer.innerText || skuContainer.textContent || "";
-      const rawLines = rawSkuText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-      rawLines.forEach((l) => {
-        if (!shouldIgnoreLazadaText(l) && !lines.includes(l)) {
-          lines.push(l);
-        }
-      });
-    }
-
-    // Extract main buyer comment text lines
     const mainTextContainer = card.querySelector(
       ".item-content-main-content-reviews-item, [class*='main-content-reviews-item'], [class*='review-content'], [class*='user-comment']"
     );
@@ -169,11 +159,10 @@ function scrapeLazadaReviews() {
       });
     }
 
-    // Fallback: If specific containers not found, extract lines from card while stripping seller reply & footer
     if (lines.length === 0) {
       const cardClone = card.cloneNode(true);
       const toRemove = cardClone.querySelectorAll(
-        ".item-content-seller-reply, .item-content-footer, .reviewer, .user-name, .title.right, .item-content-head-rating, [class*='seller-reply'], [class*='helpful'], [class*='footer']"
+        ".item-content-seller-reply, .item-content-footer, .reviewer, .user-name, .title.right, .item-content-head-rating, [class*='seller-reply'], [class*='helpful'], [class*='footer'], button, svg"
       );
       toRemove.forEach((el) => el.remove());
 
@@ -188,33 +177,26 @@ function scrapeLazadaReviews() {
 
     const fullText = lines.join("\n").trim();
 
-    // Debugging log
-    console.log({
-      reviewer,
-      date,
-      rating: null,
-      text: fullText
-    });
+    if (!fullText || fullText.length < 2) return;
 
-    reviews.push({
-      id: reviewer && date ? `${reviewer}-${date}-${index}` : `lazada-review-${index}`,
-      reviewer,
-      rating: null, // Per-review stars removed per instructions
-      date,
-      text: fullText,
-      review: fullText,
-      platform: "lazada",
-    });
+    if (!seenTexts.has(fullText.toLowerCase())) {
+      seenTexts.add(fullText.toLowerCase());
+      reviews.push({
+        id: reviewer && date ? `${reviewer}-${date}-${index}` : `lazada-review-${index}`,
+        reviewer,
+        rating: null,
+        date,
+        text: fullText,
+        review: fullText,
+        platform: "lazada",
+      });
+    }
   });
 
-  console.log("Lazada: Scraped buyer reviews:", reviews.length);
-
   const metadata = getLazadaProductMetadata();
-  console.log("Lazada: Product metadata:", metadata);
-
   return {
     ...metadata,
+    isProductPage: true,
     reviews,
   };
 }
-

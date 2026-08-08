@@ -71,9 +71,13 @@ export default function DetectedPageCard({
             </h2>
 
             <div className="rating-stars-inline">
-              <Star size={12} color="#fbbf24" fill="#fbbf24" style={{ marginRight: '3px', verticalAlign: 'middle' }} />
-              <span className="rating-num">{rating}</span>
-              <span className="review-count-bullet">·</span>
+              {rating && rating !== '--' ? (
+                <>
+                  <Star size={12} color="#fbbf24" fill="#fbbf24" style={{ marginRight: '3px', verticalAlign: 'middle' }} />
+                  <span className="rating-num">{rating}</span>
+                  <span className="review-count-bullet">·</span>
+                </>
+              ) : null}
               <span className="review-count-tag">{reviewsCount} Reviews</span>
             </div>
           </div>
@@ -120,9 +124,13 @@ export default function DetectedPageCard({
 
           {/* Rating row */}
           <div className="rating-stars-inline">
-            <Star size={12} color="#fbbf24" fill="#fbbf24" style={{ marginRight: '3px', verticalAlign: 'middle' }} />
-            <span className="rating-num">{rating}</span>
-            <span className="review-count-bullet">·</span>
+            {rating && rating !== '--' ? (
+              <>
+                <Star size={12} color="#fbbf24" fill="#fbbf24" style={{ marginRight: '3px', verticalAlign: 'middle' }} />
+                <span className="rating-num">{rating}</span>
+                <span className="review-count-bullet">·</span>
+              </>
+            ) : null}
             <span className="review-count-tag">{reviewsCount} Reviews</span>
           </div>
         </div>

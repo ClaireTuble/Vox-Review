@@ -1,12 +1,11 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, User, Zap, AlertTriangle, Eye, EyeOff, Globe, Cpu, BookmarkCheck, Sparkles, Shield } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Mail, Lock, User, Zap, AlertTriangle, Eye, EyeOff, Globe, BookmarkCheck, Sparkles, Shield } from 'lucide-react';
 import logo from '../../assets/VRLogo.png';
 import authService from '../../services/authService.js';
 import '../css/AuthModern.css';
 
 export default function LoginPage() {
-  const navigate = useNavigate();
   const [role, setRole]                 = useState('user');
   const [email, setEmail]               = useState('');
   const [password, setPassword]         = useState('');
@@ -14,6 +13,7 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe]     = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const fillQuickAccount = (testEmail, testPassword) => {
     setEmail(testEmail);
@@ -24,6 +24,7 @@ export default function LoginPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage('');
+    setSuccessMessage('');
 
     if (!email || !password) {
       setErrorMessage('Please fill in both email and password.');
@@ -36,12 +37,11 @@ export default function LoginPage() {
       setIsSubmitting(false);
 
       if (res.success) {
-        const userRole = res.session.user.role;
-        if (userRole === 'superadmin' || role === 'superadmin') {
-          navigate('/superadmin/dashboard');
-        } else {
-          navigate('/user/dashboard');
-        }
+        // Session is saved and synced to chrome.storage.local by authService.
+        // Show a success notification — do NOT redirect to the dashboard.
+        // The user can open the extension to continue; it will detect the session.
+        setSuccessMessage('Login successful! Your VoxReview account is now connected to the extension.');
+        setTimeout(() => setSuccessMessage(''), 8000);
       }
     } catch (err) {
       setIsSubmitting(false);
@@ -151,6 +151,16 @@ export default function LoginPage() {
                 <Zap size={14} /> SuperAdmin
               </button>
             </div>
+
+            {/* Success Toast */}
+            {successMessage && (
+              <div className="auth-success-toast">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>{successMessage}</span>
+              </div>
+            )}
 
             {/* Error Message */}
             {errorMessage && (

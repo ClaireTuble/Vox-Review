@@ -3,6 +3,8 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+
+  // ── reviewsScraped ──────────────────────────────────────────────────────────
   if (message?.type === "reviewsScraped") {
     const {
       platform = "shopee",
@@ -23,6 +25,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       reviewsCount: reviews.length,
       url: pageUrl,
     });
+
+    // Clear any unsupported-site flag for this tab since we now have valid data.
+    chrome.storage.local.set({ voxreviewSiteStatus: { unsupported: false } });
 
     chrome.storage.local.get(["voxreviewLastScrape"], (result) => {
       const currentScrape = result.voxreviewLastScrape || {};
@@ -51,6 +56,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const scrapeData = {
         sessionId: sessionId,
         platform: platform,
+        isProductPage: message.isProductPage ?? true,
         productTitle: productTitle,
         productImage: productImage,
         rating: rating,
@@ -76,6 +82,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
 
+  // ── unsupportedSite ─────────────────────────────────────────────────────────
+  // Content script sends this when it lands on a page that is not one of the
+  // supported platforms. We store the flag so the popup can show a clean
+  // "unsupported site" message instead of stale or empty review data.
+  if (message?.type === "unsupportedSite") {
+    const pageUrl = message.url || sender.tab?.url || "";
+    console.log("VoxReview: Unsupported site detected:", pageUrl);
+
+    chrome.storage.local.set({
+      voxreviewSiteStatus: {
+        unsupported: true,
+        url: pageUrl,
+        timestamp: Date.now(),
+      },
+    }).catch((err) => console.error("Failed to store site status:", err));
+
+    sendResponse({ ok: true });
+  }
+
+  // ── userAuthSync ───────────────────────────────────────────────────────────
+  // Synchronizes the web application's authentication session to chrome.storage.local
+  // so the extension popup automatically recognizes authenticated vs guest users.
+  if (message?.type === "userAuthSync") {
+    const session = message.session || null;
+    console.log("VoxReview background: Auth session synced:", session);
+
+    chrome.storage.local.set({
+      voxreview_auth_session: session,
+    }).catch((err) => console.error("Failed to store auth session:", err));
+
+    sendResponse({ ok: true });
+  }
+
+  // ── rescanPage ──────────────────────────────────────────────────────────────
   if (message?.type === "rescanPage") {
     // Forward rescan request to the content script on the active tab
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
