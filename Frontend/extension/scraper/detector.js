@@ -10,6 +10,14 @@ function detectPlatform() {
         return "lazada";
     }
 
+    if (host.includes("play.google") || host.includes("play.google.com")) {
+        return "googleplay";
+    }
+
+    if (host.includes("agoda")) {
+        return "agoda";
+    }
+
     if (host.includes("google")) {
         return "google";
     }

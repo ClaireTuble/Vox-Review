@@ -14,6 +14,14 @@ function scrapeReviews(platform) {
             return scrapeGoogleReviews();
 
 
+        case "googleplay":
+            return scrapeGooglePlayReviews();
+
+
+        case "agoda":
+            return scrapeAgodaReviews();
+
+
         default:
             return [];
     }

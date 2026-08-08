@@ -64,6 +64,31 @@
         "content.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://play.google.com/*"
+      ],
+      "js": [
+        "scraper/detector.js",
+        "scraper/platforms/googleplay.js",
+        "scraper/scraperManager.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.agoda.com/*",
+        "https://*.agoda.com/*"
+      ],
+      "js": [
+        "scraper/detector.js",
+        "scraper/platforms/agoda.js",
+        "scraper/scraperManager.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
     }
   ]
 }

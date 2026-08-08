@@ -29,15 +29,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       // Session change: different product, URL, rating filter, or first run
       const isDifferentProduct = currentScrape.productTitle && currentScrape.productTitle !== productTitle;
-      const isDifferentUrl     = currentScrape.url && pageUrl && currentScrape.url !== pageUrl;
-      const isDifferentFilter  = currentScrape.ratingFilter !== undefined && currentScrape.ratingFilter !== ratingFilter;
-      const productChanged     = isDifferentProduct || isDifferentUrl || isDifferentFilter || !currentScrape.sessionId;
+      const isDifferentUrl = currentScrape.url && pageUrl && currentScrape.url !== pageUrl;
+      const isDifferentFilter = currentScrape.ratingFilter !== undefined && currentScrape.ratingFilter !== ratingFilter;
+      const productChanged = isDifferentProduct || isDifferentUrl || isDifferentFilter || !currentScrape.sessionId;
 
       let finalReviews = reviews; // always replace on filter/product change
-      let sessionId    = currentScrape.sessionId;
+      let sessionId = currentScrape.sessionId;
 
       if (productChanged) {
-        sessionId    = Date.now();
+        sessionId = Date.now();
         finalReviews = reviews; // clear old session reviews completely
       } else {
         // Same product & same filter: deduplicate & merge
@@ -49,18 +49,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       const scrapeData = {
-        sessionId:   sessionId,
-        platform:    platform,
+        sessionId: sessionId,
+        platform: platform,
         productTitle: productTitle,
         productImage: productImage,
-        rating:       rating,
-        category:     category,
+        rating: rating,
+        category: category,
         ratingFilter: ratingFilter,
-        reviews:      finalReviews,
-        reviewCount:  finalReviews.length,
-        url:          pageUrl,
-        timestamp:    Date.now(),
-        tabId:        sender.tab?.id ?? null,
+        reviews: finalReviews,
+        reviewCount: finalReviews.length,
+        url: pageUrl,
+        timestamp: Date.now(),
+        tabId: sender.tab?.id ?? null,
       };
 
       chrome.storage.local.set({

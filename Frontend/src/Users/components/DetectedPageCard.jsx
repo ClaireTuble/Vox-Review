@@ -2,26 +2,32 @@ import { CheckCircle2, Globe, Star, MessageSquare } from 'lucide-react';
 import '../css/DetectedPageCard.css';
 
 const PLATFORM_LABELS = {
-  amazon: { label: 'Amazon', cls: 'amazon' },
   shopee: { label: 'Shopee', cls: 'shopee' },
   lazada: { label: 'Lazada', cls: 'lazada' },
-  google: { label: 'Google', cls: 'google' },
+  google: { label: 'Google Reviews', cls: 'google' },
+  googleplay: { label: 'Google Play', cls: 'googleplay' },
+  agoda: { label: 'Agoda', cls: 'agoda' },
+  default: { label: 'Current Source', cls: 'default' },
 };
 
 export default function DetectedPageCard({
-  platform = 'amazon',
-  pageTitle = 'Sony WH-1000XM5 Wireless Noise Canceling Headphones',
-  category = 'Electronics / Audio',
-  rating = '4.7',
+  platform = '',
+  pageTitle = 'Detecting Product...',
+  category = 'Product Reviews',
+  rating = '--',
   productImage = null,
-  reviewsCount = '1,420',
+  reviewsCount = '0',
   reviewSource = 'Product Reviews',
   status = 'idle',             // 'idle' | 'analyzing' | 'completed'
   hasMultipleTargets = false,  // true when other targets were available
   onChangeTarget = null,       // callback → re-open selector
 }) {
-  const plat = PLATFORM_LABELS[platform] || PLATFORM_LABELS.amazon;
+  const normalizedPlatform = String(platform || '').toLowerCase();
+  const plat = PLATFORM_LABELS[normalizedPlatform] || PLATFORM_LABELS.default;
   const isCompleted = status === 'completed';
+  
+  console.log('DetectedPageCard props:', { platform, pageTitle, category, rating, reviewsCount, normalizedPlatform, platLabel: plat.label });
+
 
   // ── COMPLETED STATE ──────────────────────────────────────────────────────────
   if (isCompleted) {

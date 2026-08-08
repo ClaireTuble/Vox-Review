@@ -26,9 +26,12 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
       ? (review.platform || '').toLowerCase()
       : '';
     const resolvedPlatform = candidatePlatform || (fallbackPlatform || '').toLowerCase();
+    if (resolvedPlatform === 'googleplay') return 'Google Play';
     if (resolvedPlatform === 'google') return 'Google';
     if (resolvedPlatform === 'lazada') return 'Lazada';
-    return 'Shopee';
+    if (resolvedPlatform === 'shopee') return 'Shopee';
+    if (resolvedPlatform === 'agoda') return 'Agoda';
+    return 'Current Source';
   };
 
   const getReviewLabel = (review, fallbackPlatform = '') => {
@@ -43,6 +46,20 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
     if (reviewerName) return reviewerName;
     const platformName = getPlatformName(review, fallbackPlatform);
     return `${platformName} Reviewer`;
+  };
+
+  const getReviewDate = (review) => {
+    if (typeof review === 'object' && review !== null) {
+      return review.date || review.reviewDate || review.posted || '';
+    }
+    return '';
+  };
+
+  const getReviewHelpful = (review) => {
+    if (typeof review === 'object' && review !== null) {
+      return review.helpfulCount || review.helpful || review.likes || null;
+    }
+    return null;
   };
 
   const getReviewText = (review) => {
@@ -376,6 +393,16 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
                 <span>{q.emoji} {q.emotion} • {q.driver}</span>
                 <span>{q.author}</span>
               </div>
+              {q.date && (
+                <div className="quote-submeta-row">
+                  <span>{q.date}</span>
+                </div>
+              )}
+              {q.helpfulCount && (
+                <div className="quote-submeta-row">
+                  <span>{q.helpfulCount} found this helpful</span>
+                </div>
+              )}
             </div>
           ))}
         </div>

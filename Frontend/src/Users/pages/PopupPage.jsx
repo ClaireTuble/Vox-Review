@@ -14,29 +14,36 @@ export default function PopupPage() {
   const currentUser = authService.getCurrentUser();
   const isLoggedIn = !!currentUser;
 
-  const [activeTab, setActiveTab]         = useState('analyze');
+  const [activeTab, setActiveTab] = useState('analyze');
   const [analysisStatus, setAnalysisStatus] = useState('idle');
 
   // Scrape data read from chrome.storage.local (set by background.js)
-  const [detectedPlatform, setDetectedPlatform]       = useState('shopee');
+  const [detectedPlatform, setDetectedPlatform] = useState('');
   const [scrapedProductTitle, setScrapedProductTitle] = useState(null);
-  const [scrapedCategory, setScrapedCategory]         = useState(null);
-  const [scrapedRating, setScrapedRating]             = useState(null);
+  const [scrapedCategory, setScrapedCategory] = useState(null);
+  const [scrapedRating, setScrapedRating] = useState(null);
   const [scrapedProductImage, setScrapedProductImage] = useState(null);
-  const [scrapedReviews, setScrapedReviews]           = useState([]);
+  const [scrapedReviews, setScrapedReviews] = useState([]);
 
-  const [currentSessionId, setCurrentSessionId]     = useState(null);
+  const [currentSessionId, setCurrentSessionId] = useState(null);
 
   const syncScrapeData = (data) => {
     if (!data) return;
     if (data.sessionId && data.sessionId !== currentSessionId) {
+      // New session detected: clear all old product data first
       setCurrentSessionId(data.sessionId);
-      setAnalysisStatus('idle'); // reset analysis state on new session
+      setAnalysisStatus('idle');
+      setDetectedPlatform('');
+      setScrapedProductTitle(null);
+      setScrapedCategory(null);
+      setScrapedRating(null);
+      setScrapedProductImage(null);
+      setScrapedReviews([]);
     }
-    if (data.platform)     setDetectedPlatform(data.platform);
+    if (data.platform) setDetectedPlatform(data.platform);
     if (data.productTitle) setScrapedProductTitle(data.productTitle);
-    if (data.category)     setScrapedCategory(data.category);
-    if (data.rating)       setScrapedRating(data.rating);
+    if (data.category) setScrapedCategory(data.category);
+    if (data.rating) setScrapedRating(data.rating);
     if (data.productImage) setScrapedProductImage(data.productImage);
     if (Array.isArray(data.reviews)) setScrapedReviews(data.reviews);
   };
@@ -46,6 +53,7 @@ export default function PopupPage() {
       // 1. Initial load from storage on popup mount
       chrome.storage.local.get(['voxreviewLastScrape'], (result) => {
         console.log('Popup loaded storage:', result?.voxreviewLastScrape);
+        console.log('Popup current sessionId:', currentSessionId);
         syncScrapeData(result?.voxreviewLastScrape);
       });
 
@@ -53,6 +61,7 @@ export default function PopupPage() {
       const handleStorageChange = (changes, areaName) => {
         if (areaName === 'local' && changes.voxreviewLastScrape) {
           console.log('Popup storage changed:', changes.voxreviewLastScrape.newValue);
+          console.log('Popup current sessionId before sync:', currentSessionId);
           syncScrapeData(changes.voxreviewLastScrape.newValue);
         }
       };
@@ -64,9 +73,15 @@ export default function PopupPage() {
     }
   }, [currentSessionId]);
 
-  const platformLabel = detectedPlatform
-    ? detectedPlatform.charAt(0).toUpperCase() + detectedPlatform.slice(1)
-    : 'Shopee';
+  const platformLabel = (() => {
+    const value = String(detectedPlatform || '').toLowerCase();
+    if (value === 'googleplay') return 'Google Play';
+    if (value === 'google') return 'Google Reviews';
+    if (value === 'lazada') return 'Lazada';
+    if (value === 'shopee') return 'Shopee';
+    if (value === 'agoda') return 'Agoda';
+    return 'Current Source';
+  })();
 
   const handleAnalyzeClick = () => {
     if (analysisStatus === 'analyzing') return;

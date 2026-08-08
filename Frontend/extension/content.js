@@ -32,6 +32,11 @@ if (platform === "lazada") {
   console.log("[Lazada] Platform detected, starting scrape flow.");
 }
 
+if (platform === "googleplay") {
+  console.log("Detected platform: googleplay");
+  console.log("[Google Play] Platform detected, starting scrape flow.");
+}
+
 if (platform === "unknown") {
   // Nothing to do on non-supported pages
   console.log("VoxReview: Unsupported platform, exiting.");
@@ -86,6 +91,16 @@ if (platform === "unknown") {
       if (platform === "lazada") {
         console.log("[Lazada] Reviews found:", reviews.length);
         console.log("[Lazada] Sending to background", {
+          platform,
+          productTitle,
+          reviewsCount: reviews.length,
+          url: productUrl,
+        });
+      }
+
+      if (platform === "googleplay") {
+        console.log("[Google Play] Reviews found:", reviews.length);
+        console.log("[Google Play] Sending to background", {
           platform,
           productTitle,
           reviewsCount: reviews.length,

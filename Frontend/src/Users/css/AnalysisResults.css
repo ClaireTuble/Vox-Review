@@ -543,3 +543,13 @@
   color: #64748B;
   font-weight: 600;
 }
+
+.quote-submeta-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  font-size: 9px;
+  color: #94a3b8;
+  gap: 8px;
+  font-weight: 500;
+}
