@@ -13,7 +13,8 @@ import '../css/tables.css';
 import '../css/responsive.css';
 
 export default function Users({ activeTab, setActiveTab, onSignOut }) {
-  const [users] = useState(mockUsers);
+  // Filter out any SuperAdmin entries — Manage Users shows regular users only
+  const [users] = useState(mockUsers.filter((u) => u.role !== 'SuperAdmin'));
 
   return (
     <div className="superadmin-page-container">
@@ -22,17 +23,15 @@ export default function Users({ activeTab, setActiveTab, onSignOut }) {
       <main className="superadmin-viewport">
         <Header
           title="Manage Users"
-          subtitle="Review account activity, update roles, and oversee user access."
+          subtitle="View and monitor regular VoxReview users and their platform activity."
           user={mockCurrentUser}
         />
 
         <section className="admin-content-grid">
           <article className="admin-panel">
             <TopActions
-              title="User Management Hub"
-              subtitle="Manage platform users, update roles, and review extension activity logs."
-              primaryLabel="Add New User"
-              onPrimaryAction={() => window.alert('Add new user modal placeholder')}
+              title="User Overview"
+              subtitle="Monitor registered VoxReview users and their platform usage history."
             >
               <SearchBar />
             </TopActions>
@@ -43,15 +42,14 @@ export default function Users({ activeTab, setActiveTab, onSignOut }) {
                   <tr>
                     <th>User ID</th>
                     <th>Name / Email</th>
-                    <th>Role</th>
                     <th>Account Status</th>
-                    <th>Joined Date</th>
-                    <th>Actions</th>
+                    <th>Registered</th>
+                    <th>Platforms Used</th>
                   </tr>
                 </thead>
                 <tbody>
                   {users.map((user) => (
-                    <UserRow key={user.id} user={user} onEdit={() => window.alert(`Editing user ${user.name}`)} />
+                    <UserRow key={user.id} user={user} />
                   ))}
                 </tbody>
               </table>

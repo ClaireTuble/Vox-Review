@@ -59,6 +59,7 @@ export default function PopupPage() {
   const [currentUser, setCurrentUser] = useState(() => authService.getCurrentUser());
   const isLoggedIn = !!currentUser;
 
+  const [theme, setTheme] = useState(() => localStorage.getItem('voxreview-theme') || 'light');
   const [authToastMessage, setAuthToastMessage] = useState('');
   const [activeTab, setActiveTab] = useState('analyze');
   const [isSiteUnsupported, setIsSiteUnsupported] = useState(false);
@@ -97,6 +98,15 @@ export default function PopupPage() {
     if (data.productImage) setScrapedProductImage(data.productImage);
     if (Array.isArray(data.reviews)) setScrapedReviews(data.reviews);
   };
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('voxreview-theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     // 1. Check active tab URL directly — general rule for ANY website opened
@@ -228,7 +238,7 @@ export default function PopupPage() {
         {/* Extension Header */}
         <Header
           isLoggedIn={isLoggedIn}
-          userName={currentUser?.name}
+          userName={currentUser?.username || currentUser?.name}
           onLogout={handleLogout}
           onLoginClick={handleOpenLogin}
         />
@@ -364,6 +374,8 @@ export default function PopupPage() {
               onLoginClick={handleOpenLogin}
               onRegisterClick={handleOpenRegister}
               onLogout={handleLogout}
+              theme={theme}
+              onThemeToggle={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
             />
           )}
         </div>

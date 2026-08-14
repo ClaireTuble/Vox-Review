@@ -30,17 +30,29 @@
   border: 2px solid rgba(217, 119, 6, 0.2);
   box-shadow: 0 4px 20px rgba(245, 158, 11, 0.15);
   flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.dark .no-reviews-icon-ring {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0.06));
+  border-color: rgba(245, 158, 11, 0.35);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 
 .no-reviews-main-icon {
   color: #D97706;
+  transition: color 0.2s ease;
+}
+
+.dark .no-reviews-main-icon {
+  color: #F59E0B;
 }
 
 /* ── Heading ── */
 .no-reviews-title {
   font-size: 15px;
   font-weight: 700;
-  color: #1E293B;
+  color: var(--text-primary);
   margin: 0;
   letter-spacing: -0.01em;
 }
@@ -48,7 +60,7 @@
 /* ── Body text ── */
 .no-reviews-body {
   font-size: 12px;
-  color: #64748B;
+  color: var(--text-secondary);
   line-height: 1.55;
   margin: 0;
   max-width: 290px;
@@ -58,12 +70,13 @@
 /* ── Guidance card ── */
 .no-reviews-guidance-card {
   width: 100%;
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
   border-radius: 14px;
   padding: 12px 14px;
   margin-top: 2px;
   text-align: left;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .guidance-card-header {
@@ -72,7 +85,7 @@
   gap: 6px;
   font-size: 10px;
   font-weight: 700;
-  color: #475569;
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 8px;
@@ -85,12 +98,21 @@
   flex-direction: column;
   gap: 5px;
   font-size: 11px;
-  color: #64748B;
+  color: var(--text-secondary);
   line-height: 1.45;
 }
 
 .guidance-steps-list li strong {
-  color: #1E293B;
+  color: var(--text-primary);
+}
+
+.guidance-footer-note {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 8px 0 0;
+  border-top: 1px dashed var(--border-divider);
+  padding-top: 8px;
 }
 
 /* ── Action button ── */
@@ -101,7 +123,7 @@
   gap: 7px;
   width: 100%;
   padding: 10px 16px;
-  background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+  background: linear-gradient(135deg, var(--accent-color) 0%, var(--accent-hover) 100%);
   color: #FFFFFF;
   border: none;
   border-radius: 10px;
@@ -114,7 +136,7 @@
 }
 
 .no-reviews-rescan-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #1D4ED8 0%, #1E40AF 100%);
+  background: linear-gradient(135deg, var(--accent-hover) 0%, var(--accent-color) 100%);
   transform: translateY(-1px);
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
 }

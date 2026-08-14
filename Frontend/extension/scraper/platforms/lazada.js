@@ -4,16 +4,19 @@ function isLazadaProductPage() {
   const href = window.location.href;
   const path = window.location.pathname;
 
-  const hasProductUrl = /-i\d+-s\d+\.html/i.test(href) || /\.html$/i.test(path) || /\/products\//i.test(path);
+  const hasProductUrl = /-i\d+-s\d+\.html/i.test(href) || /\.html$/i.test(path) || /\/products\//i.test(path) || /itemid=/i.test(href) || /product/i.test(path);
   const hasProductDom = !!document.querySelector(
-    "#module_product_detail, .pdp-block, .pdp-product-title, #module_product_review, .mod-reviews, .pdp-mod-review, [class*='mod-review']"
+    "#module_product_detail, .pdp-block, .pdp-product-title, #module_product_review, .mod-reviews, .pdp-mod-review, [class*='mod-review'], [class*='pdp'], [class*='product-title'], h1"
+  );
+  const reviewishDom = !!document.querySelector(
+    "[class*='review'], [class*='rating'], [class*='comment'], [class*='feedback'], .mod-reviews"
   );
 
   if (path === "/" || path === "" || path.includes("/catalog") || path.includes("/tag") || path.includes("/cart") || path.includes("/customer") || path.includes("/shop/")) {
-    if (!hasProductDom) return false;
+    if (!hasProductDom && !reviewishDom) return false;
   }
 
-  return hasProductUrl || hasProductDom;
+  return hasProductUrl || hasProductDom || reviewishDom;
 }
 
 function getLazadaProductMetadata() {
@@ -128,6 +131,34 @@ function scrapeLazadaReviews() {
 
   const reviews = [];
   const seenTexts = new Set();
+
+  if (cards.length === 0) {
+    const fallbackNodes = Array.from(document.querySelectorAll("body *")).filter((node) => {
+      const text = (node.innerText || node.textContent || "").replace(/\s+/g, " ").trim();
+      return text.length > 30 && !/search|catalog|shop|cart|buy now|add to cart|product details/i.test(text);
+    });
+
+    fallbackNodes.forEach((node) => {
+      const text = (node.innerText || node.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text || text.length < 20) return;
+      if (!seenTexts.has(text.toLowerCase())) {
+        seenTexts.add(text.toLowerCase());
+        reviews.push({
+          id: `lazada-fallback-${reviews.length}`,
+          reviewer: "Lazada Buyer",
+          rating: null,
+          date: "",
+          text,
+          review: text,
+          platform: "lazada",
+        });
+      }
+    });
+
+    if (reviews.length > 0) {
+      return { ...getLazadaProductMetadata(), isProductPage: true, reviews };
+    }
+  }
 
   cards.forEach((card, index) => {
     const reviewerEl = card.querySelector(

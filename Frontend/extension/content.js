@@ -25,11 +25,11 @@ async function safeSendMessage(message) {
 }
 
 // ── Auth Session Sync ────────────────────────────────────────────────────────
-// Reuses voxreview_auth_session + userAuthSync mechanism to synchronize the
-// web application's authentication session back to the extension background/popup.
+// Only the regular user session is meant for the extension.
+// Super admin storage is written separately and is never forwarded.
 function syncUserAuthSession() {
   try {
-    const raw = localStorage.getItem("voxreview_auth_session");
+    const raw = localStorage.getItem("user_auth_session");
     const session = raw ? JSON.parse(raw) : null;
     safeSendMessage({
       type: "userAuthSync",
@@ -44,7 +44,7 @@ function syncUserAuthSession() {
 if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
   syncUserAuthSession();
   window.addEventListener("storage", (e) => {
-    if (e.key === "voxreview_auth_session") {
+    if (e.key === "user_auth_session") {
       syncUserAuthSession();
     }
   });

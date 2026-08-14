@@ -90,3 +90,20 @@
   background: rgba(59, 130, 246, 0.12);
   color: #93c5fd;
 }
+
+/* ── Platforms Used column ── */
+.platforms-used-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.platform-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}

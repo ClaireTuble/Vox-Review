@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   Sparkles, Trash2, Lock, BookmarkPlus,
-  BatteryFull, Banknote, Package, Headphones, Heart, Wrench,
+  BatteryFull, Banknote, Package, Headphones, Heart, Wrench, MessageSquare
 } from 'lucide-react';
 import '../css/AnalysisResults.css';
 
@@ -148,12 +148,12 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
       <div className="analysis-section">
         <div className="analysis-glass-card" style={{ alignItems: 'center', textAlign: 'center', padding: '24px 16px' }}>
           <div className="hero-emoji-ring" style={{ width: '60px', height: '60px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Sparkles size={32} color="#2563EB" style={{ filter: 'drop-shadow(0 0 8px rgba(37,99,235,0.4))' }} />
+            <Sparkles size={32} color="var(--accent-color)" style={{ filter: 'drop-shadow(0 0 8px rgba(37,99,235,0.4))' }} />
           </div>
-          <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#1E293B', margin: 0 }}>
+          <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
             AI Emotion Analysis Engine
           </h3>
-          <p style={{ fontSize: '11px', color: '#94a3b8', lineHeight: 1.4, margin: 0, maxWidth: '280px' }}>
+          <p style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.4, margin: 0, maxWidth: '280px' }}>
             Click <strong>"Analyze Detected Page"</strong> to evaluate reviews from the active page across emotion categories.
           </p>
         </div>
@@ -242,10 +242,10 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
       {/* 3. Donut Chart — emotion emojis kept, animated */}
       <div className="analysis-glass-card">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
             Emotion Distribution
           </span>
-          <span style={{ fontSize: '10px', color: '#64748B' }}>Tap emotion to inspect keywords</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Tap emotion to inspect keywords</span>
         </div>
 
         <div className="donut-chart-wrapper">
@@ -288,7 +288,7 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
                   <span className="legend-dot" style={{ backgroundColor: item.color }} />
                   <span>{item.emoji} {item.label}</span>
                 </div>
-                <span style={{ fontWeight: 700, color: '#1E293B' }}>{item.percentage}%</span>
+                <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{item.percentage}%</span>
               </div>
             ))}
           </div>
@@ -321,10 +321,10 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
       {/* 4. Emotion Drivers — Lucide category icons, emotion emojis kept */}
       <div className="analysis-glass-card">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
             Emotion Drivers
           </span>
-          <span style={{ fontSize: '10px', color: '#2563EB', fontWeight: 600 }}>{data.drivers.length} Drivers</span>
+          <span style={{ fontSize: '10px', color: 'var(--accent-color)', fontWeight: 600 }}>{data.drivers.length} Drivers</span>
         </div>
 
         <div className="aspects-grid">
@@ -360,10 +360,10 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
       {/* 5. AI Insights — filter buttons keep emotion emojis */}
       <div className="analysis-glass-card">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: '12px', fontWeight: 700, color: '#1E293B', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
             AI Insights
           </span>
-          <span style={{ fontSize: '10px', color: '#64748B' }}>Filter Review Evidence</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Filter Review Evidence</span>
         </div>
 
         <div className="quotes-filter-bar">
@@ -390,7 +390,10 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
             <div key={q.id} className="quote-bubble">
               <p className="quote-text">"{q.text}"</p>
               <div className="quote-meta-row">
-                <span>{q.emoji} {q.emotion} • {q.driver}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  {q.emoji === '💬' ? <MessageSquare size={11} /> : <span>{q.emoji}</span>}
+                  <span>{q.emotion} • {q.driver}</span>
+                </span>
                 <span>{q.author}</span>
               </div>
               {q.date && (

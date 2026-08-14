@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Mail, Lock, User, Zap, AlertTriangle, Eye, EyeOff, Globe, BookmarkCheck, Sparkles, Shield } from 'lucide-react';
 import logo from '../../assets/VRLogo.png';
-import authService from '../../services/authService.js';
+import authService, { openWebAppAuth } from '../../services/authService.js';
 import '../css/AuthModern.css';
 
 export default function LoginPage() {
@@ -31,9 +31,16 @@ export default function LoginPage() {
       return;
     }
 
+    if (role === 'superadmin') {
+      openWebAppAuth('/admin/login');
+      setErrorMessage('Super Admin login opens the dedicated admin portal.');
+      setIsSubmitting(false);
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const res = await authService.login(email, password);
+      const res = await authService.login(email, password, 'user');
       setIsSubmitting(false);
 
       if (res.success) {

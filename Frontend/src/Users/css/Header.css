@@ -5,11 +5,12 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  background: #FFFFFF;
-  border-bottom: 1px solid #EAF0F8;
+  background: var(--bg-popup);
+  border-bottom: 1px solid var(--border-divider);
   position: sticky;
   top: 0;
   z-index: 50;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .vox-brand {
@@ -36,7 +37,7 @@
 .vox-brand-name {
   font-size: 13px;
   font-weight: 800;
-  color: #0F172A;
+  color: var(--text-primary);
   letter-spacing: -0.02em;
   line-height: 1.2;
 }
@@ -44,7 +45,7 @@
 .vox-brand-tag {
   font-size: 9px;
   font-weight: 700;
-  color: #64748B;
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -63,17 +64,17 @@
   font-size: 11px;
   font-weight: 700;
   border-radius: 999px;
-  border: 1px solid #DBEAFE;
-  background: #F8FAFC;
-  color: #2563EB;
+  border: 1px solid var(--accent-border);
+  background: var(--bg-stage);
+  color: var(--accent-color);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .vox-login-btn:hover {
-  background: #EFF6FF;
-  border-color: #BFDBFE;
-  color: #1D4ED8;
+  background: var(--accent-light);
+  border-color: var(--accent-color);
+  color: var(--accent-hover);
 }
 
 .vox-user-profile {
@@ -81,23 +82,23 @@
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
+  background: var(--bg-stage);
+  border: 1px solid var(--border-card);
   border-radius: 999px;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .vox-user-profile:hover {
-  background: #F1F5F9;
-  border-color: #CBD5E1;
+  background: var(--border-divider);
+  border-color: var(--border-card);
 }
 
 .vox-user-avatar {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: rgba(37, 99, 235, 0.12);
+  background: var(--accent-light);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -106,5 +107,5 @@
 .vox-user-name {
   font-size: 11px;
   font-weight: 700;
-  color: #334155;
+  color: var(--text-primary);
 }

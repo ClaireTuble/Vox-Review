@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Sparkles, Download, ArrowRight, Brain, Globe, BookmarkCheck, BarChart3, ShoppingBag, Store, MapPin, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Download, ArrowRight, Brain, Globe, BookmarkCheck, BarChart3, Store, MapPin, Lock, CheckCircle2, Smartphone } from 'lucide-react';
 import Navigation from '../components/Navigation.jsx';
 import logo from '../../assets/VRLogo.png';
 import '../css/LandingPage.css';
@@ -30,7 +30,7 @@ export default function LandingPage() {
           </h1>
           
           <p className="hero-subtext">
-            VoxReview uses AI emotion analysis to help you understand what people really feel about any product across major e-commerce platforms.
+            VoxReview uses AI sentiment and emotion analysis to help you understand customer feedback and reviews across supported shopping, place, and app platforms.
           </p>
 
           <div className="hero-cta-group">
@@ -45,11 +45,8 @@ export default function LandingPage() {
 
           {/* Supported Platforms Row */}
           <div className="hero-platforms-row">
-            <span className="platforms-label">Works on</span>
+            <span className="platforms-label">Supported platforms</span>
             <div className="platform-badges">
-              <span className="platform-tag">
-                <ShoppingBag size={13} className="plat-icon amazon" /> Amazon
-              </span>
               <span className="platform-tag">
                 <Store size={13} className="plat-icon shopee" /> Shopee
               </span>
@@ -58,6 +55,9 @@ export default function LandingPage() {
               </span>
               <span className="platform-tag">
                 <MapPin size={13} className="plat-icon maps" /> Google Maps
+              </span>
+              <span className="platform-tag">
+                <Smartphone size={13} className="plat-icon play" /> Google Play Store
               </span>
             </div>
           </div>
@@ -71,7 +71,7 @@ export default function LandingPage() {
             Why <span className="gradient-text">VoxReview</span>?
           </h2>
           <p className="why-subtitle">
-            Extract emotional clarity from thousands of customer reviews in milliseconds.
+            Extract key sentiment patterns and emotional insights from customer reviews efficiently.
           </p>
         </div>
 
@@ -83,7 +83,7 @@ export default function LandingPage() {
             </div>
             <h3 className="why-card-title">AI Emotion Analysis</h3>
             <p className="why-card-desc">
-              Detect emotions in reviews using advanced AI models trained on millions of feedback data points.
+              Analyze emotions and sentiment patterns in customer comments using AI-driven feedback classification.
             </p>
           </div>
 
@@ -92,9 +92,9 @@ export default function LandingPage() {
             <div className="why-card-icon-wrapper blue">
               <Globe size={22} />
             </div>
-            <h3 className="why-card-title">Works Everywhere</h3>
+            <h3 className="why-card-title">Supported Platforms</h3>
             <p className="why-card-desc">
-              Supports Amazon, Shopee, Lazada, Google Maps & more with instant on-page overlay detection.
+              Seamlessly analyze reviews on Shopee, Lazada, Google Maps, and Google Play Store directly on the page.
             </p>
           </div>
 
@@ -105,7 +105,7 @@ export default function LandingPage() {
             </div>
             <h3 className="why-card-title">Save & Track</h3>
             <p className="why-card-desc">
-              Save analyses and revisit your historical sentiment trends and product evaluations anytime.
+              Save review analyses to revisit historical sentiment summaries and feedback highlights anytime.
             </p>
           </div>
 
@@ -116,7 +116,7 @@ export default function LandingPage() {
             </div>
             <h3 className="why-card-title">Smart Insights</h3>
             <p className="why-card-desc">
-              Get instant summary reports, emotional drivers, keyword breakdown, and authenticity scores.
+              View structured summary reports, emotional breakdowns, key topics, and sentiment distributions.
             </p>
           </div>
         </div>
@@ -133,8 +133,8 @@ export default function LandingPage() {
               <span className="dot green" />
             </div>
             <div className="browser-address-bar">
-              <span className="lock-icon">🔒</span>
-              <span className="url-text">amazon.com/dp/B08PZHYWJS</span>
+              <Lock size={10} className="lock-icon" />
+              <span className="url-text">shopee.ph/product/123456789</span>
             </div>
             <div className="browser-actions-placeholder"></div>
           </div>
@@ -215,7 +215,7 @@ export default function LandingPage() {
             <span className="footer-title">VoxReview</span>
           </div>
           <p className="footer-copy">
-            © {new Date().getFullYear()} VoxReview. AI Emotion Intelligence for Product Reviews. All rights reserved.
+            © {new Date().getFullYear()} VoxReview. AI-Powered Review Analysis for Shopping, Place, and App Platforms. All rights reserved.
           </p>
         </div>
       </footer>

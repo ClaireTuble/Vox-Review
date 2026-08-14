@@ -1,25 +1,25 @@
-import { Globe, AlertCircle, Layers, HelpCircle } from 'lucide-react';
+import { Globe, AlertCircle, Layers, HelpCircle, Store, MapPin, Smartphone, Check } from 'lucide-react';
 import '../css/UnsupportedSiteView.css';
 
 const SUPPORTED_PLATFORMS = [
   {
     name: 'Shopee',
-    icon: '🛍️',
+    Icon: Store,
     domain: 'shopee.ph',
   },
   {
     name: 'Lazada',
-    icon: '🏪',
+    Icon: Store,
     domain: 'lazada.com.ph',
   },
   {
     name: 'Google Maps',
-    icon: '🗺️',
+    Icon: MapPin,
     domain: 'google.com/maps',
   },
   {
     name: 'Google Play Store',
-    icon: '▶️',
+    Icon: Smartphone,
     domain: 'play.google.com',
   },
 ];
@@ -62,16 +62,23 @@ export default function UnsupportedSiteView() {
         </div>
 
         <ul className="supported-platforms-list">
-          {SUPPORTED_PLATFORMS.map((p) => (
-            <li key={p.name} className="supported-platform-item">
-              <span className="platform-item-icon">{p.icon}</span>
-              <div className="platform-item-info">
-                <span className="platform-item-name">{p.name}</span>
-                <span className="platform-item-domain">{p.domain}</span>
-              </div>
-              <span className="platform-item-check">✓</span>
-            </li>
-          ))}
+          {SUPPORTED_PLATFORMS.map((p) => {
+            const PlatformIcon = p.Icon;
+            return (
+              <li key={p.name} className="supported-platform-item">
+                <span className="platform-item-icon">
+                  <PlatformIcon size={16} color="#2563EB" />
+                </span>
+                <div className="platform-item-info">
+                  <span className="platform-item-name">{p.name}</span>
+                  <span className="platform-item-domain">{p.domain}</span>
+                </div>
+                <span className="platform-item-check">
+                  <Check size={14} color="#10B981" />
+                </span>
+              </li>
+            );
+          })}
         </ul>
       </div>
 
@@ -93,7 +100,7 @@ export default function UnsupportedSiteView() {
 
       {/* ── Footer note ── */}
       <p className="unsupported-footer-note">
-        🚀 Additional websites will be supported in future updates!
+        Additional websites will be supported in future updates!
       </p>
     </div>
   );

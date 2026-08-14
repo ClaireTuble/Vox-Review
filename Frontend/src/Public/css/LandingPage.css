@@ -299,10 +299,6 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
-.plat-icon.amazon {
-  color: #FF9900;
-}
-
 .plat-icon.shopee {
   color: #EE4D2D;
 }
@@ -313,6 +309,10 @@
 
 .plat-icon.maps {
   color: #4285F4;
+}
+
+.plat-icon.play {
+  color: #34A853;
 }
 
 /* ── "Why VoxReview?" Section ─────────────────────────────── */
@@ -479,7 +479,10 @@
 }
 
 .lock-icon {
-  font-size: 10px;
+  display: flex;
+  align-items: center;
+  color: #64748B;
+  flex-shrink: 0;
 }
 
 .browser-body {

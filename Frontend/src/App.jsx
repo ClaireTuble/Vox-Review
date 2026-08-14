@@ -4,6 +4,7 @@ import AboutPage from './Public/pages/AboutPage.jsx';
 import AuthPage from './Public/pages/AuthPage.jsx';
 import PopupPage from './Users/pages/PopupPage.jsx';
 import SuperAdminDashboard from './SuperAdmin/pages/SuperAdminDashboard.jsx';
+import SuperAdminLoginPage from './SuperAdmin/superadminAuth/sAuth.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
 export default function App() {
@@ -14,6 +15,9 @@ export default function App() {
       <Route path="/about" element={<AboutPage />} />
       <Route path="/login" element={<AuthPage initialMode="login" />} />
       <Route path="/register" element={<AuthPage initialMode="register" />} />
+
+      {/* Admin Login — separate, non-public route */}
+      <Route path="/admin/login" element={<SuperAdminLoginPage />} />
 
       {/* Protected: Extension User */}
       <Route

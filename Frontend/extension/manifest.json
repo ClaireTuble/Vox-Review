@@ -24,8 +24,13 @@
   "content_scripts": [
     {
       "matches": [
-        "https://shopee.ph/*",
-        "https://*.shopee.ph/*"
+        "https://*.shopee.ph/*",
+        "https://*.shopee.com/*",
+        "https://*.shopee.co.id/*",
+        "https://*.shopee.com.my/*",
+        "https://*.shopee.sg/*",
+        "https://*.shopee.tw/*",
+        "https://*.shopee.vn/*"
       ],
       "js": [
         "scraper/detector.js",
@@ -37,10 +42,12 @@
     },
     {
       "matches": [
-        "https://www.lazada.com.ph/*",
         "https://*.lazada.com.ph/*",
-        "https://www.lazada.com/*",
-        "https://*.lazada.com/*"
+        "https://*.lazada.com/*",
+        "https://*.lazada.co.id/*",
+        "https://*.lazada.com.my/*",
+        "https://*.lazada.sg/*",
+        "https://*.lazada.vn/*"
       ],
       "js": [
         "scraper/detector.js",
@@ -54,7 +61,8 @@
       "matches": [
         "https://www.google.com/maps/*",
         "https://maps.google.com/*",
-        "https://www.google.com.ph/maps/*",
+        "https://*.google.com/maps/*",
+        "https://*.google.com.ph/maps/*",
         "https://maps.google.com.ph/*"
       ],
       "js": [

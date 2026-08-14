@@ -28,7 +28,7 @@ function LoginForm({ onSwitchToRegister }) {
     if (!email || !password) { setError('Please fill in both fields.'); return; }
     setSubmitting(true);
     try {
-      const res = await authService.login(email, password);
+      const res = await authService.login(email, password, 'user');
       setSubmitting(false);
       if (res.success) {
         // Session is synced to chrome.storage.local via authService.
@@ -49,25 +49,6 @@ function LoginForm({ onSwitchToRegister }) {
         <p className="ap-form-subtitle">Enter your email and password to continue</p>
       </div>
 
-      {/* Quick fill */}
-      <div className="ap-quick-row">
-        <button type="button" className="ap-quick-btn" onClick={() => fillQuick('user@test.com', 'user123')}>
-          <User size={12} /> Fill User
-        </button>
-        <button type="button" className="ap-quick-btn" onClick={() => fillQuick('admin@test.com', 'admin123')}>
-          <Zap size={12} /> Fill Admin
-        </button>
-      </div>
-
-      {/* Role selector */}
-      <div className="ap-role-selector">
-        <button type="button" className={`ap-role-btn ${role === 'user' ? 'active' : ''}`} onClick={() => setRole('user')}>
-          <User size={14} /> User
-        </button>
-        <button type="button" className={`ap-role-btn ${role === 'superadmin' ? 'active' : ''}`} onClick={() => setRole('superadmin')}>
-          <Zap size={14} /> SuperAdmin
-        </button>
-      </div>
 
       {success && (
         <div className="ap-success-toast">
@@ -144,7 +125,9 @@ function LoginForm({ onSwitchToRegister }) {
 /* ─── REGISTER FORM ─────────────────────────────────────── */
 function RegisterForm({ onSwitchToLogin }) {
   const [selectedRole, setSelectedRole] = useState('user');
-  const [fullName, setFullName]         = useState('');
+  const [username, setUsername]         = useState('');
+  const [firstName, setFirstName]       = useState('');
+  const [lastName, setLastName]         = useState('');
   const [email, setEmail]               = useState('');
   const [password, setPassword]         = useState('');
   const [confirmPwd, setConfirmPwd]     = useState('');
@@ -169,14 +152,20 @@ function RegisterForm({ onSwitchToLogin }) {
   const handleSubmit = async (ev) => {
     ev.preventDefault();
     setError('');
-    if (!fullName || !email || !password || !confirmPwd) { setError('Please fill all fields.'); return; }
+    if (!username || !firstName || !lastName || !email || !password || !confirmPwd) {
+      setError('Please fill all required fields.');
+      return;
+    }
     if (password !== confirmPwd) { setError('Passwords do not match.'); return; }
     if (!agreeTerms) { setError('You must agree to the terms.'); return; }
     setSubmitting(true);
-    const res = await authService.login(email, password);
+    const res = await authService.login(email, password, 'user', {
+      username,
+      firstName,
+      lastName
+    });
     setSubmitting(false);
     if (res?.success) {
-      // Session synced to chrome.storage.local — show toast, do NOT navigate away.
       setSuccess('Sign-up successful! Your account is now connected to VoxReview. Open the extension to continue.');
       setTimeout(() => setSuccess(''), 8000);
     }
@@ -187,16 +176,6 @@ function RegisterForm({ onSwitchToLogin }) {
       <div className="ap-form-header">
         <h2 className="ap-form-title">Create an account</h2>
         <p className="ap-form-subtitle">Fill in the details to get started</p>
-      </div>
-
-      {/* Role selector */}
-      <div className="ap-role-selector">
-        <button type="button" className={`ap-role-btn ${selectedRole === 'user' ? 'active' : ''}`} onClick={() => setSelectedRole('user')}>
-          <User size={14} /> User
-        </button>
-        <button type="button" className={`ap-role-btn ${selectedRole === 'superadmin' ? 'active' : ''}`} onClick={() => setSelectedRole('superadmin')}>
-          <Zap size={14} /> SuperAdmin
-        </button>
       </div>
 
       {success && (
@@ -216,11 +195,31 @@ function RegisterForm({ onSwitchToLogin }) {
 
       <form className="ap-form" onSubmit={handleSubmit}>
         <div className="ap-field">
-          <label htmlFor="reg-name" className="ap-label">Full Name</label>
+          <label htmlFor="reg-username" className="ap-label">Username*</label>
           <div className="ap-input-wrap">
             <User size={15} className="ap-icon" />
-            <input id="reg-name" type="text" className="ap-input" placeholder="John Doe"
-              value={fullName} onChange={e => setFullName(e.target.value)} required />
+            <input id="reg-username" type="text" className="ap-input" placeholder="claire123"
+              value={username} onChange={e => setUsername(e.target.value)} required />
+          </div>
+        </div>
+
+        <div className="auth-form-row">
+          <div className="ap-field flex-1">
+            <label htmlFor="reg-firstname" className="ap-label">First Name*</label>
+            <div className="ap-input-wrap">
+              <User size={15} className="ap-icon" />
+              <input id="reg-firstname" type="text" className="ap-input" placeholder="Claire"
+                value={firstName} onChange={e => setFirstName(e.target.value)} required />
+            </div>
+          </div>
+
+          <div className="ap-field flex-1">
+            <label htmlFor="reg-lastname" className="ap-label">Last Name*</label>
+            <div className="ap-input-wrap">
+              <User size={15} className="ap-icon" />
+              <input id="reg-lastname" type="text" className="ap-input" placeholder="Tuble"
+                value={lastName} onChange={e => setLastName(e.target.value)} required />
+            </div>
           </div>
         </div>
 

@@ -9,21 +9,33 @@ import authService from '../services/authService';
  */
 export default function ProtectedRoute({ children, allowedRole }) {
   const location = useLocation();
-  const isAuthenticated = authService.isAuthenticated();
   const currentRole = authService.checkRole();
 
-  if (!isAuthenticated) {
-    // Redirect unauthenticated user to /login with state saved
+  const isUserAuthenticated = authService.isAuthenticated();
+  const isSuperAdminAuthenticated = authService.isSuperAdminAuthenticated();
+
+  if (allowedRole === 'superadmin') {
+    if (!isSuperAdminAuthenticated) {
+      return <Navigate to="/admin/login" state={{ from: location }} replace />;
+    }
+
+    if (currentRole !== 'superadmin') {
+      return <Navigate to="/superadmin/dashboard" replace />;
+    }
+
+    return children;
+  }
+
+  if (!isUserAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   if (allowedRole && currentRole !== allowedRole) {
-    // If logged in user tries to access a role-unauthorized route, redirect to their proper dashboard
     if (currentRole === 'superadmin') {
       return <Navigate to="/superadmin/dashboard" replace />;
-    } else {
-      return <Navigate to="/user/dashboard" replace />;
     }
+
+    return <Navigate to="/user/dashboard" replace />;
   }
 
   return children;

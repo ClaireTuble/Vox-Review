@@ -4,20 +4,21 @@ function isShopeeProductPage() {
   const href = window.location.href;
   const path = window.location.pathname;
 
-  // 1. URL pattern: -i.1234.5678 or /product/ or /i/
-  const hasProductUrl = /-i\.\d+\.\d+/i.test(href) || /\/product\//i.test(path) || /\/i\//i.test(path);
+  const hasProductUrl = /-i\.\d+\.\d+/i.test(href) || /\/product\//i.test(path) || /\/i\//i.test(path) || /itemid=/i.test(href) || /flash_sale/i.test(path);
 
-  // 2. DOM elements typical for a Shopee product detail page
   const hasProductDom = !!document.querySelector(
-    ".page-product, [class*='page-product'], [data-cmtid], .shopee-product-rating, div._44qVwb, div.WB2BS, [class*='product-title']"
+    ".page-product, [class*='page-product'], [data-cmtid], .shopee-product-rating, div._44qVwb, div.WB2BS, [class*='product-title'], h1, [class*='product-name'], [class*='product-detail']"
   );
 
-  // Non-product pages like search, category, cart, home, seller center
+  const reviewishDom = !!document.querySelector(
+    "[class*='rating'], [class*='review'], [class*='comment'], [class*='feedback'], [data-cmtid]"
+  );
+
   if (path === "/" || path === "" || path.includes("/search") || path.includes("/cart") || path.includes("/user") || path.includes("/seller")) {
-    if (!hasProductDom) return false;
+    if (!hasProductDom && !reviewishDom) return false;
   }
 
-  return hasProductUrl || hasProductDom;
+  return hasProductUrl || hasProductDom || reviewishDom;
 }
 
 function getShopeeProductMetadata() {
@@ -76,7 +77,16 @@ function scrapeShopeeReviews() {
     };
   }
 
-  const cards = Array.from(document.querySelectorAll("[data-cmtid], .shopee-product-rating"));
+  let cards = Array.from(document.querySelectorAll("[data-cmtid], .shopee-product-rating"));
+
+  if (cards.length === 0) {
+    cards = Array.from(document.querySelectorAll(
+      "[class*='rating'], [class*='review'], [class*='comment'], [class*='feedback']"
+    )).filter((node) => {
+      const text = (node.innerText || node.textContent || "").trim();
+      return text.length > 20 && !/helpful|report|translate|variation|size|color/i.test(text);
+    });
+  }
 
   console.log("[Shopee] Found review cards:", cards.length);
 

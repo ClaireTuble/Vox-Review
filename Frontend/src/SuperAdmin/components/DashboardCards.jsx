@@ -3,10 +3,10 @@ import StatisticCard from './StatisticCard.jsx';
 import '../css/cards.css';
 
 const STAT_CONFIG = [
-  { id: 'users', label: 'Total Registered Users', value: '8,420', change: '+12.5%', color: '#2563EB', icon: Users },
-  { id: 'extension', label: 'Active Chrome Extensions', value: '6,140', change: '+18.2%', color: '#16A34A', icon: Puzzle },
-  { id: 'reviews', label: 'Reviews Analyzed', value: '1,420,890', change: '+24.6%', color: '#2563EB', icon: BarChart3 },
-  { id: 'platforms', label: 'Supported Platforms', value: '14 Active', change: 'Stable', color: '#2563EB', icon: Globe },
+  { id: 'total-users',  title: 'Total Users',        value: '3',        change: '+3',     color: '#2563EB', icon: Users },
+  { id: 'active-users', title: 'Active Users',        value: '2',        change: '+2',     color: '#16A34A', icon: Puzzle },
+  { id: 'analyses',     title: 'Total Analyses',      value: '47',       change: '+12',    color: '#7C3AED', icon: BarChart3 },
+  { id: 'platforms',    title: 'Supported Platforms', value: '4 Active', change: 'Stable', color: '#0891B2', icon: Globe },
 ];
 
 export default function DashboardCards() {

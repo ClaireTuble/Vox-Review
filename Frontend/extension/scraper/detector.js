@@ -4,17 +4,18 @@ const SUPPORTED_PLATFORMS = ["shopee", "lazada", "googleplay", "google"];
 function detectPlatform() {
     const host = window.location.hostname.toLowerCase();
     const path = window.location.pathname.toLowerCase();
+    const href = window.location.href.toLowerCase();
 
     // Google Play must be checked BEFORE generic Google to avoid mis-detection.
     if (host === "play.google.com" || host.startsWith("play.google.")) {
         return "googleplay";
     }
 
-    if (host.includes("shopee")) {
+    if (host.includes("shopee") || href.includes("shopee.")) {
         return "shopee";
     }
 
-    if (host.includes("lazada")) {
+    if (host.includes("lazada") || href.includes("lazada.")) {
         return "lazada";
     }
 

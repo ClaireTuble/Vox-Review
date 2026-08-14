@@ -5,9 +5,9 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
   const savedItems = [
     {
       id: 1,
-      targetTitle: 'Sony WH-1000XM5 Wireless Noise Canceling Headphones',
-      platform: 'Amazon',
-      dominantEmotion: '😊 Happy',
+      targetTitle: 'Sony WH-1000XM5 Wireless Headphones Review',
+      platform: 'Google Play Store',
+      dominantEmotion: 'Happy',
       percentage: '45%',
       date: '2 hours ago'
     },
@@ -15,7 +15,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
       id: 2,
       targetTitle: 'Anker Magnetic Wireless Power Bank 10,000mAh',
       platform: 'Shopee',
-      dominantEmotion: '😊 Happy',
+      dominantEmotion: 'Happy',
       percentage: '62%',
       date: 'Yesterday'
     },
@@ -23,7 +23,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
       id: 3,
       targetTitle: 'Logitech MX Master 3S Ergonomic Mouse',
       platform: 'Lazada',
-      dominantEmotion: '😒 Sarcastic',
+      dominantEmotion: 'Sarcastic',
       percentage: '28%',
       date: '3 days ago'
     }
@@ -34,12 +34,12 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
       <div className="saved-view-container">
         <div className="saved-card" style={{ flexDirection: 'column', textAlign: 'center', padding: '24px 16px', gap: '12px' }}>
           <div className="idle-icon-wrapper" style={{ width: '48px', height: '48px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Lock size={24} color="#2563EB" />
+            <Lock size={24} color="var(--accent-color)" />
           </div>
-          <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#1E293B', margin: 0 }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
             Saved Analyses &amp; History Locked
           </h3>
-          <p style={{ fontSize: '11px', color: '#64748B', margin: 0, lineHeight: 1.4, maxWidth: '260px' }}>
+          <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.4, maxWidth: '260px' }}>
             Log in to view your Saved Analyses, access Analysis History across platforms, and export PDF/CSV reports.
           </p>
           <button
@@ -57,7 +57,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
     <div className="saved-view-container">
       <div className="saved-view-header">
         <span className="saved-view-title">Saved Analyses</span>
-        <span style={{ fontSize: '10px', color: '#818cf8', fontWeight: 600 }}>{savedItems.length} items</span>
+        <span style={{ fontSize: '10px', color: 'var(--accent-color)', fontWeight: 600 }}>{savedItems.length} items</span>
       </div>
 
       <input 

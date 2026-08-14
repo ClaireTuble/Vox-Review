@@ -27,14 +27,15 @@
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
-  border: 2px solid rgba(37, 99, 235, 0.15);
+  background: var(--accent-light);
+  border: 2px solid var(--accent-border);
   box-shadow: 0 4px 20px rgba(37, 99, 235, 0.1);
   flex-shrink: 0;
+  transition: all 0.2s ease;
 }
 
 .unsupported-globe-icon {
-  color: #2563EB;
+  color: var(--accent-color);
   opacity: 0.8;
 }
 
@@ -48,17 +49,18 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: #FEF2F2;
-  border: 2px solid #ffffff;
+  background: rgba(239, 68, 68, 0.15);
+  border: 2px solid var(--bg-popup);
   color: #EF4444;
   box-shadow: 0 2px 8px rgba(239, 68, 68, 0.2);
+  transition: border-color 0.2s ease;
 }
 
 /* ── Heading ── */
 .unsupported-title {
   font-size: 15px;
   font-weight: 700;
-  color: #1E293B;
+  color: var(--text-primary);
   margin: 0;
   letter-spacing: -0.01em;
 }
@@ -66,7 +68,7 @@
 /* ── Body text ── */
 .unsupported-body {
   font-size: 12px;
-  color: #64748B;
+  color: var(--text-secondary);
   line-height: 1.55;
   margin: 0;
   max-width: 290px;
@@ -75,7 +77,7 @@
 
 .unsupported-subtext {
   font-size: 11px;
-  color: #94A3B8;
+  color: var(--text-muted);
   line-height: 1.5;
   margin: 0;
   max-width: 280px;
@@ -85,11 +87,12 @@
 /* ── Supported platforms section ── */
 .supported-platforms-section {
   width: 100%;
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
   border-radius: 14px;
   padding: 12px 14px;
   margin-top: 4px;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .supported-platforms-header {
@@ -98,7 +101,7 @@
   gap: 5px;
   font-size: 10px;
   font-weight: 700;
-  color: #64748B;
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 10px;
@@ -117,21 +120,27 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
+  background: var(--bg-stage);
+  border: 1px solid var(--border-card);
   border-radius: 10px;
   padding: 8px 12px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
 .supported-platform-item:hover {
-  border-color: #BFDBFE;
+  border-color: var(--accent-border);
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
 }
 
 .platform-item-icon {
-  font-size: 16px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent-light);
+  border: 1px solid var(--accent-border);
   flex-shrink: 0;
 }
 
@@ -146,12 +155,12 @@
 .platform-item-name {
   font-size: 12px;
   font-weight: 600;
-  color: #1E293B;
+  color: var(--text-primary);
 }
 
 .platform-item-domain {
   font-size: 10px;
-  color: #94A3B8;
+  color: var(--text-muted);
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
 
@@ -165,11 +174,12 @@
 /* ── General Guidance Card ── */
 .unsupported-guidance-card {
   width: 100%;
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
   border-radius: 14px;
   padding: 12px 14px;
   text-align: left;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .guidance-card-header {
@@ -178,7 +188,7 @@
   gap: 6px;
   font-size: 10px;
   font-weight: 700;
-  color: #475569;
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 8px;
@@ -191,14 +201,14 @@
   flex-direction: column;
   gap: 5px;
   font-size: 11px;
-  color: #64748B;
+  color: var(--text-secondary);
   line-height: 1.45;
 }
 
 /* ── Footer note ── */
 .unsupported-footer-note {
   font-size: 11px;
-  color: #94A3B8;
+  color: var(--text-muted);
   margin: 0;
   line-height: 1.5;
 }

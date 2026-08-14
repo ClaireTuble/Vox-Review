@@ -1,6 +1,6 @@
 /* ============================================================
-   AnalysisResults — Light Theme
-   Blue (#2563EB) & White (#F8FAFC / #FFFFFF)
+   AnalysisResults — Themed
+   Adaptive styling using CSS Variables
    ============================================================ */
 
 /* ── Emotion icon animations (Emotion section ONLY) ──────── */
@@ -34,7 +34,7 @@
 
 /* ── Skeleton loading ────────────────────────────────────── */
 .skeleton-box {
-  background: linear-gradient(90deg, #E2E8F0 25%, #F1F5F9 50%, #E2E8F0 75%);
+  background: linear-gradient(90deg, var(--border-card) 25%, var(--bg-stage) 50%, var(--border-card) 75%);
   background-size: 400px 100%;
   animation: shimmer 1.4s infinite;
   border-radius: 8px;
@@ -63,39 +63,40 @@
   gap: 10px;
 }
 
-/* White card — light theme base */
+/* White card — themed surface base */
 .analysis-glass-card {
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
+  background: var(--bg-popup);
+  border: 1px solid var(--border-card);
   border-radius: 14px;
   padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
   position: relative;
   overflow: hidden;
   animation: popupFadeIn 220ms ease-out;
 }
 
 .analysis-glass-card:hover {
-  border-color: rgba(37, 99, 235, 0.25);
+  border-color: var(--accent-border);
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.07);
   transform: translateY(-1px);
 }
 
 /* ── Hero Emotion Banner ─────────────────────────────────── */
 .hero-emotion-banner.compact {
-  background: linear-gradient(135deg, #F8FBFF 0%, #F1F5F9 100%);
-  border: 1px solid #E2E8F0;
-  border-left: 3px solid #2563EB;
+  background: var(--bg-stage);
+  border: 1px solid var(--border-card);
+  border-left: 3px solid var(--accent-color);
   border-radius: 14px;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+  transition: all 0.2s ease;
 }
 
 .hero-emotion-header-row {
@@ -113,7 +114,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #2563EB;
+  color: var(--accent-color);
 }
 
 .hero-emotion-body {
@@ -125,7 +126,7 @@
 .hero-emotion-name {
   font-size: 18px;
   font-weight: 800;
-  color: #1E293B;
+  color: var(--text-primary);
 }
 
 .hero-emotion-metrics {
@@ -137,15 +138,15 @@
 .hero-emotion-score {
   font-size: 18px;
   font-weight: 800;
-  color: #1E293B;
+  color: var(--text-primary);
 }
 
 .hero-confidence-badge {
   font-size: 9px;
   font-weight: 700;
-  background: rgba(37, 99, 235, 0.08);
-  color: #2563EB;
-  border: 1px solid rgba(37, 99, 235, 0.18);
+  background: var(--accent-light);
+  color: var(--accent-color);
+  border: 1px solid var(--accent-border);
   padding: 2px 7px;
   border-radius: 10px;
 }
@@ -176,33 +177,32 @@
 }
 
 .action-tool-btn.secondary-clear {
-  background: #F1F5F9;
-  border: 1px solid #CBD5E1;
-  color: #475569;
+  background: var(--bg-stage);
+  border: 1px solid var(--border-card);
+  color: var(--text-secondary);
 }
 
 .action-tool-btn.secondary-clear:hover {
-  background: #E2E8F0;
-  color: #1E293B;
+  background: var(--border-divider);
+  color: var(--text-primary);
 }
 
 .action-tool-btn.primary-save {
-  background: #2563EB;
+  background: var(--accent-color);
   color: #ffffff;
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
 }
 
 .action-tool-btn.primary-save:hover {
-  background: #1D4ED8;
+  background: var(--accent-hover);
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-  transform: translateY(-1px);
 }
 
 /* ── Guest Lock Banner ───────────────────────────────────── */
 .guest-lock-banner {
-  background: #fffbeb;
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  color: #92400e;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #F59E0B;
   border-radius: 10px;
   padding: 8px 12px;
   font-size: 10px;
@@ -279,14 +279,14 @@
 .donut-center-score {
   font-size: 15px;
   font-weight: 800;
-  color: #1E293B;
+  color: var(--text-primary);
   line-height: 1.1;
 }
 
 .donut-center-label {
   font-size: 9px;
   font-weight: 600;
-  color: #64748B;
+  color: var(--text-secondary);
 }
 
 /* ── Legend Grid ─────────────────────────────────────────── */
@@ -303,19 +303,19 @@
   justify-content: space-between;
   padding: 6px 8px;
   border-radius: 10px;
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
+  background: var(--bg-stage);
+  border: 1px solid var(--border-card);
   font-size: 10px;
-  color: #475569;
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
 .legend-item:hover,
 .legend-item.active {
-  background: #FFFFFF;
-  border-color: #2563EB;
-  color: #1E293B;
+  background: var(--bg-card);
+  border-color: var(--accent-color);
+  color: var(--text-primary);
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
 }
 
@@ -334,8 +334,8 @@
 
 /* ── Emotion Intelligence Card ───────────────────────────── */
 .emotion-intelligence-card {
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
+  background: var(--bg-stage);
+  border: 1px solid var(--border-card);
   border-radius: 10px;
   padding: 10px 12px;
   display: flex;
@@ -356,7 +356,7 @@
   gap: 6px;
   font-size: 11px;
   font-weight: 700;
-  color: #1E293B;
+  color: var(--text-primary);
 }
 
 .intel-confidence-box {
@@ -364,7 +364,7 @@
   align-items: center;
   gap: 4px;
   font-size: 10px;
-  color: #64748B;
+  color: var(--text-secondary);
   flex-shrink: 0;
 }
 
@@ -384,7 +384,7 @@
 .intel-label {
   font-size: 10px;
   font-weight: 700;
-  color: #64748B;
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -396,9 +396,9 @@
 }
 
 .keyword-tag {
-  background: #EFF6FF;
-  border: 1px solid rgba(37, 99, 235, 0.15);
-  color: #1d4ed8;
+  background: var(--accent-light);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-color);
   font-size: 10px;
   font-weight: 600;
   padding: 3px 8px;
@@ -413,14 +413,15 @@
 }
 
 .aspect-card {
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
+  background: var(--bg-stage);
+  border: 1px solid var(--border-card);
   border-radius: 10px;
   padding: 9px 10px;
   display: flex;
   flex-direction: column;
   gap: 7px;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .aspect-card-header {
@@ -436,14 +437,14 @@
 }
 
 .aspect-icon {
-  color: #2563EB;
+  color: var(--accent-color);
   display: flex;
 }
 
 .aspect-name {
   font-size: 11px;
   font-weight: 700;
-  color: #1E293B;
+  color: var(--text-primary);
 }
 
 .aspect-emotion-badge {
@@ -452,7 +453,7 @@
   gap: 4px;
   font-size: 10px;
   font-weight: 600;
-  color: #64748B;
+  color: var(--text-secondary);
 }
 
 .aspect-progress-row {
@@ -464,7 +465,7 @@
 .aspect-bar-track {
   flex: 1;
   height: 5px;
-  background: #E2E8F0;
+  background: var(--border-divider);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -478,7 +479,7 @@
 .aspect-score-text {
   font-size: 10px;
   font-weight: 700;
-  color: #334155;
+  color: var(--text-secondary);
   width: 28px;
   text-align: right;
   flex-shrink: 0;
@@ -498,9 +499,9 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  background: #F1F5F9;
-  border: 1px solid #E2E8F0;
-  color: #64748B;
+  background: var(--bg-stage);
+  border: 1px solid var(--border-card);
+  color: var(--text-secondary);
   font-size: 10px;
   font-weight: 600;
   padding: 4px 9px;
@@ -512,24 +513,25 @@
 }
 
 .filter-chip.active {
-  background: #2563EB;
-  border-color: #2563EB;
+  background: var(--accent-color);
+  border-color: var(--accent-color);
   color: #ffffff;
 }
 
 .quote-bubble {
-  background: #F8FAFC;
-  border: 1px solid #E2E8F0;
+  background: var(--bg-stage);
+  border: 1px solid var(--border-card);
   border-radius: 10px;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .quote-text {
   font-size: 11px;
-  color: #1E293B;
+  color: var(--text-primary);
   line-height: 1.45;
   margin: 0;
   font-style: italic;
@@ -540,7 +542,7 @@
   align-items: center;
   justify-content: space-between;
   font-size: 9px;
-  color: #64748B;
+  color: var(--text-secondary);
   font-weight: 600;
 }
 
@@ -549,7 +551,7 @@
   align-items: center;
   justify-content: flex-start;
   font-size: 9px;
-  color: #94a3b8;
+  color: var(--text-muted);
   gap: 8px;
   font-weight: 500;
 }

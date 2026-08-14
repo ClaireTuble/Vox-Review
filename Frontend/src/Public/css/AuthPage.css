@@ -829,3 +829,15 @@
   flex-shrink: 0;
   margin-top: 2px;
 }
+
+/* Horizontal Form Row helper */
+.auth-form-row {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+}
+
+.auth-form-row .flex-1 {
+  flex: 1;
+  min-width: 0;
+}

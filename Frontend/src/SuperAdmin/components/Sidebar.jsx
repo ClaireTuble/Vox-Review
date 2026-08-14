@@ -1,13 +1,14 @@
-import { LayoutDashboard, Users, Globe, Settings, LogOut, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Users, Globe, Sliders, ShieldAlert, Settings, LogOut } from 'lucide-react';
 import logo from '../../assets/VRLogo.png';
 import '../css/sidebar.css';
 
 const NAV_ITEMS = [
-  { key: 'overview', label: 'System Overview', Icon: LayoutDashboard },
+  { key: 'overview', label: 'Home', Icon: LayoutDashboard },
   { key: 'users', label: 'Manage Users', Icon: Users },
   { key: 'platforms', label: 'Supported Platforms', Icon: Globe },
-  { key: 'analytics', label: 'Analytics', Icon: BarChart3 },
-  { key: 'settings', label: 'Platform Settings', Icon: Settings },
+  { key: 'platformSettings', label: 'Platform Settings', Icon: Sliders },
+  { key: 'logs', label: 'Admin Activity Logs', Icon: ShieldAlert },
+  { key: 'settings', label: 'Settings', Icon: Settings },
 ];
 
 export default function Sidebar({ activeTab, onTabChange, onSignOut }) {
