@@ -10,6 +10,7 @@
   color: #1E293B;
   display: flex;
   flex-direction: column;
+  padding-top: 68px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, Helvetica, Arial, sans-serif;
 }
 
@@ -442,24 +443,6 @@
 }
 
 @media (max-width: 768px) {
-  .about-header {
-    padding: 0 24px;
-    height: 64px;
-  }
-  
-  .about-nav {
-    gap: 4px;
-  }
-  
-  .nav-link {
-    padding: 6px 12px;
-    font-size: 12px;
-  }
-  
-  .nav-link.register-btn {
-    padding: 8px 16px;
-  }
-  
   .about-hero {
     padding: 60px 24px 40px;
   }

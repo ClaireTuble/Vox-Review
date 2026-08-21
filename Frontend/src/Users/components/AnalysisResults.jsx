@@ -30,6 +30,7 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
     if (resolvedPlatform === 'google') return 'Google';
     if (resolvedPlatform === 'lazada') return 'Lazada';
     if (resolvedPlatform === 'shopee') return 'Shopee';
+    if (resolvedPlatform === 'steam') return 'Steam';
     if (resolvedPlatform === 'agoda') return 'Agoda';
     return 'Current Source';
   };

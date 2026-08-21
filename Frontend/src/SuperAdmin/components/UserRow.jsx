@@ -1,55 +1,90 @@
-import { CircleDot } from 'lucide-react';
+import { CircleDot, History } from 'lucide-react';
 import '../css/tables.css';
+import '../css/modal.css';
 
-const PLATFORM_COLORS = {
-  'Shopee': { bg: 'rgba(251,146,60,0.14)', color: '#fb923c' },
-  'Lazada': { bg: 'rgba(147,51,234,0.14)', color: '#c084fc' },
-  'Google Maps': { bg: 'rgba(59,130,246,0.14)', color: '#60a5fa' },
-  'Google Play Store': { bg: 'rgba(52,211,153,0.14)', color: '#6ee7b7' },
+const PLATFORM_BADGE_STYLES = {
+  'Shopee':            { bg: 'rgba(251,146,60,0.15)',   color: '#fb923c', border: '1px solid rgba(251,146,60,0.25)' },
+  'Lazada':            { bg: 'rgba(192,132,252,0.15)',   color: '#c084fc', border: '1px solid rgba(192,132,252,0.25)' },
+  'Google Maps':       { bg: 'rgba(96,165,250,0.15)',    color: '#60a5fa', border: '1px solid rgba(96,165,250,0.25)' },
+  'Google Play Store': { bg: 'rgba(110,231,183,0.15)',   color: '#6ee7b7', border: '1px solid rgba(110,231,183,0.25)' },
+  'Steam':             { bg: 'rgba(129,140,248,0.15)',   color: '#818cf8', border: '1px solid rgba(129,140,248,0.25)' },
 };
 
-export default function UserRow({ user }) {
+export default function UserRow({ user, onOpenHistory }) {
   const statusStyle = user.status === 'Pending'
     ? { color: '#fbbf24' }   // amber for pending
     : { color: '#86efac' };  // green for active
 
+  const activities = user.activities || [];
+  const uniquePlatforms = Array.from(new Set(activities.map((a) => a.platform))).filter(Boolean);
+
   return (
     <tr>
-      <td style={{ fontFamily: 'monospace', color: '#94a3b8' }}>{user.id}</td>
+      <td style={{ fontFamily: 'monospace', color: '#94a3b8' }}>{user.user_id}</td>
       <td>
         <div className="table-user-cell">
-          <strong>{user.username ? `@${user.username}` : user.name}</strong>
+          <strong>{user.full_name || 'Unnamed user'}</strong>
           <span>{user.email}</span>
         </div>
       </td>
 
+      <td>{user.role}</td>
       <td>
         <span className="status-dot-active" style={statusStyle}>
           <CircleDot size={10} />
-          {user.status}
+          {user.status || 'Active'}
         </span>
       </td>
-      <td>{user.joined}</td>
+
+      {/* Platforms Used Column — Styled exactly as in the requested photo */}
       <td>
-        <div className="platforms-used-cell">
-          {(user.platformsUsed && user.platformsUsed.length > 0)
-            ? user.platformsUsed.map((p) => {
-                const c = PLATFORM_COLORS[p] || { bg: 'rgba(148,163,184,0.12)', color: '#94a3b8' };
-                return (
-                  <span
-                    key={p}
-                    className="platform-pill"
-                    style={{ background: c.bg, color: c.color }}
-                  >
-                    {p}
-                  </span>
-                );
-              })
-            : <span style={{ color: '#475569', fontSize: '11px' }}>None recorded</span>
-          }
-        </div>
+        {uniquePlatforms.length > 0 ? (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {uniquePlatforms.map((plat) => {
+              const style = PLATFORM_BADGE_STYLES[plat] || {
+                bg: 'rgba(148,163,184,0.15)',
+                color: '#94a3b8',
+                border: '1px solid rgba(148,163,184,0.25)',
+              };
+              return (
+                <span
+                  key={plat}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '4px 14px',
+                    borderRadius: '20px',
+                    backgroundColor: style.bg,
+                    color: style.color,
+                    border: style.border,
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    letterSpacing: '0.01em',
+                  }}
+                >
+                  {plat}
+                </span>
+              );
+            })}
+          </div>
+        ) : (
+          <span style={{ color: '#64748b', fontSize: '0.85rem' }}>None</span>
+        )}
       </td>
 
+      <td>{user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}</td>
+
+      {/* Rightmost Action Column: View History */}
+      <td>
+        <button
+          className="btn-view-history"
+          onClick={() => onOpenHistory && onOpenHistory(user)}
+          title="View user activity history"
+        >
+          <History size={14} />
+          <span>View History</span>
+        </button>
+      </td>
     </tr>
   );
 }

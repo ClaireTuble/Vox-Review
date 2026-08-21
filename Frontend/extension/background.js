@@ -1,3 +1,60 @@
+// ── Config ───────────────────────────────────────────────────────────────────
+const BACKEND_URLS = ["http://localhost:5000", "http://127.0.0.1:5000"];
+
+// ── Health report helper (fire-and-forget) ───────────────────────────────────
+// Posts a health event to the backend. Never blocks scraping; failures are logged
+// and silently ignored so the core extension flow is unaffected.
+async function reportHealthToBackend(payload) {
+  for (const baseUrl of BACKEND_URLS) {
+    try {
+      const res = await fetch(`${baseUrl}/api/health/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) return;
+    } catch (err) {
+      // Try next URL fallback
+    }
+  }
+  console.warn("VoxReview: Health report failed on all backend URLs (backend may be offline)");
+}
+
+// ── User Activity report helper (fire-and-forget) ────────────────────────────
+// Reports regular user platform usage ("Used") using stored Auth session.
+async function reportUserActivityToBackend(platform) {
+  if (!platform || platform === "unknown") return;
+
+  try {
+    chrome.storage.local.get(["voxreview_auth_session"], async (res) => {
+      const session = res.voxreview_auth_session;
+      const token = session?.token;
+      if (!token) return;
+
+      for (const baseUrl of BACKEND_URLS) {
+        try {
+          const resp = await fetch(`${baseUrl}/api/user/activity`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              platform: platform,
+              activity_type: "Used",
+            }),
+          });
+          if (resp.ok) return;
+        } catch (err) {
+          // Try next URL fallback
+        }
+      }
+    });
+  } catch (err) {
+    console.warn("VoxReview: User activity report notice:", err.message);
+  }
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log("VoxReview installed");
 });
@@ -18,6 +75,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } = message;
 
     const pageUrl = url || sender.tab?.url || "";
+    const isProductPage = message.isProductPage ?? true;
 
     console.log("Received scrape:", {
       platform,
@@ -28,6 +86,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // Clear any unsupported-site flag for this tab since we now have valid data.
     chrome.storage.local.set({ voxreviewSiteStatus: { unsupported: false } });
+
+    // ── Immediate Health & Activity Report Dispatch ────────────────────────────
+    if (isProductPage && platform && platform !== "unknown") {
+      reportUserActivityToBackend(platform);
+
+      if (reviews.length > 0) {
+        // SUCCESS: reviews were actually extracted
+        reportHealthToBackend({
+          platform,
+          status: "Working",
+          lastSuccessfulStage: "Data Transfer",
+          errorStage: null,
+          errorMessage: null,
+        });
+      } else {
+        // WARNING: product page confirmed but no reviews found in DOM
+        reportHealthToBackend({
+          platform,
+          status: "Warning",
+          lastSuccessfulStage: "Review Section Detection",
+          errorStage: "Review Extraction",
+          errorMessage: "Product page detected but no reviews found in DOM.",
+        });
+      }
+    }
 
     chrome.storage.local.get(["voxreviewLastScrape"], (result) => {
       const currentScrape = result.voxreviewLastScrape || {};
@@ -69,15 +152,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         tabId: sender.tab?.id ?? null,
       };
 
-      chrome.storage.local.set({
-        voxreviewLastScrape: scrapeData,
-      }).then(() => {
+      chrome.storage.local.set({ voxreviewLastScrape: scrapeData }, () => {
         console.log("Stored scrape data to chrome.storage.local:", scrapeData);
-        chrome.storage.local.get(["voxreviewLastScrape"], (readBack) => {
-          console.log("Read back from chrome.storage.local:", readBack.voxreviewLastScrape);
-        });
-      }).catch((err) => console.error("Failed to store scrape result:", err));
+      });
     });
+
+    sendResponse({ ok: true });
+  }
+
+  // ── scrapeError ─────────────────────────────────────────────────────────────
+  // Content script sends this when scrapeAndSend() catches a runtime exception.
+  if (message?.type === "scrapeError") {
+    const { platform, errorStage, errorMessage } = message;
+    console.error("VoxReview: Scrape error reported:", { platform, errorStage, errorMessage });
+
+    if (platform && platform !== "unknown") {
+      reportHealthToBackend({
+        platform,
+        status: "Error",
+        lastSuccessfulStage: null,
+        errorStage: errorStage || "Review Extraction",
+        errorMessage: errorMessage || "An unknown error occurred during scraping.",
+      });
+
+      chrome.storage.local.set({
+        voxreviewLastScrape: {
+          platform,
+          isProductPage: true,
+          hasError: true,
+          errorStage: errorStage || "Review Extraction",
+          errorMessage: errorMessage || "An unknown error occurred during scraping.",
+          reviews: [],
+          reviewCount: 0,
+          timestamp: Date.now(),
+        },
+      });
+    }
 
     sendResponse({ ok: true });
   }

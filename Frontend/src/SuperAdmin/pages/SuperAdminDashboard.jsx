@@ -27,6 +27,7 @@ export default function SuperAdminDashboard() {
         return <PlatformSettings activeTab={activeAdminTab} setActiveTab={setActiveAdminTab} onSignOut={handleSignOut} />;
       case 'logs':
         return <AdminActivityLogs activeTab={activeAdminTab} setActiveTab={setActiveAdminTab} onSignOut={handleSignOut} />;
+      case 'security':
       case 'settings':
         return <Settings activeTab={activeAdminTab} setActiveTab={setActiveAdminTab} onSignOut={handleSignOut} />;
       case 'overview':

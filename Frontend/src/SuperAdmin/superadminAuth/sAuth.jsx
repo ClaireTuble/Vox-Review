@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Mail, Lock, Eye, EyeOff, AlertTriangle, ShieldCheck, Sparkles, Server, Activity, KeyRound, ArrowLeft } from 'lucide-react';
-import logo from '../../assets/VRLogo.png';
+import { useVoxLogo } from '../../utils/useVoxLogo.js';
 import authService from '../../services/authService.js';
 import './sAuth.css';
 
 export default function SuperAdminLoginPage() {
+    const logo = useVoxLogo({ forceDark: true });
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [showPass, setShowPass] = useState(false);
@@ -23,11 +24,9 @@ export default function SuperAdminLoginPage() {
             const res = await authService.login(email, password, 'superadmin');
             setSubmitting(false);
             if (res.success) {
-                const role = authService.checkRole();
-                if (role === 'superadmin') {
+                if (res.role === 'superadmin') {
                     navigate('/superadmin/dashboard', { replace: true });
                 } else {
-                    // Logged in but not a super admin — deny access
                     authService.logout('superadmin');
                     setError('Access denied. This login is for administrators only.');
                 }

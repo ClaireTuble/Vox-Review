@@ -20,6 +20,9 @@ function scrapeReviews(platform) {
         case "googleplay":
             return scrapeGooglePlayReviews();
 
+        case "steam":
+            return scrapeSteamReviews();
+
         default:
             return [];
     }

@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, Zap, AlertTriangle, Eye, EyeOff, Globe, BookmarkCheck, Sparkles, Shield } from 'lucide-react';
-import logo from '../../assets/VRLogo.png';
+import { logoDark } from '../../utils/useVoxLogo.js';
 import authService, { openWebAppAuth } from '../../services/authService.js';
 import '../css/AuthModern.css';
 
 export default function LoginPage() {
+  const navigate = useNavigate();
   const [role, setRole]                 = useState('user');
   const [email, setEmail]               = useState('');
   const [password, setPassword]         = useState('');
@@ -44,9 +45,6 @@ export default function LoginPage() {
       setIsSubmitting(false);
 
       if (res.success) {
-        // Session is saved and synced to chrome.storage.local by authService.
-        // Show a success notification — do NOT redirect to the dashboard.
-        // The user can open the extension to continue; it will detect the session.
         setSuccessMessage('Login successful! Your VoxReview account is now connected to the extension.');
         setTimeout(() => setSuccessMessage(''), 8000);
       }
@@ -72,7 +70,7 @@ export default function LoginPage() {
           
           <div className="auth-brand-section">
             <Link to="/" className="auth-brand-logo">
-              <img src={logo} alt="VoxReview Logo" className="auth-logo-img" />
+              <img src={logoDark} alt="VoxReview Logo" className="auth-logo-img" />
               <span className="auth-brand-name">VoxReview</span>
             </Link>
 

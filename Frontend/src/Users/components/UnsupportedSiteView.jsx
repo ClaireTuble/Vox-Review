@@ -1,4 +1,4 @@
-import { Globe, AlertCircle, Layers, HelpCircle, Store, MapPin, Smartphone, Check } from 'lucide-react';
+import { Globe, AlertCircle, Layers, HelpCircle, Store, MapPin, Smartphone, Check, Gamepad2 } from 'lucide-react';
 import '../css/UnsupportedSiteView.css';
 
 const SUPPORTED_PLATFORMS = [
@@ -21,6 +21,11 @@ const SUPPORTED_PLATFORMS = [
     name: 'Google Play Store',
     Icon: Smartphone,
     domain: 'play.google.com',
+  },
+  {
+    name: 'Steam',
+    Icon: Gamepad2,
+    domain: 'store.steampowered.com',
   },
 ];
 
@@ -47,7 +52,7 @@ export default function UnsupportedSiteView() {
 
       {/* ── Main Message ── */}
       <p className="unsupported-body">
-        This website is not supported by the extension yet.
+        The current website is not one of VoxReview&apos;s supported platforms.
       </p>
 
       <p className="unsupported-subtext">

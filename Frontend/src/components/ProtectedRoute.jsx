@@ -1,4 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import authService from '../services/authService';
 
 /**
@@ -10,17 +11,28 @@ import authService from '../services/authService';
 export default function ProtectedRoute({ children, allowedRole }) {
   const location = useLocation();
   const currentRole = authService.checkRole();
+  const [adminUser, setAdminUser] = useState(undefined);
 
   const isUserAuthenticated = authService.isAuthenticated();
-  const isSuperAdminAuthenticated = authService.isSuperAdminAuthenticated();
+
+  useEffect(() => {
+    if (allowedRole !== 'superadmin') return undefined;
+
+    let active = true;
+    authService.verifySuperAdminSession().then((user) => {
+      if (active) setAdminUser(user || null);
+    });
+
+    return () => { active = false; };
+  }, [allowedRole]);
 
   if (allowedRole === 'superadmin') {
-    if (!isSuperAdminAuthenticated) {
-      return <Navigate to="/admin/login" state={{ from: location }} replace />;
+    if (adminUser === undefined) {
+      return null;
     }
 
-    if (currentRole !== 'superadmin') {
-      return <Navigate to="/superadmin/dashboard" replace />;
+    if (!adminUser) {
+      return <Navigate to="/admin/login" state={{ from: location }} replace />;
     }
 
     return children;

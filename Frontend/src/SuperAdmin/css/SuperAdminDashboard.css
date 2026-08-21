@@ -25,6 +25,7 @@
   left: 0;
   height: 100vh;
   z-index: 1000;
+  overflow-x: hidden;
 }
 
 .admin-brand-header {

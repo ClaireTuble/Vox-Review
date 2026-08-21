@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { User, Mail, Lock, ShieldCheck, Zap, AlertTriangle, Eye, EyeOff, Globe, BookmarkCheck, Sparkles, Shield } from 'lucide-react';
-import logo from '../../assets/VRLogo.png';
+import { logoDark } from '../../utils/useVoxLogo.js';
 import authService from '../../services/authService.js';
 import '../css/AuthModern.css';
 
@@ -53,16 +53,21 @@ export default function RegisterPage() {
     }
 
     setIsSubmitting(true);
-    const res = await authService.login(email, password, 'user', {
-      username,
-      firstName,
-      lastName
-    });
-    setIsSubmitting(false);
+    try {
+      const res = await authService.signUp(email, password, {
+        username,
+        firstName,
+        lastName,
+      });
+      setIsSubmitting(false);
 
-    if (res?.success) {
-      setSuccessMessage('Sign-up successful! Your account is now connected to VoxReview. Open the extension to continue.');
-      setTimeout(() => setSuccessMessage(''), 8000);
+      if (res?.success) {
+        setSuccessMessage('Sign-up successful! Your account is now connected to VoxReview. Open the extension to continue.');
+        setTimeout(() => setSuccessMessage(''), 8000);
+      }
+    } catch (err) {
+      setIsSubmitting(false);
+      setErrorMessage(err.message || 'Sign up failed.');
     }
   };
 
@@ -82,7 +87,7 @@ export default function RegisterPage() {
           
           <div className="auth-brand-section">
             <Link to="/" className="auth-brand-logo">
-              <img src={logo} alt="VoxReview Logo" className="auth-logo-img" />
+              <img src={logoDark} alt="VoxReview Logo" className="auth-logo-img" />
               <span className="auth-brand-name">VoxReview</span>
             </Link>
 

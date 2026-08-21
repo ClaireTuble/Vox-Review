@@ -1,0 +1,23 @@
+# Environment files / secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+**/dist/
+
+# Local/editor files
+.vscode/
+.idea/
+*.log
+
+# Temporary one-time scripts
+Backend/set-superadmin-role.mjs
+
+__pycache__/
+*.pyc

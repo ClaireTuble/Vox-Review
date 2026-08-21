@@ -4,7 +4,7 @@ import {
   Mail, Lock, User, Zap, AlertTriangle, Eye, EyeOff,
   Shield, Globe, BookmarkCheck, Sparkles, ShieldCheck, Brain, BarChart3
 } from 'lucide-react';
-import logo from '../../assets/VRLogo.png';
+import { logoDark } from '../../utils/useVoxLogo.js';
 import authService from '../../services/authService.js';
 import '../css/AuthPage.css';
 
@@ -159,15 +159,22 @@ function RegisterForm({ onSwitchToLogin }) {
     if (password !== confirmPwd) { setError('Passwords do not match.'); return; }
     if (!agreeTerms) { setError('You must agree to the terms.'); return; }
     setSubmitting(true);
-    const res = await authService.login(email, password, 'user', {
-      username,
-      firstName,
-      lastName
-    });
-    setSubmitting(false);
-    if (res?.success) {
-      setSuccess('Sign-up successful! Your account is now connected to VoxReview. Open the extension to continue.');
-      setTimeout(() => setSuccess(''), 8000);
+    try {
+      const res = await authService.signUp(email, password, {
+        username,
+        firstName,
+        lastName,
+      });
+      if (res?.success) {
+        setSuccess(res.session
+          ? 'Sign-up successful! Your account is now connected to VoxReview. Open the extension to continue.'
+          : 'Sign-up successful! Check your email to confirm your account, then sign in.');
+        setTimeout(() => setSuccess(''), 8000);
+      }
+    } catch (err) {
+      setError(err.message || 'Sign up failed.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -300,7 +307,7 @@ function BrandingPanel({ mode }) {
       {/* Inner glassmorphism card */}
       <div className="ap-glass-card">
         <Link to="/" className="ap-brand-logo-row">
-          <img src={logo} alt="VoxReview" className="ap-brand-logo-img" />
+          <img src={logoDark} alt="VoxReview" className="ap-brand-logo-img" />
           <span className="ap-brand-logo-name">VoxReview</span>
         </Link>
 

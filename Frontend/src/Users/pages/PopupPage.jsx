@@ -23,6 +23,14 @@ function detectPlatformFromUrl(urlStr) {
     const host = url.hostname.toLowerCase();
     const path = url.pathname.toLowerCase();
 
+    // Steam Store product pages only
+    if (host === 'store.steampowered.com' || host.endsWith('.steampowered.com')) {
+      const steamAppMatch = url.pathname.match(/^\/app\/(\d+)(?:\/|$)/i);
+      if (steamAppMatch) {
+        return 'steam';
+      }
+    }
+
     // Google Play Store
     if (host === 'play.google.com' || host.startsWith('play.google.')) {
       return 'googleplay';
@@ -73,6 +81,8 @@ export default function PopupPage() {
   const [scrapedRating, setScrapedRating] = useState(null);
   const [scrapedProductImage, setScrapedProductImage] = useState(null);
   const [scrapedReviews, setScrapedReviews] = useState([]);
+  const [scrapedHasError, setScrapedHasError] = useState(false);
+  const [scrapedErrorMessage, setScrapedErrorMessage] = useState('');
 
   const [currentSessionId, setCurrentSessionId] = useState(null);
 
@@ -89,6 +99,8 @@ export default function PopupPage() {
       setScrapedRating(null);
       setScrapedProductImage(null);
       setScrapedReviews([]);
+      setScrapedHasError(false);
+      setScrapedErrorMessage('');
     }
     if (data.platform) setDetectedPlatform(data.platform);
     if (data.isProductPage !== undefined) setScrapedIsProductPage(data.isProductPage);
@@ -97,6 +109,8 @@ export default function PopupPage() {
     if (data.rating) setScrapedRating(data.rating);
     if (data.productImage) setScrapedProductImage(data.productImage);
     if (Array.isArray(data.reviews)) setScrapedReviews(data.reviews);
+    if (data.hasError !== undefined) setScrapedHasError(!!data.hasError);
+    if (data.errorMessage) setScrapedErrorMessage(data.errorMessage);
   };
 
   useEffect(() => {
@@ -109,16 +123,21 @@ export default function PopupPage() {
   }, [theme]);
 
   useEffect(() => {
-    // 1. Check active tab URL directly — general rule for ANY website opened
+    // 1. Check active tab URL directly — this is the AUTHORITATIVE source
+    //    for whether the current site is supported. Storage-based status is
+    //    secondary and must not override a positive URL detection.
+    let urlBasedPlatform = 'unknown';
+
     if (typeof chrome !== 'undefined' && chrome.tabs?.query) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const activeTabObj = tabs?.[0];
         const activeUrl = activeTabObj?.url || '';
-        const platformFromUrl = detectPlatformFromUrl(activeUrl);
+        urlBasedPlatform = detectPlatformFromUrl(activeUrl);
 
-        if (platformFromUrl === 'unknown') {
+        if (urlBasedPlatform === 'unknown') {
           setIsSiteUnsupported(true);
         } else {
+          // URL says this is a supported platform — trust it unconditionally
           setIsSiteUnsupported(false);
         }
       });
@@ -131,8 +150,20 @@ export default function PopupPage() {
         syncScrapeData(result?.voxreviewLastScrape);
 
         const siteStatus = result?.voxreviewSiteStatus;
+        // Only apply the stored unsupported flag if the URL-based check
+        // didn't already determine this is a supported site.
+        // Since chrome.tabs.query is async, urlBasedPlatform may still be
+        // 'unknown' at this point if the tabs callback hasn't fired yet.
+        // In that case, we defer to the storage value — but it will be
+        // corrected when the tabs callback fires (which sets the
+        // authoritative value).
         if (siteStatus?.unsupported === true) {
-          setIsSiteUnsupported(true);
+          setIsSiteUnsupported((prev) => {
+            // If the URL check has already set it to false, keep it false
+            return prev;
+          });
+        } else if (siteStatus?.unsupported === false) {
+          setIsSiteUnsupported(false);
         }
 
         // Synchronize auth session from chrome.storage.local
@@ -168,13 +199,21 @@ export default function PopupPage() {
         }
 
         if (changes.voxreviewLastScrape) {
-          syncScrapeData(changes.voxreviewLastScrape.newValue);
+          const newScrape = changes.voxreviewLastScrape.newValue;
+          syncScrapeData(newScrape);
+          // If we just received valid scrape data for a known platform,
+          // this is a supported site — clear the unsupported flag.
+          if (newScrape?.platform && newScrape.platform !== 'unknown') {
+            setIsSiteUnsupported(false);
+          }
         }
 
         if (changes.voxreviewSiteStatus) {
           const newStatus = changes.voxreviewSiteStatus.newValue;
           if (newStatus?.unsupported === true) {
             setIsSiteUnsupported(true);
+          } else if (newStatus?.unsupported === false) {
+            setIsSiteUnsupported(false);
           }
         }
       };
@@ -192,6 +231,7 @@ export default function PopupPage() {
     if (value === 'google') return 'Google Reviews';
     if (value === 'lazada') return 'Lazada';
     if (value === 'shopee') return 'Shopee';
+    if (value === 'steam') return 'Steam';
     if (value === 'agoda') return 'Agoda';
     return 'Current Source';
   })();
@@ -268,7 +308,29 @@ export default function PopupPage() {
               {/* ── 1. Website Not Supported (FIRST CHECK) ── */}
               {isSiteUnsupported ? (
                 <UnsupportedSiteView />
-              ) : /* ── 2. Supported site, but No Product Reviews / Non-product page ── */
+              ) : scrapedHasError ? (
+                /* ── 2. Scraper Error / Exception ── */
+                <div className="no-reviews-view">
+                  <div className="no-reviews-icon-ring" style={{ background: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.3)' }}>
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="8" x2="12" y2="12" />
+                      <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                  </div>
+                  <h2 className="no-reviews-title" style={{ color: '#EF4444' }}>Extraction Warning / Error</h2>
+                  <p className="no-reviews-body">
+                    {scrapedErrorMessage || 'An error occurred while attempting to extract reviews from this page.'}
+                  </p>
+                  <button
+                    className={`no-reviews-rescan-btn ${isRescanning ? 'rescanning' : ''}`}
+                    onClick={handleRescanPage}
+                    disabled={isRescanning}
+                  >
+                    <span>{isRescanning ? 'Scanning Page…' : 'Retry Extraction'}</span>
+                  </button>
+                </div>
+              ) : /* ── 3. Supported site, but No Product Reviews / Non-product page ── */
               !scrapedIsProductPage || scrapedReviews.length === 0 ? (
                 <NoReviewsView
                   platform={detectedPlatform}

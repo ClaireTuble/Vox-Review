@@ -1,8 +1,10 @@
 import { User, LogIn, LogOut } from 'lucide-react';
-import logo from '../../assets/VRLogo.png';
+import { useVoxLogo } from '../../utils/useVoxLogo.js';
 import '../css/Header.css';
 
 export default function Header({ isLoggedIn, userName, onLogout, onLoginClick }) {
+  const logo = useVoxLogo();
+
   return (
     <header className="vox-header">
       <div className="vox-brand">

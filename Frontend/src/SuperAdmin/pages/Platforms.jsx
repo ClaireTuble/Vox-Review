@@ -1,8 +1,9 @@
-import { CheckCircle2, AlertCircle, Globe, Activity, Layers, Clock, ShieldCheck } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { CheckCircle2, AlertCircle, Globe, Activity, Layers, Clock, ShieldCheck, Minus, WifiOff, Loader2 } from 'lucide-react';
 import Header from '../components/Header.jsx';
 import Sidebar from '../components/Sidebar.jsx';
 import TopActions from '../components/TopActions.jsx';
-import { mockPlatforms } from '../data/platforms.js';
+import { fetchPlatformHealth, getCachedPlatformHealth, FALLBACK_PLATFORMS } from '../data/platforms.js';
 import { mockCurrentUser } from '../data/users.js';
 import '../css/dashboard.css';
 import '../css/sidebar.css';
@@ -20,7 +21,47 @@ const PIPELINE_STAGES = [
   'NLP Analysis',
 ];
 
+const HEALTH_POLL_INTERVAL = 30_000; // 30 seconds
+
 export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
+  const cachedData = getCachedPlatformHealth();
+  const [platforms, setPlatforms] = useState(cachedData || FALLBACK_PLATFORMS);
+  const [loading, setLoading] = useState(!cachedData);
+  const [platformLoading, setPlatformLoading] = useState({});
+  const [backendAvailable, setBackendAvailable] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadHealth = async () => {
+      if (mounted) {
+        const loadingMap = {};
+        platforms.forEach((p) => { loadingMap[p.name] = true; });
+        setPlatformLoading(loadingMap);
+      }
+
+      try {
+        const data = await fetchPlatformHealth();
+        if (mounted) {
+          setPlatforms(data);
+          setBackendAvailable(true);
+        }
+      } catch (err) {
+        console.warn('VoxReview: Health fetch failed:', err.message);
+        if (mounted) setBackendAvailable(false);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+          setPlatformLoading({});
+        }
+      }
+    };
+
+    loadHealth();
+    const interval = setInterval(loadHealth, HEALTH_POLL_INTERVAL);
+    return () => { mounted = false; clearInterval(interval); };
+  }, []);
+
   return (
     <div className="superadmin-page-container">
       <Sidebar activeTab={activeTab} onTabChange={setActiveTab} onSignOut={onSignOut} />
@@ -36,8 +77,24 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
           <article className="admin-panel">
             <TopActions
               title="Platform Health & Scraper Diagnostics"
-              subtitle="Read-only status monitoring for VoxReview Chrome Extension integration pipelines."
+              subtitle="Real-time status monitoring for VoxReview Chrome Extension integration pipelines."
             />
+
+            {/* Backend connectivity warning */}
+            {!backendAvailable && (
+              <div className="health-warning-banner">
+                <WifiOff size={15} />
+                <span>Unable to reach health monitoring service. Showing last known state.</span>
+              </div>
+            )}
+
+            {/* Loading state */}
+            {loading && (
+              <div className="health-loading-state">
+                <Activity size={18} className="spin-icon" />
+                <span>Loading platform health data…</span>
+              </div>
+            )}
 
             {/* Standardized Pipeline Overview Legend */}
             <div className="pipeline-legend-card">
@@ -57,15 +114,18 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
             </div>
 
             <div className="platform-diagnostics-list">
-              {mockPlatforms.map((platform, index) => {
+              {platforms.map((platform, index) => {
+                const isPlatformChecking = !!platformLoading[platform.name];
                 const isError = platform.scrapingStatus === 'Error' || platform.status === 'Error';
+                const isWarning = platform.scrapingStatus === 'Warning' || platform.status === 'Warning';
+                const isUnavailable = platform.scrapingStatus === 'Unavailable' || platform.status === 'Unavailable';
                 const hasDiagnostics = !!(platform.scrapingStatus || platform.lastChecked);
                 const errorStageIndex = PIPELINE_STAGES.indexOf(platform.errorStage);
 
                 return (
                   <div
                     key={`${platform.name}-${index}`}
-                    className={`platform-health-card ${isError ? 'has-error' : 'is-healthy'}`}
+                    className={`platform-health-card ${isPlatformChecking ? 'is-loading' : isError ? 'has-error' : isWarning ? 'has-warning' : isUnavailable ? 'is-unavailable' : 'is-healthy'}`}
                   >
                     {/* Card Top Banner */}
                     <div className="health-card-header">
@@ -84,17 +144,35 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
                           <ShieldCheck size={12} />
                           {platform.supportStatus || 'Supported'}
                         </span>
-                        <span
-                          className="status-badge scraping-badge"
-                          style={{
-                            background: isError ? 'rgba(239,68,68,0.14)' : 'rgba(22,163,74,0.14)',
-                            color: isError ? '#f87171' : '#4ade80',
-                            border: `1px solid ${isError ? 'rgba(239,68,68,0.3)' : 'rgba(22,163,74,0.3)'}`,
-                          }}
-                        >
-                          {isError ? <AlertCircle size={12} /> : <CheckCircle2 size={12} />}
-                          Scraping: {platform.scrapingStatus || platform.status || 'Working'}
-                        </span>
+
+                        {isPlatformChecking ? (
+                          <span
+                            className="status-badge scraping-badge"
+                            style={{
+                              background: 'rgba(59,130,246,0.12)',
+                              color: '#60a5fa',
+                              border: '1px solid rgba(59,130,246,0.3)',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                            }}
+                          >
+                            <Loader2 size={12} className="spin-icon" />
+                            <span>Checking...</span>
+                          </span>
+                        ) : (
+                          <span
+                            className="status-badge scraping-badge"
+                            style={{
+                              background: platform.statusBg || 'rgba(107,114,128,0.08)',
+                              color: platform.statusColor || '#9CA3AF',
+                              border: `1px solid ${platform.statusColor ? platform.statusColor + '4D' : 'rgba(107,114,128,0.3)'}`,
+                            }}
+                          >
+                            {isError ? <AlertCircle size={12} /> : isUnavailable ? <Minus size={12} /> : <CheckCircle2 size={12} />}
+                            Scraping: {platform.scrapingStatus || platform.status || 'Unavailable'}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -117,15 +195,28 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
                           </div>
                           <div className="metric-item">
                             <span className="metric-label">Scraping Status</span>
-                            <span className={`metric-value ${isError ? 'text-error' : 'text-success'}`}>
-                              {platform.scrapingStatus || platform.status || 'Working'}
+                            <span className={`metric-value ${isError ? 'text-error' : isWarning ? 'text-warning' : isUnavailable ? 'text-muted' : 'text-success'}`}>
+                              {platform.scrapingStatus || platform.status || 'Unavailable'}
+                            </span>
+                          </div>
+                          <div className="metric-item">
+                            <span className="metric-label">NLP Status</span>
+                            <span className="metric-value text-muted">
+                              {platform.nlpStatus || 'Not Implemented'}
                             </span>
                           </div>
                           <div className="metric-item">
                             <span className="metric-label">Last Checked</span>
                             <span className="metric-value text-muted">
                               <Clock size={12} style={{ display: 'inline', marginRight: '4px' }} />
-                              {platform.lastChecked || 'N/A'}
+                              {platform.lastChecked || 'Never'}
+                            </span>
+                          </div>
+                          <div className="metric-item">
+                            <span className="metric-label">Last Success</span>
+                            <span className="metric-value text-muted">
+                              <Clock size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                              {platform.lastSuccessfulCheck || 'Never'}
                             </span>
                           </div>
                         </div>
@@ -147,6 +238,27 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
                               </p>
                             </div>
                           </div>
+                        ) : isWarning ? (
+                          <div className="error-diagnostic-box" style={{ borderColor: 'rgba(245,158,11,0.3)', background: 'rgba(245,158,11,0.05)' }}>
+                            <div className="error-box-header" style={{ color: '#F59E0B' }}>
+                              <AlertCircle size={15} className="error-box-icon" />
+                              <span>Warning: {platform.errorStage || 'Partial Issue'}</span>
+                            </div>
+                            <div className="error-box-body">
+                              <p>
+                                <strong>Stage:</strong>{' '}
+                                <span className="error-stage-pill">{platform.errorStage || 'Unknown Stage'}</span>
+                              </p>
+                              <p>
+                                <strong>Message:</strong> &ldquo;{platform.errorMessage || 'A warning condition was detected.'}&rdquo;
+                              </p>
+                            </div>
+                          </div>
+                        ) : isUnavailable ? (
+                          <div className="healthy-diagnostic-box" style={{ borderColor: 'rgba(107,114,128,0.2)', color: '#9CA3AF' }}>
+                            <Minus size={14} />
+                            <span>No health reports received yet. Status will update after first scraping event.</span>
+                          </div>
                         ) : (
                           <div className="healthy-diagnostic-box">
                             <CheckCircle2 size={14} className="healthy-box-icon" />
@@ -160,9 +272,15 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
                           <div className="pipeline-stage-nodes">
                             {PIPELINE_STAGES.map((stage, idx) => {
                               let stageState = 'passed';
-                              if (isError) {
+
+                              // NLP Analysis is always "not-implemented" until real NLP exists
+                              if (stage === 'NLP Analysis') {
+                                stageState = 'not-implemented';
+                              } else if (isUnavailable) {
+                                stageState = 'unavailable';
+                              } else if (isError || isWarning) {
                                 if (idx === errorStageIndex) stageState = 'failed';
-                                else if (idx > errorStageIndex) stageState = 'blocked';
+                                else if (idx > errorStageIndex && errorStageIndex >= 0) stageState = 'blocked';
                               }
 
                               return (
@@ -171,8 +289,13 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
                                     {stageState === 'passed' && <CheckCircle2 size={12} />}
                                     {stageState === 'failed' && <AlertCircle size={12} />}
                                     {stageState === 'blocked' && <span className="dot-blocked" />}
+                                    {stageState === 'not-implemented' && <Minus size={12} />}
+                                    {stageState === 'unavailable' && <Minus size={12} />}
                                   </div>
                                   <span className="stage-node-label">{stage}</span>
+                                  {stageState === 'not-implemented' && (
+                                    <span className="stage-sublabel">Not Implemented</span>
+                                  )}
                                 </div>
                               );
                             })}

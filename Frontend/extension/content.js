@@ -63,14 +63,14 @@ if (platform === "unknown") {
   console.log("VoxReview: Unsupported platform — sending unsupportedSite signal.");
   safeSendMessage({
     type: "unsupportedSite",
-    url:  window.location.href,
+    url: window.location.href,
   });
 
 } else {
   // ── State tracking ─────────────────────────────────────────────────────────
   let lastSentSignature = ""; // tracks last sent (url + filter + reviewCount)
-  let isScraping        = false;
-  let debounceTimer     = null;
+  let isScraping = false;
+  let debounceTimer = null;
 
   // Observer stays alive for the whole page session — NEVER disconnected
   // after a successful scrape. Only disconnected on context invalidation.
@@ -89,21 +89,21 @@ if (platform === "unknown") {
 
     try {
       const raw = (typeof scrapeReviews === "function")
-        ? scrapeReviews(platform)
+        ? await scrapeReviews(platform)
         : null;
 
       if (!raw) { return; }
 
       // Normalise: scraper may return array or {reviews, ...metadata}
-      const reviews       = Array.isArray(raw) ? raw          : (raw.reviews       || []);
-      const isProductPage = Array.isArray(raw) ? true         : (raw.isProductPage ?? true);
-      const productTitle  = Array.isArray(raw) ? ""           : (raw.productTitle  || "");
-      const productImage  = Array.isArray(raw) ? null         : (raw.productImage  || null);
-      const rating        = Array.isArray(raw) ? null         : (raw.rating        || null);
-      const category      = Array.isArray(raw) ? null         : (raw.category      || null);
-      const ratingFilter  = Array.isArray(raw) ? "all"        : (raw.ratingFilter  || "all");
-      const productUrl    = Array.isArray(raw) ? window.location.href
-                                                : (raw.productUrl || window.location.href);
+      const reviews = Array.isArray(raw) ? raw : (raw.reviews || []);
+      const isProductPage = Array.isArray(raw) ? true : (raw.isProductPage ?? true);
+      const productTitle = Array.isArray(raw) ? "" : (raw.productTitle || "");
+      const productImage = Array.isArray(raw) ? null : (raw.productImage || null);
+      const rating = Array.isArray(raw) ? null : (raw.rating || null);
+      const category = Array.isArray(raw) ? null : (raw.category || null);
+      const ratingFilter = Array.isArray(raw) ? "all" : (raw.ratingFilter || "all");
+      const productUrl = Array.isArray(raw) ? window.location.href
+        : (raw.productUrl || window.location.href);
 
       // Build a lightweight signature of the current visible state.
       // Only send a message to background when something actually changed.
@@ -129,20 +129,28 @@ if (platform === "unknown") {
       );
 
       await safeSendMessage({
-        type:          "reviewsScraped",
-        platform:      platform,
+        type: "reviewsScraped",
+        platform: platform,
         isProductPage: isProductPage,
-        productTitle:  productTitle,
-        productImage:  productImage,
-        rating:        rating,
-        category:      category,
-        ratingFilter:  ratingFilter,
-        url:           productUrl,
-        reviews:       reviews,   // always the FULL current visible set
+        productTitle: productTitle,
+        productImage: productImage,
+        rating: rating,
+        category: category,
+        ratingFilter: ratingFilter,
+        url: productUrl,
+        reviews: reviews,   // always the FULL current visible set
       });
 
     } catch (err) {
       console.error("VoxReview scrapeAndSend error:", err);
+
+      // Report the error to background.js for health tracking
+      await safeSendMessage({
+        type: "scrapeError",
+        platform: platform,
+        errorStage: "Review Extraction",
+        errorMessage: err.message || "An unknown error occurred during scraping.",
+      });
     } finally {
       isScraping = false;
     }

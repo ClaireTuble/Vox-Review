@@ -1,0 +1,390 @@
+/* Super Admin Restructured Settings Layout & Submenu Styling */
+
+.settings-layout-wrapper {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  width: 100%;
+}
+
+/* Left Submenu Navigation Sidebar */
+.settings-submenu-nav {
+  width: 240px;
+  flex-shrink: 0;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 18px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 8px 24px rgba(2, 6, 23, 0.2);
+}
+
+.settings-submenu-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+}
+
+.settings-subtab-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+}
+
+.settings-subtab-btn:hover {
+  background: rgba(30, 41, 59, 0.8);
+  color: #f8fafc;
+}
+
+.settings-subtab-btn.active {
+  background: rgba(37, 99, 235, 0.18);
+  border-color: rgba(59, 130, 246, 0.35);
+  color: #60a5fa;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+}
+
+.subtab-btn-icon {
+  flex-shrink: 0;
+  color: currentColor;
+}
+
+.subtab-btn-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.subtab-btn-label {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.subtab-btn-desc {
+  font-size: 10px;
+  font-weight: 400;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.settings-subtab-btn.active .subtab-btn-desc {
+  color: #93c5fd;
+}
+
+/* Submenu Footer Divider & Quick Links */
+.settings-submenu-divider {
+  height: 1px;
+  background: rgba(148, 163, 184, 0.12);
+  margin: 8px 0;
+}
+
+.settings-quick-link-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-quick-link-btn:hover {
+  background: rgba(30, 41, 59, 0.9);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+/* Right Content View Area */
+.settings-content-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Settings Section Card */
+.settings-card-panel {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 18px;
+  padding: 24px;
+  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.2);
+}
+
+.settings-card-panel .section-title-group {
+  margin-bottom: 20px;
+}
+
+.settings-card-panel .section-title-group h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #f8fafc;
+  margin: 0 0 4px 0;
+}
+
+.settings-card-panel .section-title-group .title-icon {
+  color: #60a5fa;
+}
+
+.settings-card-panel .section-title-group .section-desc {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 0;
+}
+
+/* Super Admin Profile Summary Component */
+.admin-account-summary-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 14px;
+  padding: 16px 20px;
+}
+
+.account-summary-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.account-avatar-badge {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.account-info-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-info-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.account-info-email {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.account-status-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.account-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.account-role-badge {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: rgba(37, 99, 235, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Change Password Form Grid */
+.password-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.form-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-field-group label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #cbd5e1;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.form-input-text {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #f8fafc;
+  font-size: 13px;
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.form-input-text:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+  background: rgba(30, 41, 59, 0.95);
+}
+
+.form-input-text::placeholder {
+  color: #64748b;
+}
+
+.form-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.submit-password-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+}
+
+.submit-password-btn:hover {
+  background: #1d4ed8;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+}
+
+/* Activity Logs Link Banner */
+.logs-link-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: rgba(30, 41, 59, 0.4);
+  border: 1px dashed rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  padding: 16px 20px;
+}
+
+.logs-link-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logs-link-icon {
+  color: #f59e0b;
+}
+
+.logs-link-text h5 {
+  margin: 0 0 2px 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.logs-link-text p {
+  margin: 0;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.open-logs-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: rgba(51, 65, 85, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.open-logs-btn:hover {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+}
+
+/* Responsive adjust for mobile */
+@media (max-width: 900px) {
+  .settings-layout-wrapper {
+    flex-direction: column;
+  }
+
+  .settings-submenu-nav {
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .settings-subtab-btn {
+    white-space: nowrap;
+  }
+
+  .admin-account-summary-box,
+  .logs-link-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

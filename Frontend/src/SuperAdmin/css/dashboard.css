@@ -1481,6 +1481,95 @@
   font-weight: 700;
 }
 
+/* ─────────────────────────────────────────────
+   Real-Time Health Status Indicators & Banners
+───────────────────────────────────────────── */
+
+.health-warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 10px;
+  color: #fbbf24;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.health-loading-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(30, 41, 59, 0.5);
+  border-radius: 10px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.spin-icon {
+  animation: spin 1.2s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.platform-health-card.has-warning {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(30, 41, 59, 0.95);
+}
+
+.platform-health-card.is-unavailable {
+  border-color: rgba(148, 163, 184, 0.12);
+  background: rgba(15, 23, 42, 0.6);
+  opacity: 0.85;
+}
+
+.stage-node.state-not-implemented {
+  background: rgba(107, 114, 128, 0.12);
+  color: #9ca3af;
+  border: 1px solid rgba(107, 114, 128, 0.2);
+}
+
+.stage-node.state-unavailable {
+  background: rgba(107, 114, 128, 0.08);
+  color: #6b7280;
+  border: 1px solid rgba(107, 114, 128, 0.12);
+}
+
+.stage-sublabel {
+  font-size: 9px;
+  color: #6b7280;
+  margin-left: 2px;
+  font-weight: 500;
+}
+
+.status-not-implemented {
+  background: rgba(107, 114, 128, 0.14);
+  color: #9ca3af;
+}
+
+.status-unavailable {
+  background: rgba(107, 114, 128, 0.08);
+  color: #6b7280;
+}
+
+.diag-unavailable {
+  border-color: rgba(148, 163, 184, 0.12);
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.pill-unavailable {
+  background: rgba(107, 114, 128, 0.12);
+  color: #9ca3af;
+}
+
+
 
 
 

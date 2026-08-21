@@ -6,6 +6,7 @@ const PLATFORM_LABELS = {
   lazada: { label: 'Lazada', cls: 'lazada' },
   google: { label: 'Google Reviews', cls: 'google' },
   googleplay: { label: 'Google Play', cls: 'googleplay' },
+  steam: { label: 'Steam', cls: 'steam' },
   agoda: { label: 'Agoda', cls: 'agoda' },
   default: { label: 'Current Source', cls: 'default' },
 };

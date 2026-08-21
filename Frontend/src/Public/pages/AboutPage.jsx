@@ -1,11 +1,12 @@
 import { Link } from 'react-router-dom';
 import { Brain, Shield, Zap, Globe, BarChart3, Users, Settings, Code, Heart, Star, CheckCircle, ArrowRight, Store, MapPin, Smartphone } from 'lucide-react';
-import logo from '../../assets/VRLogo.png';
+import { useVoxLogo } from '../../utils/useVoxLogo.js';
 import Navigation from '../components/Navigation.jsx';
 import '../css/AboutPage.css';
 import '../css/LandingPage.css';
 
 export default function AboutPage() {
+  const logo = useVoxLogo();
   return (
     <div className="about-page-container">
       <Navigation activePage="about" />

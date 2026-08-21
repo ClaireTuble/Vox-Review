@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom';
 import { Sparkles, Download, ArrowRight, Brain, Globe, BookmarkCheck, BarChart3, Store, MapPin, Lock, CheckCircle2, Smartphone } from 'lucide-react';
 import Navigation from '../components/Navigation.jsx';
-import logo from '../../assets/VRLogo.png';
+import { useVoxLogo, logoDark } from '../../utils/useVoxLogo.js';
 import '../css/LandingPage.css';
 
 export default function LandingPage() {
+  const logo = useVoxLogo();
   return (
     <div className="landing-page-container">
       {/* Background Ambient Glows & Box Grid Texture */}
@@ -162,7 +163,7 @@ export default function LandingPage() {
             <div className="vox-widget-overlay">
               <div className="widget-header">
                 <div className="widget-brand">
-                  <img src={logo} alt="VoxReview" className="widget-logo" />
+                  <img src={logoDark} alt="VoxReview" className="widget-logo" />
                   <span className="widget-name">VoxReview</span>
                 </div>
                 <div className="widget-user-icon">

@@ -17,11 +17,11 @@ export default function NoReviewsView({ platform = '', onRescan, isRescanning = 
       </div>
 
       {/* ── Heading ── */}
-      <h2 className="no-reviews-title">No Product Reviews Detected</h2>
+      <h2 className="no-reviews-title">No Reviews or Comments Detected</h2>
 
       {/* ── Main Message ── */}
       <p className="no-reviews-body">
-        No product reviews detected. Please open a product page with customer reviews.
+        This page is supported, but there are no customer reviews available to analyze yet.
       </p>
 
       {/* ── General How to Use the Extension Section ── */}
@@ -39,7 +39,7 @@ export default function NoReviewsView({ platform = '', onRescan, isRescanning = 
           <li>View the generated results.</li>
         </ol>
         <p className="guidance-footer-note">
-          VoxReview currently supports Shopee, Lazada, Google Maps, and Google Play Store. Additional websites will be supported in future updates.
+          VoxReview currently supports Shopee, Lazada, Google Maps, Google Play Store, and Steam. Additional websites will be supported in future updates.
         </p>
       </div>
 

@@ -1,25 +1,67 @@
-export const mockPlatforms = [
+let cachedPlatforms = null;
+
+/**
+ * Returns the last successfully fetched health data array from memory cache,
+ * or null if no fetch has occurred yet.
+ */
+export function getCachedPlatformHealth() {
+  return cachedPlatforms;
+}
+
+const BACKEND_URLS = ['http://localhost:5000', 'http://127.0.0.1:5000'];
+
+/**
+ * Fetches real platform health data from the backend API.
+ * Tries localhost then 127.0.0.1 to avoid IPv4/IPv6 DNS resolution mismatches.
+ * Updates the in-memory cache on success.
+ *
+ * @returns {Promise<Array>} Array of platform health objects
+ * @throws {Error} If the backend is unreachable on all URLs
+ */
+export async function fetchPlatformHealth() {
+  let lastError = null;
+
+  for (const baseUrl of BACKEND_URLS) {
+    try {
+      const res = await fetch(`${baseUrl}/api/health/status`);
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.success) {
+        cachedPlatforms = data.platforms;
+        return data.platforms;
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('Health API unreachable on localhost:5000 and 127.0.0.1:5000');
+}
+
+/**
+ * Fallback data used ONLY when the backend is unreachable.
+ * All scraping statuses are "Unavailable" — never fake "Working".
+ * NLP is always "Not Implemented".
+ */
+export const FALLBACK_PLATFORMS = [
   {
     name: 'Shopee',
     category: 'E-Commerce',
     domain: 'shopee.ph',
     supportStatus: 'Supported',
     platformStatus: 'Active',
-    scrapingStatus: 'Working',
-    nlpStatus: 'Enabled',
-    reviewLimit: 500,
-    lastChecked: '10 mins ago',
-    lastSuccessfulCheck: '10 mins ago',
+    scrapingStatus: 'Unavailable',
+    nlpStatus: 'Not Implemented',
+    lastChecked: 'Never',
+    lastSuccessfulCheck: 'Never',
     errorCount: 0,
     lastError: null,
     errorStatus: null,
     errorStage: null,
     errorMessage: null,
-    status: 'Working',
-    responseTime: '112ms',
-    statusBg: 'rgba(22,163,74,0.12)',
-    statusColor: '#16A34A',
-    usageCount: 342,
+    status: 'Unavailable',
+    statusBg: 'rgba(107,114,128,0.08)',
+    statusColor: '#9CA3AF',
   },
   {
     name: 'Lazada',
@@ -27,21 +69,18 @@ export const mockPlatforms = [
     domain: 'lazada.com.ph',
     supportStatus: 'Supported',
     platformStatus: 'Active',
-    scrapingStatus: 'Warning',
-    nlpStatus: 'Enabled',
-    reviewLimit: 500,
-    lastChecked: '15 mins ago',
-    lastSuccessfulCheck: '2 hours ago',
-    errorCount: 3,
-    lastError: 'Review elements were not detected.',
-    errorStatus: 'Warning',
-    errorStage: 'Review Extraction',
-    errorMessage: 'Review elements were not detected.',
-    status: 'Warning',
-    responseTime: '98ms',
-    statusBg: 'rgba(245,158,11,0.12)',
-    statusColor: '#F59E0B',
-    usageCount: 218,
+    scrapingStatus: 'Unavailable',
+    nlpStatus: 'Not Implemented',
+    lastChecked: 'Never',
+    lastSuccessfulCheck: 'Never',
+    errorCount: 0,
+    lastError: null,
+    errorStatus: null,
+    errorStage: null,
+    errorMessage: null,
+    status: 'Unavailable',
+    statusBg: 'rgba(107,114,128,0.08)',
+    statusColor: '#9CA3AF',
   },
   {
     name: 'Google Maps',
@@ -49,21 +88,18 @@ export const mockPlatforms = [
     domain: 'google.com/maps',
     supportStatus: 'Supported',
     platformStatus: 'Active',
-    scrapingStatus: 'Working',
-    nlpStatus: 'Enabled',
-    reviewLimit: 300,
-    lastChecked: '25 mins ago',
-    lastSuccessfulCheck: '25 mins ago',
+    scrapingStatus: 'Unavailable',
+    nlpStatus: 'Not Implemented',
+    lastChecked: 'Never',
+    lastSuccessfulCheck: 'Never',
     errorCount: 0,
     lastError: null,
     errorStatus: null,
     errorStage: null,
     errorMessage: null,
-    status: 'Working',
-    responseTime: '135ms',
-    statusBg: 'rgba(22,163,74,0.12)',
-    statusColor: '#16A34A',
-    usageCount: 189,
+    status: 'Unavailable',
+    statusBg: 'rgba(107,114,128,0.08)',
+    statusColor: '#9CA3AF',
   },
   {
     name: 'Google Play Store',
@@ -71,20 +107,36 @@ export const mockPlatforms = [
     domain: 'play.google.com',
     supportStatus: 'Supported',
     platformStatus: 'Active',
-    scrapingStatus: 'Working',
-    nlpStatus: 'Enabled',
-    reviewLimit: 400,
-    lastChecked: '1 hour ago',
-    lastSuccessfulCheck: '1 hour ago',
+    scrapingStatus: 'Unavailable',
+    nlpStatus: 'Not Implemented',
+    lastChecked: 'Never',
+    lastSuccessfulCheck: 'Never',
     errorCount: 0,
     lastError: null,
     errorStatus: null,
     errorStage: null,
     errorMessage: null,
-    status: 'Working',
-    responseTime: '104ms',
-    statusBg: 'rgba(22,163,74,0.12)',
-    statusColor: '#16A34A',
-    usageCount: 156,
+    status: 'Unavailable',
+    statusBg: 'rgba(107,114,128,0.08)',
+    statusColor: '#9CA3AF',
+  },
+  {
+    name: 'Steam',
+    category: 'Gaming',
+    domain: 'store.steampowered.com',
+    supportStatus: 'Supported',
+    platformStatus: 'Active',
+    scrapingStatus: 'Unavailable',
+    nlpStatus: 'Not Implemented',
+    lastChecked: 'Never',
+    lastSuccessfulCheck: 'Never',
+    errorCount: 0,
+    lastError: null,
+    errorStatus: null,
+    errorStage: null,
+    errorMessage: null,
+    status: 'Unavailable',
+    statusBg: 'rgba(107,114,128,0.08)',
+    statusColor: '#9CA3AF',
   },
 ];

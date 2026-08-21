@@ -374,7 +374,7 @@ export default function ProfileView({
             
             <div className="help-box-content" style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '4px' }}>
               <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
-                VoxReview analyzes product reviews across Shopee, Lazada, Google Maps, and Google Play Store using AI emotion intelligence.
+                VoxReview analyzes product reviews across Shopee, Lazada, Google Maps, Google Play Store, and Steam using AI emotion intelligence.
               </p>
               <div className="help-tip-item" style={{ background: 'var(--bg-stage)', padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border-card)' }}>
                 <strong style={{ fontSize: '11.5px', color: 'var(--text-primary)', display: 'block', marginBottom: '3px' }}>How to run analysis:</strong>
