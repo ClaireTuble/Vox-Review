@@ -25,7 +25,7 @@ export default function RecentUsersTable({ users }) {
               <tr key={user.id}>
                 <td>
                   <div className="table-user-cell">
-                    <strong>{user.username ? `@${user.username}` : user.name}</strong>
+                    <strong>{user.fullName || user.name || 'User'}</strong>
                     <span>{user.email}</span>
                   </div>
                 </td>

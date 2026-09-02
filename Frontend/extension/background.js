@@ -1,5 +1,9 @@
+importScripts("healthTestConfig.js");
+
 // ── Config ───────────────────────────────────────────────────────────────────
 const BACKEND_URLS = ["http://localhost:5000", "http://127.0.0.1:5000"];
+const HEALTH_CHECK_TIMEOUT_MS = 45_000;
+const activeHealthChecks = new Set();
 
 // ── Health report helper (fire-and-forget) ───────────────────────────────────
 // Posts a health event to the backend. Never blocks scraping; failures are logged
@@ -12,18 +16,107 @@ async function reportHealthToBackend(payload) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (res.ok) return;
+      if (res.ok) return true;
     } catch (err) {
       // Try next URL fallback
     }
   }
   console.warn("VoxReview: Health report failed on all backend URLs (backend may be offline)");
+  return false;
 }
+
+async function runHealthCheck(platform, requestId) {
+  if (activeHealthChecks.has(platform)) {
+    return { ok: false, platform, status: "Unavailable", errorMessage: "A health check is already running." };
+  }
+
+  const testUrl = HEALTH_TEST_URLS[platform];
+  if (!testUrl) {
+    return { ok: false, platform, status: "Not Implemented", errorMessage: "No health-test URL is configured." };
+  }
+
+  activeHealthChecks.add(platform);
+  let tabId = null;
+  let timeoutId = null;
+  let settled = false;
+  let onUpdated;
+  let onError;
+
+  const finish = async (result) => {
+    if (settled) return result;
+    settled = true;
+    clearTimeout(timeoutId);
+    chrome.tabs.onUpdated.removeListener(onUpdated);
+    chrome.tabs.onErrorOccurred.removeListener(onError);
+    activeHealthChecks.delete(platform);
+
+    const report = {
+      platform,
+      status: result.status || "Unavailable",
+      lastSuccessfulStage: result.lastSuccessfulStage || null,
+      errorStage: result.errorStage || null,
+      errorMessage: result.errorMessage || null,
+    };
+    const reportOk = await reportHealthToBackend(report);
+
+    if (tabId !== null) {
+      try { await chrome.tabs.remove(tabId); } catch { /* The tab may already be closed. */ }
+    }
+
+    return { ...report, reportOk };
+  };
+
+  return new Promise((resolve) => {
+    const resolveUnavailable = (errorMessage, errorStage = "Page Load") => {
+      finish({ status: "Unavailable", errorStage, errorMessage }).then(resolve);
+    };
+
+    onUpdated = (updatedTabId, changeInfo) => {
+      if (updatedTabId !== tabId || changeInfo.status !== "complete" || settled) return;
+
+      chrome.tabs.sendMessage(tabId, { type: "healthCheck", platform, requestId }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolveUnavailable(chrome.runtime.lastError.message, "Extension Pipeline");
+          return;
+        }
+        finish(response?.platform === platform ? response : {
+          status: "Unavailable",
+          errorStage: "Extension Pipeline",
+          errorMessage: "The platform content script did not return a health result.",
+        }).then(resolve);
+      });
+    };
+
+    onError = (failedTabId, details) => {
+      if (failedTabId === tabId) {
+        resolveUnavailable(details?.error || "The platform test page could not be loaded.");
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onErrorOccurred.addListener(onError);
+    timeoutId = setTimeout(() => {
+      resolveUnavailable("Health check timed out.", "Health Check Timeout");
+    }, HEALTH_CHECK_TIMEOUT_MS);
+
+    chrome.tabs.create({ url: testUrl, active: false }, (tab) => {
+      if (chrome.runtime.lastError || !tab?.id) {
+        resolveUnavailable(chrome.runtime.lastError?.message || "The test tab could not be opened.");
+        return;
+      }
+      tabId = tab.id;
+    });
+  });
+}
+
+const VALID_PLATFORMS = new Set(["shopee", "lazada", "google", "googleplay", "steam"]);
 
 // ── User Activity report helper (fire-and-forget) ────────────────────────────
 // Reports regular user platform usage ("Used") using stored Auth session.
-async function reportUserActivityToBackend(platform) {
+async function reportUserActivityToBackend(platform, productTitle = "", productUrl = "") {
   if (!platform || platform === "unknown") return;
+  const platformKey = String(platform).trim().toLowerCase();
+  if (!VALID_PLATFORMS.has(platformKey)) return;
 
   try {
     chrome.storage.local.get(["voxreview_auth_session"], async (res) => {
@@ -40,8 +133,10 @@ async function reportUserActivityToBackend(platform) {
               Authorization: `Bearer ${token}`,
             },
             body: JSON.stringify({
-              platform: platform,
+              platform: platformKey,
               activity_type: "Used",
+              product_title: productTitle || "",
+              product_url: productUrl || "",
             }),
           });
           if (resp.ok) return;
@@ -61,11 +156,42 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
+  // ── Explicit browser health test ──────────────────────────────────────────
+  if (message?.type === "healthCheck") {
+    const platform = String(message.platform || "").toLowerCase();
+    if (!VALID_PLATFORMS.has(platform)) {
+      sendResponse({ ok: false, platform, status: "Unavailable", errorMessage: "Invalid platform." });
+      return;
+    }
+    runHealthCheck(platform, message.requestId || `${platform}-${Date.now()}`)
+      .then(sendResponse)
+      .catch((error) => sendResponse({
+        ok: false,
+        platform,
+        status: "Error",
+        errorStage: "Health Check",
+        errorMessage: error.message || "Health check failed.",
+      }));
+    return true;
+  }
+
+  // ── pageDetected / productDetected (Decoupled Activity Reporting) ─────────
+  // Fired ONLY when the content script on an active tab confirms a supported platform page
+  if (message?.type === "pageDetected" || message?.type === "productDetected") {
+    const { platform, isProductPage = true, productTitle = "", productUrl = "" } = message;
+    const pageUrl = productUrl || sender.tab?.url || "";
+    if (isProductPage && platform && VALID_PLATFORMS.has(String(platform).toLowerCase())) {
+      reportUserActivityToBackend(platform, productTitle, pageUrl);
+    }
+    sendResponse({ ok: true });
+    return;
+  }
+
   // ── reviewsScraped ──────────────────────────────────────────────────────────
   if (message?.type === "reviewsScraped") {
     const {
-      platform = "shopee",
-      productTitle = "Shopee Product",
+      platform,
+      productTitle = "",
       productImage = null,
       rating = null,
       category = null,
@@ -73,6 +199,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       url = "",
       ratingFilter = "all",
     } = message;
+
+    if (!platform || !VALID_PLATFORMS.has(String(platform).toLowerCase())) {
+      sendResponse({ ok: false, error: "Invalid platform" });
+      return;
+    }
 
     const pageUrl = url || sender.tab?.url || "";
     const isProductPage = message.isProductPage ?? true;
@@ -87,10 +218,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Clear any unsupported-site flag for this tab since we now have valid data.
     chrome.storage.local.set({ voxreviewSiteStatus: { unsupported: false } });
 
-    // ── Immediate Health & Activity Report Dispatch ────────────────────────────
-    if (isProductPage && platform && platform !== "unknown") {
-      reportUserActivityToBackend(platform);
-
+    // ── Immediate Health Report Dispatch ───────────────────────────────────────
+    if (isProductPage) {
       if (reviews.length > 0) {
         // SUCCESS: reviews were actually extracted
         reportHealthToBackend({
@@ -217,6 +346,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "userAuthSync") {
     const session = message.session || null;
     console.log("VoxReview background: Auth session synced:", session);
+
+    if (!session || !session.user || !session.token) {
+      chrome.storage.local.remove(["voxreview_auth_session"]).catch((err) =>
+        console.error("Failed to clear auth session:", err)
+      );
+      sendResponse({ ok: true });
+      return;
+    }
 
     chrome.storage.local.set({
       voxreview_auth_session: session,

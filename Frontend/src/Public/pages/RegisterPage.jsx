@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { User, Mail, Lock, ShieldCheck, Zap, AlertTriangle, Eye, EyeOff, Globe, BookmarkCheck, Sparkles, Shield } from 'lucide-react';
 import { logoDark } from '../../utils/useVoxLogo.js';
-import authService from '../../services/authService.js';
+import authService, { normalizeAuthErrorMessage } from '../../services/authService.js';
+import VerificationCodeModal from '../../Users/components/VerificationCodeModal.jsx';
 import '../css/AuthModern.css';
+
+const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value || '').trim());
 
 export default function RegisterPage() {
   const navigate = useNavigate();
@@ -20,6 +23,10 @@ export default function RegisterPage() {
   const [isSubmitting, setIsSubmitting]       = useState(false);
   const [errorMessage, setErrorMessage]       = useState('');
   const [successMessage, setSuccessMessage]   = useState('');
+
+  // Signup verification modal state
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [pendingSignupData, setPendingSignupData] = useState(null);
 
   const getPasswordStrength = (pwd) => {
     if (!pwd) return { strength: 0, label: '' };
@@ -43,6 +50,14 @@ export default function RegisterPage() {
       setErrorMessage('Please fill out all required fields.');
       return;
     }
+    if (!isValidEmail(email)) {
+      setErrorMessage('Please enter a valid email address.');
+      return;
+    }
+    if (password.length < 8 || !/[a-z]/i.test(password) || !/\d/.test(password)) {
+      setErrorMessage('Password must meet the required security requirements.');
+      return;
+    }
     if (password !== confirmPassword) {
       setErrorMessage('Passwords do not match.');
       return;
@@ -53,22 +68,27 @@ export default function RegisterPage() {
     }
 
     setIsSubmitting(true);
-    try {
-      const res = await authService.signUp(email, password, {
-        username,
-        firstName,
-        lastName,
-      });
-      setIsSubmitting(false);
+    const signupData = { email, password, username, firstName, lastName };
 
-      if (res?.success) {
-        setSuccessMessage('Sign-up successful! Your account is now connected to VoxReview. Open the extension to continue.');
-        setTimeout(() => setSuccessMessage(''), 8000);
-      }
+    try {
+      // Step 1: Send verification code email via Brevo. Account NOT created yet.
+      await authService.requestSignupVerification(signupData);
+      setPendingSignupData(signupData);
+      setShowVerificationModal(true);
     } catch (err) {
+      setErrorMessage(normalizeAuthErrorMessage(err, 'signup'));
+    } finally {
       setIsSubmitting(false);
-      setErrorMessage(err.message || 'Sign up failed.');
     }
+  };
+
+  const handleVerificationSuccess = (result) => {
+    setShowVerificationModal(false);
+    setSuccessMessage('Registration & email verification successful! Your account is ready.');
+    setTimeout(() => {
+      setSuccessMessage('');
+      navigate('/login');
+    }, 4000);
   };
 
   return (
@@ -345,6 +365,17 @@ export default function RegisterPage() {
           </div>
         </div>
       </div>
+
+      {showVerificationModal && (
+        <VerificationCodeModal
+          isOpen={showVerificationModal}
+          email={pendingSignupData?.email}
+          purpose="signup_email_verification"
+          signupData={pendingSignupData}
+          onVerifySuccess={handleVerificationSuccess}
+          onCancel={() => setShowVerificationModal(false)}
+        />
+      )}
     </div>
   );
 }

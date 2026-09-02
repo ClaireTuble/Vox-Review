@@ -1,4 +1,6 @@
+import { createClient } from "@supabase/supabase-js";
 import supabase from "../config/supabase.js";
+import { createNotification } from "../utils/auditLogger.js";
 
 // ── Platform display metadata ────────────────────────────────────────────────
 const PLATFORM_META = {
@@ -10,7 +12,7 @@ const PLATFORM_META = {
 };
 
 const VALID_PLATFORMS = Object.keys(PLATFORM_META);
-const VALID_STATUSES  = ["Working", "Warning", "Error"];
+const VALID_STATUSES  = ["Working", "Warning", "Error", "Unavailable", "Not Implemented"];
 
 // ── In-Memory Health State Store ──────────────────────────────────────────────
 // Serves live data immediately and survives database connectivity issues.
@@ -85,6 +87,24 @@ function getStatusStyle(status) {
   }
 }
 
+function normalizePlatformCode(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+(.)/g, (_, character) => character.toUpperCase());
+}
+
+function getPlatformCode(platform) {
+  const stableCode = platform.platform || platform.code || platform.platform_code || platform.slug;
+  if (stableCode) return normalizePlatformCode(stableCode);
+
+  const displayName = String(platform.display_name || platform.name || platform.platform_name || '').trim().toLowerCase();
+  const matchingEntry = Object.entries(PLATFORM_META).find(([, metadata]) => (
+    metadata.name.toLowerCase() === displayName
+  ));
+  return matchingEntry?.[0] || normalizePlatformCode(displayName);
+}
+
 // ── POST /api/health/report ──────────────────────────────────────────────────
 export async function reportHealth(req, res) {
   try {
@@ -138,8 +158,13 @@ export async function reportHealth(req, res) {
 
     memoryHealthStore.set(platform, updatedItem);
 
-    // Asynchronously sync to Supabase if connected
-    supabase
+    const healthSupabase = process.env.SUPABASE_SERVICE_ROLE_KEY
+      ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        })
+      : supabase;
+
+    const { error: syncError } = await healthSupabase
       .from("platform_health")
       .upsert({
         platform,
@@ -155,10 +180,51 @@ export async function reportHealth(req, res) {
         error_count: newErrorCount,
         updated_at: nowIso,
       }, { onConflict: "platform" })
-      .then(({ error }) => {
-        if (error) console.warn("Supabase background sync notice:", error.message);
-      })
-      .catch((err) => console.warn("Supabase connection notice:", err.message));
+    if (syncError) console.warn("Supabase health sync notice:", syncError.message);
+
+    // Create notifications for important health state changes
+    const previousStatus = current.status || null;
+    const statusChanged = previousStatus !== status;
+    const isImportantChange = (
+      status === "Error" ||
+      status === "Warning" ||
+      (previousStatus === "Error" && status === "Working") ||
+      (previousStatus === "Warning" && status === "Working")
+    );
+
+    if (statusChanged && isImportantChange) {
+      // Determine notification type and title based on status change
+      let notificationType = "info";
+      let notificationTitle = "Platform Status";
+      let notificationMessage = `${updatedItem.name} status: ${status}`;
+
+      if (status === "Error") {
+        notificationType = "danger";
+        notificationTitle = `${updatedItem.name} Error`;
+        notificationMessage = `Scraping error detected on ${updatedItem.name}${errorStage ? ` at ${errorStage}` : ""}.${errorMessage ? ` ${errorMessage}` : ""}`;
+      } else if (status === "Warning") {
+        notificationType = "warning";
+        notificationTitle = `${updatedItem.name} Warning`;
+        notificationMessage = `Warning on ${updatedItem.name}${errorStage ? ` at ${errorStage}` : ""}.${errorMessage ? ` ${errorMessage}` : ""}`;
+      } else if (status === "Working" && (previousStatus === "Error" || previousStatus === "Warning")) {
+        notificationType = "success";
+        notificationTitle = `${updatedItem.name} Recovered`;
+        notificationMessage = `${updatedItem.name} has recovered and is now operational.`;
+      }
+
+      try {
+        await createNotification({
+          category: "Platform",
+          type: notificationType,
+          title: notificationTitle,
+          message: notificationMessage,
+          source_event: `health_report_${platform}_${status}`,
+          is_active: true,
+        });
+      } catch (notifErr) {
+        console.warn(`[HealthController] Notification creation warning for ${platform}:`, notifErr.message);
+      }
+    }
 
     return res.status(200).json({ success: true, platform: updatedItem });
   } catch (err) {
@@ -170,42 +236,64 @@ export async function reportHealth(req, res) {
 // ── GET /api/health/status ───────────────────────────────────────────────────
 export async function getHealthStatus(_req, res) {
   try {
-    // Try querying Supabase first
-    const { data, error } = await supabase
+    const healthSupabase = process.env.SUPABASE_SERVICE_ROLE_KEY
+      ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        })
+      : supabase;
+
+    const { data: platformRows, error: platformsError } = await healthSupabase
+      .from("platforms")
+      .select("*")
+      .eq("is_active", true)
+      .order("platform_id", { ascending: true });
+
+    if (platformsError) {
+      throw platformsError;
+    }
+
+    const { data: healthRows, error: healthError } = await healthSupabase
       .from("platform_health")
       .select("*")
       .order("display_name", { ascending: true });
 
-    if (!error && data && data.length > 0) {
-      data.forEach((row) => {
-        const style = getStatusStyle(row.scraping_status);
-        memoryHealthStore.set(row.platform, {
-          platform: row.platform,
-          name: row.display_name,
-          category: row.category,
-          domain: row.domain,
-          supportStatus: "Supported",
-          platformStatus: "Active",
-          scrapingStatus: row.scraping_status,
-          nlpStatus: row.nlp_status || "Not Implemented",
-          lastChecked: formatRelativeTime(row.last_checked_at),
-          lastSuccessfulCheck: formatRelativeTime(row.last_success_at),
-          errorCount: row.error_count || 0,
-          lastError: row.error_message || null,
-          errorStatus: row.scraping_status === "Error" ? "Error Detected" : null,
-          errorStage: row.error_stage || null,
-          errorMessage: row.error_message || null,
-          status: row.scraping_status,
-          statusBg: style.statusBg,
-          statusColor: style.statusColor,
-          lastCheckedRaw: row.last_checked_at,
-          lastSuccessRaw: row.last_success_at,
-        });
-      });
+    if (healthError) {
+      throw healthError;
     }
 
-    // Always return updated list from memory store (guarantees HTTP 200)
-    const platforms = Array.from(memoryHealthStore.values()).map((p) => ({
+    const healthByCode = new Map((healthRows || []).map((row) => [getPlatformCode(row), row]));
+    const healthById = new Map((healthRows || []).map((row) => [String(row.platform_id), row]));
+    const platforms = (platformRows || []).map((baseRow) => {
+      const platformCode = getPlatformCode(baseRow);
+      const metadata = PLATFORM_META[platformCode] || {};
+      const health = healthByCode.get(platformCode) || healthById.get(String(baseRow.platform_id));
+      const status = health?.scraping_status || "Unavailable";
+      const platform = {
+        platform: platformCode,
+        name: baseRow.display_name || baseRow.name || baseRow.platform_name || metadata.name || platformCode,
+        category: baseRow.category || baseRow.industry_type || metadata.category || "General",
+        domain: baseRow.domain || baseRow.base_url || metadata.domain || "",
+        supportStatus: "Supported",
+        platformStatus: "Active",
+        scrapingStatus: status,
+        nlpStatus: health?.nlp_status || "Not Implemented",
+        lastCheckedRaw: health?.last_checked_at || null,
+        lastSuccessRaw: health?.last_success_at || null,
+        errorCount: health?.error_count || 0,
+        lastError: health?.error_message || null,
+        errorStatus: status === "Error" ? "Error Detected" : null,
+        errorStage: health?.error_stage || null,
+        errorMessage: health?.error_message || null,
+        status,
+        ...getStatusStyle(status),
+      };
+
+      return {
+        ...platform,
+        lastChecked: formatRelativeTime(platform.lastCheckedRaw),
+        lastSuccessfulCheck: formatRelativeTime(platform.lastSuccessRaw),
+      };
+    }).map((p) => ({
       ...p,
       lastChecked: formatRelativeTime(p.lastCheckedRaw),
       lastSuccessfulCheck: formatRelativeTime(p.lastSuccessRaw),
@@ -214,9 +302,7 @@ export async function getHealthStatus(_req, res) {
     return res.status(200).json({ success: true, platforms });
   } catch (err) {
     console.error("Health status error:", err);
-    // Fall back to memory store even if an unhandled exception occurs
-    const platforms = Array.from(memoryHealthStore.values());
-    return res.status(200).json({ success: true, platforms });
+    return res.status(500).json({ success: false, error: "Unable to load persistent platform health." });
   }
 }
 

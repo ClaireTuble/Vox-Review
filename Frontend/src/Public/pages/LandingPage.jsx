@@ -187,11 +187,6 @@ export default function LandingPage() {
                   <span className="em-name">Happy</span>
                   <span className="em-val">86%</span>
                 </div>
-                <div className="emotion-legend-item neutral">
-                  <span className="em-dot gray" />
-                  <span className="em-name">Neutral</span>
-                  <span className="em-val">8%</span>
-                </div>
                 <div className="emotion-legend-item sad">
                   <span className="em-dot blue" />
                   <span className="em-name">Sad</span>
@@ -199,7 +194,22 @@ export default function LandingPage() {
                 </div>
                 <div className="emotion-legend-item angry">
                   <span className="em-dot red" />
-                  <span className="em-name">Angry</span>
+                  <span className="em-name">Anger</span>
+                  <span className="em-val">2%</span>
+                </div>
+                <div className="emotion-legend-item fear">
+                  <span className="em-dot orange" />
+                  <span className="em-name">Fear</span>
+                  <span className="em-val">3%</span>
+                </div>
+                <div className="emotion-legend-item disgust">
+                  <span className="em-dot purple" />
+                  <span className="em-name">Disgust</span>
+                  <span className="em-val">3%</span>
+                </div>
+                <div className="emotion-legend-item sarcastic">
+                  <span className="em-dot pink" />
+                  <span className="em-name">Sarcastic</span>
                   <span className="em-val">2%</span>
                 </div>
               </div>

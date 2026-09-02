@@ -2,7 +2,9 @@ import { Home, ChevronRight, Sparkles } from 'lucide-react';
 import NotificationBell from './NotificationBell.jsx';
 import '../css/header.css';
 
-export default function Header({ title, subtitle, user }) {
+export default function Header({ title, subtitle, user, onNavigate, setActiveTab }) {
+  const handleNavigate = onNavigate || setActiveTab;
+
   return (
     <header className="superadmin-topbar">
       <div className="topbar-content-stack">
@@ -21,7 +23,7 @@ export default function Header({ title, subtitle, user }) {
       </div>
 
       <div className="topbar-right-controls">
-        <NotificationBell />
+        <NotificationBell onNavigate={handleNavigate} />
         <div className="topbar-profile-card">
           <div className="avatar-circle">
             <Sparkles size={15} />

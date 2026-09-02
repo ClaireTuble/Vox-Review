@@ -16,13 +16,51 @@ import {
 import { useSuperAdminNotifications } from '../data/superadminNotifications.js';
 import '../css/notifications.css';
 
-export default function NotificationBell() {
+export default function NotificationBell({ onNavigate }) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState('All');
   const dropdownRef = useRef(null);
 
   const { notifications, unreadCount, toggleRead, markAllAsRead, clearRead } =
     useSuperAdminNotifications();
+
+  // Helper to determine destination tab using source_event as primary, category as fallback
+  const getDestinationTab = (notif) => {
+    const sourceEvent = notif?.source_event || '';
+    const category = notif?.category || '';
+
+    if (
+      sourceEvent === 'super_admin_login_failed' ||
+      sourceEvent.startsWith('audit_') ||
+      sourceEvent.startsWith('security_alert_')
+    ) {
+      return 'logs';
+    }
+    if (sourceEvent === 'security_settings_changed') {
+      return 'settings';
+    }
+    if (sourceEvent === 'user_registered') {
+      return 'users';
+    }
+    if (sourceEvent.startsWith('health_report_')) {
+      return 'platforms';
+    }
+    if (sourceEvent.startsWith('platform_config_')) {
+      return 'platformSettings';
+    }
+
+    if (category === 'Security') {
+      return 'logs';
+    }
+    if (category === 'Users') {
+      return 'users';
+    }
+    if (category === 'Platform') {
+      return 'platforms';
+    }
+
+    return 'overview';
+  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -146,7 +184,14 @@ export default function NotificationBell() {
                   key={notif.id}
                   className={`notification-item ${!notif.read ? 'unread' : 'read'} type-${notif.type || 'info'}`}
                   onClick={() => {
-                    if (!notif.read) toggleRead(notif.id);
+                    if (!notif.read) {
+                      toggleRead(notif.id);
+                    }
+                    setIsOpen(false);
+                    if (typeof onNavigate === 'function') {
+                      const targetTab = getDestinationTab(notif);
+                      onNavigate(targetTab);
+                    }
                   }}
                 >
                   <div className={`notification-icon-box type-${notif.type || 'info'}`}>

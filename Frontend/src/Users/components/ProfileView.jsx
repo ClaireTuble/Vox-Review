@@ -16,9 +16,15 @@ import {
   Save,
   ChevronRight,
   ArrowLeft,
-  HelpCircle
+  HelpCircle,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  Loader2
 } from 'lucide-react';
-import authService from '../../services/authService.js';
+import authService, { normalizeAuthErrorMessage } from '../../services/authService.js';
+import ProfileChangesConfirmationModal from './ProfileChangesConfirmationModal.jsx';
+import VerificationCodeModal from './VerificationCodeModal.jsx';
 import '../css/ProfileView.css';
 
 export default function ProfileView({
@@ -30,61 +36,186 @@ export default function ProfileView({
   theme = 'light',
   onThemeToggle,
   onClearSavedAnalyses,
+  onProfileUpdated,
 }) {
   const [activeView, setActiveView] = useState('main'); // 'main' | 'user-profile' | 'security' | 'help-center'
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [currentPass, setCurrentPass] = useState('');
   const [newPass, setNewPass] = useState('');
+  const [confirmPass, setConfirmPass] = useState('');
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
+  const [showPasswordSuccessModal, setShowPasswordSuccessModal] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState('success');
 
   // Account Information Edit Form State
-  const [username, setUsername] = useState(() => currentUser?.username || currentUser?.name || 'claire123');
-  const [email, setEmail] = useState(() => currentUser?.email || 'user@test.com');
-  const [firstName, setFirstName] = useState(() => currentUser?.firstName || 'Claire');
-  const [lastName, setLastName] = useState(() => currentUser?.lastName || 'Tuble');
+  const [username, setUsername] = useState(() => currentUser?.username || currentUser?.name || '');
+  const [email, setEmail] = useState(() => currentUser?.email || '');
+  const [firstName, setFirstName] = useState(() => currentUser?.firstName || '');
+  const [lastName, setLastName] = useState(() => currentUser?.lastName || '');
+  const [savedProfile, setSavedProfile] = useState(() => ({
+    username: currentUser?.username || currentUser?.name || '',
+    email: currentUser?.email || '',
+    firstName: currentUser?.firstName || '',
+    lastName: currentUser?.lastName || '',
+    fullName: currentUser?.fullName || currentUser?.name || '',
+  }));
   const [isSaving, setIsSaving] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [pendingProfileSave, setPendingProfileSave] = useState(null);
 
   // Sync state if currentUser prop updates
   useEffect(() => {
     if (currentUser) {
+      setSavedProfile({
+        username: currentUser.username || currentUser.name || '',
+        email: currentUser.email || '',
+        firstName: currentUser.firstName || '',
+        lastName: currentUser.lastName || '',
+        fullName: currentUser.fullName || currentUser.name || '',
+      });
       if (currentUser.username) setUsername(currentUser.username);
       if (currentUser.email) setEmail(currentUser.email);
-      if (currentUser.firstName) setFirstName(currentUser.firstName);
-      if (currentUser.lastName) setLastName(currentUser.lastName);
+      if (currentUser.firstName !== undefined) setFirstName(currentUser.firstName);
+      if (currentUser.lastName !== undefined) setLastName(currentUser.lastName);
     }
   }, [currentUser]);
 
-  const triggerToast = (msg) => {
+  const triggerToast = (msg, type = 'success') => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 3000);
+    setToastType(type);
+    setTimeout(() => setToastMessage(''), 4000);
   };
 
   const handleSaveProfile = (e) => {
     e.preventDefault();
-    if (!username || !email || !firstName || !lastName) {
-      triggerToast('Please fill out all required fields (*).');
+    if (!firstName.trim() || !lastName.trim()) {
+      triggerToast('Please fill out first name and last name.', 'error');
       return;
     }
-    setIsSaving(true);
-    authService.updateUserProfile({
-      username: username.trim(),
-      email: email.trim(),
+
+    const currentName = currentUser?.fullName
+      || [currentUser?.firstName, currentUser?.lastName].filter(Boolean).join(' ').trim()
+      || currentUser?.name
+      || '';
+    const nextName = `${firstName.trim()} ${lastName.trim()}`.trim();
+    const currentUsername = currentUser?.username || '';
+    const nextUsername = username.trim();
+    const changes = [];
+
+    if (currentName !== nextName) {
+      changes.push({ label: 'Name', prefix: '', currentValue: currentName, nextValue: nextName });
+    }
+    if (currentUsername !== nextUsername) {
+      changes.push({ label: 'Username', prefix: '@', currentValue: currentUsername, nextValue: nextUsername });
+    }
+
+    if (changes.length === 0) {
+      triggerToast('No profile changes to save.', 'error');
+      return;
+    }
+
+    setPendingProfileSave({
+      changes,
+      username: nextUsername,
       firstName: firstName.trim(),
       lastName: lastName.trim(),
     });
-    setTimeout(() => {
-      setIsSaving(false);
-      triggerToast('Account information saved successfully.');
-    }, 300);
   };
 
-  const handlePasswordSubmit = (e) => {
+  const confirmSaveProfile = async () => {
+    if (!pendingProfileSave || isSaving) return;
+    setIsSaving(true);
+    try {
+      const result = await authService.updateUserProfile({
+        username: pendingProfileSave.username,
+        firstName: pendingProfileSave.firstName,
+        lastName: pendingProfileSave.lastName,
+      });
+      const updatedUser = result?.user;
+      if (updatedUser) {
+        setUsername(updatedUser.username || pendingProfileSave.username);
+        setFirstName(updatedUser.firstName || pendingProfileSave.firstName);
+        setLastName(updatedUser.lastName || pendingProfileSave.lastName);
+        setSavedProfile({
+          username: updatedUser.username || pendingProfileSave.username,
+          email: updatedUser.email || savedProfile.email,
+          firstName: updatedUser.firstName || pendingProfileSave.firstName,
+          lastName: updatedUser.lastName || pendingProfileSave.lastName,
+          fullName: updatedUser.fullName || `${pendingProfileSave.firstName} ${pendingProfileSave.lastName}`.trim(),
+        });
+        onProfileUpdated?.(updatedUser);
+      }
+      triggerToast('Account information saved successfully.', 'success');
+    } catch (err) {
+      triggerToast(err?.message || 'Failed to save account information.', 'error');
+    } finally {
+      setIsSaving(false);
+      setPendingProfileSave(null);
+    }
+  };
+
+  const handlePasswordSubmit = async (e) => {
     e.preventDefault();
-    if (!currentPass || !newPass) return;
-    setShowPasswordModal(false);
+    if (!currentPass.trim()) {
+      triggerToast('Please enter your current password.', 'error');
+      return;
+    }
+    if (!newPass || !confirmPass) {
+      triggerToast('Please enter both new password and confirmation password.', 'error');
+      return;
+    }
+    if (newPass !== confirmPass) {
+      triggerToast('New passwords do not match.', 'error');
+      return;
+    }
+    if (newPass.length < 8 || !/[a-z]/i.test(newPass) || !/\d/.test(newPass)) {
+      triggerToast('New password does not meet the required security requirements.', 'error');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      // Direct authenticated password update: verifies current password & updates credentials
+      await authService.changePassword(newPass, currentPass.trim());
+      setShowPasswordModal(false);
+      setShowPasswordSuccessModal(true);
+      triggerToast('Password changed successfully.', 'success');
+    } catch (err) {
+      triggerToast(normalizeAuthErrorMessage(err, 'change-password'), 'error');
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  const handleStaySignedIn = async () => {
+    if (isCheckingSession) return;
+    setIsCheckingSession(true);
+    setShowPasswordSuccessModal(false);
     setCurrentPass('');
     setNewPass('');
-    triggerToast('Password updated successfully.');
+    setConfirmPass('');
+    setShowCurrentPass(false);
+    setShowNewPass(false);
+    setShowConfirmPass(false);
+    triggerToast('Password updated successfully. You remain signed in.', 'success');
+    setIsCheckingSession(false);
+  };
+
+  const handleSignInAgain = async () => {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
+    try {
+      setShowPasswordSuccessModal(false);
+      await onLogout?.();
+    } finally {
+      setIsSigningOut(false);
+    }
   };
 
   const handleClearData = () => {
@@ -96,24 +227,71 @@ export default function ProfileView({
 
   return (
     <div className="profile-view-container">
-      {/* Toast Notice */}
+      {/* ── TOP EXTENSION NOTIFICATION BANNER (Elevated above modals & UI content) ── */}
       {toastMessage && (
-        <div className="settings-toast-banner">
-          <CheckCircle2 size={14} color="#10B981" />
-          <span>{toastMessage}</span>
+        <div
+          className={`settings-toast-banner ${toastType || 'success'}`}
+          role="alert"
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 10001,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '9px 12px',
+            borderRadius: '10px',
+            marginBottom: '4px',
+            boxShadow: '0 4px 14px rgba(0, 0, 0, 0.16)'
+          }}
+        >
+          {toastType === 'error' ? (
+            <X size={15} color="#EF4444" style={{ flexShrink: 0 }} />
+          ) : toastType === 'warning' ? (
+            <AlertTriangle size={15} color="#F59E0B" style={{ flexShrink: 0 }} />
+          ) : (
+            <CheckCircle2 size={15} color="#10B981" style={{ flexShrink: 0 }} />
+          )}
+          <span style={{ flex: 1, fontSize: '12px', fontWeight: 600, lineHeight: 1.35 }}>{toastMessage}</span>
+          <button
+            type="button"
+            onClick={() => setToastMessage('')}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'currentColor',
+              opacity: 0.7,
+              cursor: 'pointer',
+              padding: '2px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '4px'
+            }}
+            aria-label="Dismiss notification"
+          >
+            <X size={13} />
+          </button>
         </div>
       )}
 
       {/* ── COMPACT ACCOUNT HEADER (ALWAYS VISIBLE AT TOP) ── */}
       <div className="compact-profile-header">
         <div className="profile-avatar-lg">
-          {(username || 'U').charAt(0).toUpperCase()}
+          {(savedProfile.firstName || savedProfile.username || savedProfile.email || 'U').charAt(0).toUpperCase()}
         </div>
         <div className="profile-details">
           <span className="profile-name">
-            @{username || 'claire123'}
+            {savedProfile.firstName || savedProfile.lastName
+              ? `${savedProfile.firstName} ${savedProfile.lastName}`.trim()
+              : savedProfile.fullName || `@${savedProfile.username || savedProfile.email?.split('@')[0] || 'user'}`}
           </span>
-          <span className="profile-email">{email || 'user@test.com'}</span>
+          <span className="profile-email">{savedProfile.email || ''}</span>
+          {savedProfile.username && (
+            <span style={{ fontSize: '11px', color: 'var(--accent-color)', fontWeight: 600, marginTop: '1px' }}>
+              @{savedProfile.username}
+            </span>
+          )}
         </div>
       </div>
 
@@ -293,9 +471,9 @@ export default function ProfileView({
                     id="edit-email"
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    readOnly
+                    style={{ opacity: 0.8, cursor: 'not-allowed' }}
                     placeholder="user@example.com"
-                    required
                   />
                 </div>
               </div>
@@ -406,35 +584,161 @@ export default function ProfileView({
             <form onSubmit={handlePasswordSubmit} className="password-modal-form">
               <div className="modal-field">
                 <label>Current Password</label>
-                <input
-                  type="password"
-                  placeholder="••••••••"
-                  value={currentPass}
-                  onChange={(e) => setCurrentPass(e.target.value)}
-                  required
-                />
+                <div className="password-input-wrap">
+                  <input
+                    type={showCurrentPass ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    value={currentPass}
+                    onChange={(e) => setCurrentPass(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle-btn"
+                    onClick={() => setShowCurrentPass(!showCurrentPass)}
+                    aria-label={showCurrentPass ? 'Hide password' : 'Show password'}
+                  >
+                    {showCurrentPass ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
               </div>
 
               <div className="modal-field">
                 <label>New Password</label>
-                <input
-                  type="password"
-                  placeholder="••••••••"
-                  value={newPass}
-                  onChange={(e) => setNewPass(e.target.value)}
-                  required
-                />
+                <div className="password-input-wrap">
+                  <input
+                    type={showNewPass ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    value={newPass}
+                    onChange={(e) => setNewPass(e.target.value)}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle-btn"
+                    onClick={() => setShowNewPass(!showNewPass)}
+                    aria-label={showNewPass ? 'Hide password' : 'Show password'}
+                  >
+                    {showNewPass ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="modal-field">
+                <label>Confirm New Password</label>
+                <div className="password-input-wrap">
+                  <input
+                    type={showConfirmPass ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    value={confirmPass}
+                    onChange={(e) => setConfirmPass(e.target.value)}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle-btn"
+                    onClick={() => setShowConfirmPass(!showConfirmPass)}
+                    aria-label={showConfirmPass ? 'Hide password' : 'Show password'}
+                  >
+                    {showConfirmPass ? <EyeOff size={15} /> : <Eye size={15} />}
+                  </button>
+                </div>
               </div>
 
               <div className="modal-actions">
                 <button type="button" className="profile-action-btn secondary small" onClick={() => setShowPasswordModal(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="profile-action-btn primary small">
-                  Save Password
+                <button type="submit" className="profile-action-btn primary small" disabled={isChangingPassword}>
+                  {isChangingPassword ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      <Loader2 size={13} className="extension-modal-spinner" />
+                      Saving...
+                    </span>
+                  ) : (
+                    'Save Password'
+                  )}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {pendingProfileSave && (
+        <ProfileChangesConfirmationModal
+          changes={pendingProfileSave.changes}
+          onCancel={() => setPendingProfileSave(null)}
+          onConfirm={confirmSaveProfile}
+        />
+      )}
+
+      {showVerificationModal && (
+        <VerificationCodeModal
+          isOpen={showVerificationModal}
+          email={savedProfile.email}
+          purpose="change_password"
+          onVerifySuccess={handleVerificationSuccess}
+          onCancel={() => setShowVerificationModal(false)}
+        />
+      )}
+
+      {/* Password Change Success Modal */}
+      {showPasswordSuccessModal && (
+        <div className="extension-modal-backdrop" role="presentation">
+          <div
+            className="extension-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="password-success-title"
+            style={{ maxWidth: '340px', width: '92%', padding: '20px' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <div style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                background: 'rgba(16, 185, 129, 0.12)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#10b981'
+              }}>
+                <CheckCircle2 size={18} />
+              </div>
+              <h2 id="password-success-title" style={{ fontSize: '14.5px', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                Password changed successfully.
+              </h2>
+            </div>
+
+            <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.4, margin: '0 0 16px 0' }}>
+              Your password has been updated.
+            </p>
+
+            <div className="extension-modal-actions" style={{ gap: '8px', flexDirection: 'column' }}>
+              <button
+                type="button"
+                className="extension-modal-button extension-modal-button-secondary"
+                onClick={handleStaySignedIn}
+                disabled={isCheckingSession || isSigningOut}
+                style={{ width: '100%', justifyContent: 'center' }}
+              >
+                {isCheckingSession ? 'Checking session...' : 'Stay Signed In'}
+              </button>
+              <button
+                type="button"
+                className="extension-modal-button extension-modal-button-primary"
+                onClick={handleSignInAgain}
+                disabled={isCheckingSession || isSigningOut}
+                style={{
+                  width: '100%',
+                  justifyContent: 'center',
+                  background: 'var(--accent-color, #4F46E5)',
+                  color: '#ffffff'
+                }}
+              >
+                {isSigningOut ? 'Signing out...' : 'Sign In Again'}
+              </button>
+            </div>
           </div>
         </div>
       )}

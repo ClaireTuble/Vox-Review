@@ -63,6 +63,7 @@ export default function Settings({ activeTab, setActiveTab, onSignOut }) {
           title="Security & Account Settings"
           subtitle="Manage Super Admin security controls, authentication password, and active session preferences."
           user={mockCurrentUser}
+          onNavigate={setActiveTab}
         />
 
         <section className="admin-content-grid">

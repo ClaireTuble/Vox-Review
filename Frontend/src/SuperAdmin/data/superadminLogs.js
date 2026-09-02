@@ -1,98 +1,27 @@
-export const mockSuperAdminActivityLogs = [
-  {
-    id: 'log_sa_106',
-    timestamp: 'Aug 14, 2026 5:45 PM',
-    email: 'admin@test.com',
-    action: 'Platform diagnostics viewed',
-    status: 'Warning',
-    eventType: 'Diagnostic',
-    device: 'Chrome / Windows',
-    ip: '127.0.0.1 (Local)',
-    details: 'Inspected Lazada extraction error stage',
-  },
-  {
-    id: 'log_sa_105',
-    timestamp: 'Aug 14, 2026 5:43 PM',
-    email: 'admin@test.com',
-    action: 'Viewed platform settings',
-    status: 'Successful',
-    eventType: 'Configuration',
-    device: 'Chrome / Windows',
-    ip: '127.0.0.1 (Local)',
-    details: 'Reviewed 4 platform configurations',
-  },
-  {
-    id: 'log_sa_104',
-    timestamp: 'Aug 14, 2026 5:41 PM',
-    email: 'admin@test.com',
-    action: 'Viewed user management',
-    status: 'Successful',
-    eventType: 'Access',
-    device: 'Chrome / Windows',
-    ip: '127.0.0.1 (Local)',
-    details: 'Monitored regular user activity logs',
-  },
-  {
-    id: 'log_sa_103',
-    timestamp: 'Aug 14, 2026 5:40 PM',
-    email: 'admin@test.com',
-    action: 'Super Admin login attempt',
-    status: 'Failed',
-    eventType: 'Authentication',
-    device: 'Chrome / Windows',
-    ip: '192.168.1.105',
-    details: 'Invalid password attempt detected',
-  },
-  {
-    id: 'log_sa_102',
-    timestamp: 'Aug 14, 2026 5:32 PM',
-    email: 'admin@test.com',
-    action: 'Super Admin login',
-    status: 'Successful',
-    eventType: 'Authentication',
-    device: 'Chrome / Windows',
-    ip: '127.0.0.1 (Local)',
-    details: 'Admin console session initialized',
-  },
-  {
-    id: 'log_sa_101',
-    timestamp: 'Aug 14, 2026 2:15 PM',
-    email: 'admin@voxreview.ai',
-    action: 'Logged out',
-    status: 'Successful',
-    eventType: 'Authentication',
-    device: 'Chrome / macOS',
-    ip: '112.198.45.12',
-    details: 'User initiated session sign out',
-  },
-  {
-    id: 'log_sa_100',
-    timestamp: 'Aug 13, 2026 9:04 AM',
-    email: 'admin@test.com',
-    action: 'Super Admin login',
-    status: 'Successful',
-    eventType: 'Authentication',
-    device: 'Edge / Windows',
-    ip: '127.0.0.1 (Local)',
-    details: 'Admin console session initialized',
-  },
-];
+import authService from '../../services/authService.js';
 
-export const mockSecurityNotifications = [
-  {
-    id: 'sec_notif_1',
-    type: 'alert',
-    title: 'Security Alert',
-    message: 'An unsuccessful Super Admin login attempt was detected.',
-    timestamp: 'Aug 14, 2026 5:40 PM',
-    ip: '192.168.1.105',
-  },
-  {
-    id: 'sec_notif_2',
-    type: 'info',
-    title: 'New Super Admin Login',
-    message: 'A Super Admin login was detected.',
-    timestamp: 'Aug 14, 2026 5:32 PM',
-    ip: '127.0.0.1 (Local)',
-  },
-];
+// Design/reference only; production logs must come from the backend.
+export const mockSuperAdminActivityLogs = [];
+export const mockSecurityNotifications = [];
+
+export async function fetchSuperAdminActivityLogs() {
+  try {
+    const token = await authService.getSuperAdminAccessToken();
+    const response = await fetch('http://localhost:5000/api/admin/audit-logs', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+
+    if (!response.ok) {
+      throw new Error('Unable to load admin activity logs.');
+    }
+
+    const payload = await response.json();
+    const logs = Array.isArray(payload?.logs) ? payload.logs : [];
+    const securityAlerts = Array.isArray(payload?.securityAlerts) ? payload.securityAlerts : [];
+
+    return { logs, securityAlerts };
+  } catch (error) {
+    console.warn('VoxReview: Super admin activity logs fetch failed:', error?.message || error);
+    return { logs: [], securityAlerts: [] };
+  }
+}

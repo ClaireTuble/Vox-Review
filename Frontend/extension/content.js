@@ -27,26 +27,27 @@ async function safeSendMessage(message) {
 // ── Auth Session Sync ────────────────────────────────────────────────────────
 // Only the regular user session is meant for the extension.
 // Super admin storage is written separately and is never forwarded.
-function syncUserAuthSession() {
-  try {
-    const raw = localStorage.getItem("user_auth_session");
-    const session = raw ? JSON.parse(raw) : null;
+// Forward central auth synchronization events from the web application.
+if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+  window.addEventListener("voxreview_auth_sync", (e) => {
+    const session = e.detail || null;
+    const validSession = session && session.user && session.token ? session : null;
     safeSendMessage({
       type: "userAuthSync",
-      session: session,
+      session: validSession,
     });
-  } catch (err) {
-    console.warn("VoxReview: Auth sync error", err.message);
-  }
-}
+  });
 
-// Automatically sync when on the web application domain (localhost / 127.0.0.1)
-if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-  syncUserAuthSession();
-  window.addEventListener("storage", (e) => {
-    if (e.key === "user_auth_session") {
-      syncUserAuthSession();
-    }
+  window.addEventListener("voxreview_health_check", async (event) => {
+    const request = event.detail || {};
+    const response = await safeSendMessage({
+      type: "healthCheck",
+      platform: request.platform,
+      requestId: request.requestId,
+    });
+    window.dispatchEvent(new CustomEvent("voxreview_health_check_result", {
+      detail: { requestId: request.requestId, ...(response || { ok: false, status: "Unavailable" }) },
+    }));
   });
 }
 
@@ -104,6 +105,17 @@ if (platform === "unknown") {
       const ratingFilter = Array.isArray(raw) ? "all" : (raw.ratingFilter || "all");
       const productUrl = Array.isArray(raw) ? window.location.href
         : (raw.productUrl || window.location.href);
+
+      // Decoupled Activity Dispatch: notify background as soon as product/place page is detected
+      if (isProductPage && platform) {
+        safeSendMessage({
+          type: "pageDetected",
+          platform: platform,
+          isProductPage: isProductPage,
+          productTitle: productTitle,
+          productUrl: productUrl,
+        });
+      }
 
       // Build a lightweight signature of the current visible state.
       // Only send a message to background when something actually changed.
@@ -209,6 +221,64 @@ if (platform === "unknown") {
   // Resets the dedup signature so the next scrapeAndSend() always sends,
   // even if the DOM hasn't changed since the last scrape.
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "healthCheck") {
+      const requestedPlatform = String(message.platform || "").toLowerCase();
+      if (requestedPlatform !== platform || typeof scrapeReviews !== "function") {
+        sendResponse({
+          ok: false,
+          platform: requestedPlatform,
+          status: typeof scrapeReviews === "function" ? "Warning" : "Not Implemented",
+          errorStage: "Platform Detection",
+          errorMessage: "The requested platform scraper is not available on this page.",
+        });
+        return;
+      }
+
+      Promise.resolve()
+        .then(() => scrapeReviews(platform))
+        .then((raw) => {
+          if (!raw) {
+            return {
+              ok: false,
+              platform,
+              status: "Error",
+              errorStage: "Scraper Execution",
+              errorMessage: "The scraper returned no result.",
+            };
+          }
+
+          const isProductPage = Array.isArray(raw) ? true : (raw.isProductPage ?? true);
+          const reviews = Array.isArray(raw) ? raw : (raw.reviews || []);
+          if (!isProductPage) {
+            return {
+              ok: true,
+              platform,
+              status: "Warning",
+              errorStage: "Page/Product Detection",
+              errorMessage: "The platform loaded, but no product or place page was detected.",
+            };
+          }
+
+          return {
+            ok: true,
+            platform,
+            status: reviews.length > 0 ? "Working" : "Warning",
+            lastSuccessfulStage: reviews.length > 0 ? "Data Transfer" : "Review Section Detection",
+            errorStage: reviews.length > 0 ? null : "Review Extraction",
+            errorMessage: reviews.length > 0 ? null : "Product or place page detected, but no reviews were extracted.",
+          };
+        })
+        .catch((error) => ({
+          ok: false,
+          platform,
+          status: "Error",
+          errorStage: "Scraper Execution",
+          errorMessage: error.message || "The scraper threw an error.",
+        }))
+        .then(sendResponse);
+      return true;
+    }
+
     if (message?.type === "rescanPage") {
       console.log("VoxReview: Manual rescan requested.");
       lastSentSignature = ""; // force re-send regardless of DOM changes

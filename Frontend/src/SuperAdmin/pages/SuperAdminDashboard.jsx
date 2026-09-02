@@ -7,13 +7,20 @@ import Platforms from './Platforms.jsx';
 import PlatformSettings from './PlatformSettings.jsx';
 import AdminActivityLogs from './AdminActivityLogs.jsx';
 import Settings from './Settings.jsx';
+import LogoutConfirmationModal from '../../components/LogoutConfirmationModal.jsx';
 
 export default function SuperAdminDashboard() {
   const navigate = useNavigate();
   const [activeAdminTab, setActiveAdminTab] = useState('overview');
+  const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
 
   const handleSignOut = () => {
-    authService.logout('superadmin');
+    setShowLogoutConfirmation(true);
+  };
+
+  const confirmSignOut = async () => {
+    await authService.logout('superadmin');
+    setShowLogoutConfirmation(false);
     navigate('/');
   };
 
@@ -32,9 +39,19 @@ export default function SuperAdminDashboard() {
         return <Settings activeTab={activeAdminTab} setActiveTab={setActiveAdminTab} onSignOut={handleSignOut} />;
       case 'overview':
       default:
-        return <Dashboard activeTab={activeAdminTab} setActiveTab={setActiveAdminTab} />;
+        return <Dashboard activeTab={activeAdminTab} setActiveTab={setActiveAdminTab} onSignOut={handleSignOut} />;
     }
   };
 
-  return renderActivePage();
+  return (
+    <>
+      {renderActivePage()}
+      {showLogoutConfirmation && (
+        <LogoutConfirmationModal
+          onCancel={() => setShowLogoutConfirmation(false)}
+          onConfirm={confirmSignOut}
+        />
+      )}
+    </>
+  );
 }

@@ -8,6 +8,36 @@ export function getCachedPlatformHealth() {
   return cachedPlatforms;
 }
 
+export function requestPlatformHealth(platform) {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('Health checks require a browser page.'));
+  }
+
+  const requestId = `${platform}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const onResult = (event) => {
+      if (event.detail?.requestId !== requestId) return;
+      clearTimeout(timeoutId);
+      window.removeEventListener('voxreview_health_check_result', onResult);
+      if (event.detail?.ok === false && !event.detail?.status) {
+        reject(new Error('The extension could not run the health check.'));
+      } else {
+        resolve(event.detail);
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      window.removeEventListener('voxreview_health_check_result', onResult);
+      reject(new Error('The extension health check timed out.'));
+    }, 50_000);
+
+    window.addEventListener('voxreview_health_check_result', onResult);
+    window.dispatchEvent(new CustomEvent('voxreview_health_check', {
+      detail: { platform, requestId },
+    }));
+  });
+}
+
 const BACKEND_URLS = ['http://localhost:5000', 'http://127.0.0.1:5000'];
 
 /**

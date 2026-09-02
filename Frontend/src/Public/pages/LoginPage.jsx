@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, User, Zap, AlertTriangle, Eye, EyeOff, Globe, BookmarkCheck, Sparkles, Shield } from 'lucide-react';
 import { logoDark } from '../../utils/useVoxLogo.js';
-import authService, { openWebAppAuth } from '../../services/authService.js';
+import authService, { normalizeAuthErrorMessage, openWebAppAuth } from '../../services/authService.js';
 import '../css/AuthModern.css';
+
+const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value || '').trim());
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -27,8 +29,12 @@ export default function LoginPage() {
     setErrorMessage('');
     setSuccessMessage('');
 
-    if (!email || !password) {
-      setErrorMessage('Please fill in both email and password.');
+    if (!isValidEmail(email)) {
+      setErrorMessage('Please enter a valid email address.');
+      return;
+    }
+    if (!password) {
+      setErrorMessage('Incorrect email or password. Please check your credentials and try again.');
       return;
     }
 
@@ -50,7 +56,7 @@ export default function LoginPage() {
       }
     } catch (err) {
       setIsSubmitting(false);
-      setErrorMessage(err.message || 'Authentication failed.');
+      setErrorMessage(normalizeAuthErrorMessage(err, 'login'));
     }
   };
 

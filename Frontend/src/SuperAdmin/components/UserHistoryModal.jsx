@@ -28,7 +28,7 @@ function formatDateTime(isoString) {
 export default function UserHistoryModal({ user, onClose }) {
   if (!user) return null;
 
-  const activities = user.activities || [];
+  const activities = (user.activities || []).slice(0, 7);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>

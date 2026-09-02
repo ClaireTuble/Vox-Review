@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ShieldCheck, ShieldAlert, Search, Filter, AlertTriangle, Activity, Laptop, Clock } from 'lucide-react';
 import Header from '../components/Header.jsx';
 import Sidebar from '../components/Sidebar.jsx';
 import TopActions from '../components/TopActions.jsx';
-import { mockSuperAdminActivityLogs, mockSecurityNotifications } from '../data/superadminLogs.js';
+import { fetchSuperAdminActivityLogs } from '../data/superadminLogs.js';
 import { mockCurrentUser } from '../data/users.js';
 import '../css/dashboard.css';
 import '../css/sidebar.css';
@@ -16,9 +16,26 @@ export default function AdminActivityLogs({ activeTab, setActiveTab, onSignOut }
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('All');
   const [selectedType, setSelectedType] = useState('All');
+  const [logs, setLogs] = useState([]);
+  const [securityAlerts, setSecurityAlerts] = useState([]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function load() {
+      const { logs: nextLogs, securityAlerts: nextSecurityAlerts } = await fetchSuperAdminActivityLogs();
+      if (mounted) {
+        setLogs(Array.isArray(nextLogs) ? nextLogs : []);
+        setSecurityAlerts(Array.isArray(nextSecurityAlerts) ? nextSecurityAlerts : []);
+      }
+    }
+
+    load();
+    return () => { mounted = false; };
+  }, []);
 
   // Filter logs based on search query, status, and event type
-  const filteredLogs = mockSuperAdminActivityLogs.filter((log) => {
+  const filteredLogs = logs.filter((log) => {
     const matchesSearch =
       log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
       log.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -40,6 +57,7 @@ export default function AdminActivityLogs({ activeTab, setActiveTab, onSignOut }
           title="Admin Activity Logs"
           subtitle="Audit log of Super Admin authentication history, security alerts, and system configuration actions."
           user={mockCurrentUser}
+          onNavigate={setActiveTab}
         />
 
         <section className="admin-content-grid">
@@ -51,7 +69,7 @@ export default function AdminActivityLogs({ activeTab, setActiveTab, onSignOut }
 
             {/* Security Alerts Summary Row */}
             <div className="security-alerts-banner-row">
-              {mockSecurityNotifications.map((notif) => (
+              {securityAlerts.map((notif) => (
                 <div key={notif.id} className={`security-alert-box alert-${notif.type}`}>
                   {notif.type === 'alert' ? (
                     <AlertTriangle size={18} className="alert-icon-danger" />

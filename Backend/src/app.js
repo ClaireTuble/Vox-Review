@@ -4,6 +4,8 @@ import supabase from "./config/supabase.js";
 import healthRoutes from "./routes/healthRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import userActivityRoutes from "./routes/userActivityRoutes.js";
+import userProfileRoutes from "./routes/userProfileRoutes.js";
+import verificationRoutes from "./routes/verificationRoutes.js";
 
 const app = express();
 
@@ -15,6 +17,8 @@ app.use(express.json());
 app.use("/api/health", healthRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/user/activity", userActivityRoutes);
+app.use("/api/user", userProfileRoutes);
+app.use("/api/user", verificationRoutes);
 
 // Test Route
 app.get("/", (req, res) => {

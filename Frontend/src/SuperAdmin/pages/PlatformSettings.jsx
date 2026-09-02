@@ -77,6 +77,7 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
           title="Platform Settings"
           subtitle="Monitor code-managed platform integration settings, scraper limits, and NLP analysis parameters."
           user={mockCurrentUser}
+          onNavigate={setActiveTab}
         />
 
         <section className="admin-content-grid">

@@ -11,9 +11,19 @@ const PLATFORM_BADGE_STYLES = {
 };
 
 export default function UserRow({ user, onOpenHistory }) {
-  const statusStyle = user.status === 'Pending'
-    ? { color: '#fbbf24' }   // amber for pending
-    : { color: '#86efac' };  // green for active
+  const accountStatus = user.account_status || user.status || 'Active';
+  const currentStatus = user.current_status || 'Offline';
+  const lastSeenText = user.last_seen_at
+    ? user.last_seen || new Date(user.last_seen_at).toLocaleString()
+    : 'Never';
+
+  const accountStyle = accountStatus === 'Inactive'
+    ? { color: '#fbbf24' }
+    : { color: '#86efac' };
+
+  const currentStyle = currentStatus === 'Online'
+    ? { color: '#34d399' }
+    : { color: '#94a3b8' };
 
   const activities = user.activities || [];
   const uniquePlatforms = Array.from(new Set(activities.map((a) => a.platform))).filter(Boolean);
@@ -23,20 +33,27 @@ export default function UserRow({ user, onOpenHistory }) {
       <td style={{ fontFamily: 'monospace', color: '#94a3b8' }}>{user.user_id}</td>
       <td>
         <div className="table-user-cell">
-          <strong>{user.full_name || 'Unnamed user'}</strong>
-          <span>{user.email}</span>
+          <strong style={{ color: 'var(--accent-color, #818cf8)' }}>@{user.username || user.email?.split('@')[0] || 'user'}</strong>
+          <span>{user.full_name || 'Unnamed user'}</span>
+          <span style={{ fontSize: '0.78rem', opacity: 0.7 }}>{user.email}</span>
         </div>
       </td>
 
       <td>{user.role}</td>
       <td>
-        <span className="status-dot-active" style={statusStyle}>
+        <span className="status-dot-active" style={accountStyle}>
           <CircleDot size={10} />
-          {user.status || 'Active'}
+          {accountStatus}
         </span>
       </td>
+      <td>
+        <span className="status-dot-active" style={currentStyle}>
+          <CircleDot size={10} />
+          {currentStatus}
+        </span>
+      </td>
+      <td style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>{lastSeenText}</td>
 
-      {/* Platforms Used Column — Styled exactly as in the requested photo */}
       <td>
         {uniquePlatforms.length > 0 ? (
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -74,7 +91,6 @@ export default function UserRow({ user, onOpenHistory }) {
 
       <td>{user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}</td>
 
-      {/* Rightmost Action Column: View History */}
       <td>
         <button
           className="btn-view-history"

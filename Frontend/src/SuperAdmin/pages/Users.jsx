@@ -58,6 +58,7 @@ export default function Users({ activeTab, setActiveTab, onSignOut }) {
           title="Manage Users"
           subtitle="View and monitor regular VoxReview users and their platform activity."
           user={mockCurrentUser}
+          onNavigate={setActiveTab}
         />
 
         <section className="admin-content-grid">
@@ -77,6 +78,8 @@ export default function Users({ activeTab, setActiveTab, onSignOut }) {
                     <th>Name / Email</th>
                     <th>Role</th>
                     <th>Account Status</th>
+                    <th>Current Status</th>
+                    <th>Last Seen</th>
                     <th>Platforms Used</th>
                     <th>Registered</th>
                     <th>Actions</th>
@@ -84,13 +87,13 @@ export default function Users({ activeTab, setActiveTab, onSignOut }) {
                 </thead>
                 <tbody>
                   {isLoading && (
-                    <tr><td colSpan="7">Loading users...</td></tr>
+                    <tr><td colSpan="9">Loading users...</td></tr>
                   )}
                   {!isLoading && errorMessage && (
-                    <tr><td colSpan="7">{errorMessage}</td></tr>
+                    <tr><td colSpan="9">{errorMessage}</td></tr>
                   )}
                   {!isLoading && !errorMessage && users.length === 0 && (
-                    <tr><td colSpan="7">No users registered yet.</td></tr>
+                    <tr><td colSpan="9">No users registered yet.</td></tr>
                   )}
                   {!isLoading && !errorMessage && users.map((user) => (
                     <UserRow

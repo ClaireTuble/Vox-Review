@@ -9,6 +9,7 @@ import ProfileView from '../components/ProfileView.jsx';
 import BottomNavBar from '../components/BottomNavBar.jsx';
 import UnsupportedSiteView from '../components/UnsupportedSiteView.jsx';
 import NoReviewsView from '../components/NoReviewsView.jsx';
+import LogoutConfirmationModalExtension from '../components/LogoutConfirmationModalExtension.jsx';
 import '../css/PopupPage.css';
 
 /**
@@ -65,6 +66,7 @@ export default function PopupPage() {
 
   // Synchronized authenticated user state
   const [currentUser, setCurrentUser] = useState(() => authService.getCurrentUser());
+  const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
   const isLoggedIn = !!currentUser;
 
   const [theme, setTheme] = useState(() => localStorage.getItem('voxreview-theme') || 'light');
@@ -145,36 +147,27 @@ export default function PopupPage() {
 
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       // 2. Initial load from storage on popup mount
-      chrome.storage.local.get(['voxreviewLastScrape', 'voxreviewSiteStatus', 'voxreview_auth_session'], (result) => {
+      chrome.storage.local.get(['voxreviewLastScrape', 'voxreviewSiteStatus', 'voxreview_auth_session'], async (result) => {
         console.log('Popup loaded storage:', result?.voxreviewLastScrape);
         syncScrapeData(result?.voxreviewLastScrape);
 
         const siteStatus = result?.voxreviewSiteStatus;
-        // Only apply the stored unsupported flag if the URL-based check
-        // didn't already determine this is a supported site.
-        // Since chrome.tabs.query is async, urlBasedPlatform may still be
-        // 'unknown' at this point if the tabs callback hasn't fired yet.
-        // In that case, we defer to the storage value — but it will be
-        // corrected when the tabs callback fires (which sets the
-        // authoritative value).
         if (siteStatus?.unsupported === true) {
-          setIsSiteUnsupported((prev) => {
-            // If the URL check has already set it to false, keep it false
-            return prev;
-          });
+          setIsSiteUnsupported((prev) => prev);
         } else if (siteStatus?.unsupported === false) {
           setIsSiteUnsupported(false);
         }
 
-        // Synchronize auth session from chrome.storage.local
-        if (result?.voxreview_auth_session) {
-          const authSession = result.voxreview_auth_session;
-          if (authSession?.user) {
-            authService.setSession(authSession);
-            setCurrentUser(authSession.user);
+        const extSession = result?.voxreview_auth_session;
+        if (extSession?.user && extSession?.token) {
+          authService.setSession(extSession);
+          setCurrentUser(extSession.user);
+
+          const liveUser = await authService.refreshCurrentUserProfile();
+          if (liveUser) {
+            setCurrentUser(liveUser);
           }
-        } else if (result?.voxreview_auth_session === null) {
-          authService.logout();
+        } else {
           setCurrentUser(null);
         }
       });
@@ -183,12 +176,18 @@ export default function PopupPage() {
       const handleStorageChange = (changes, areaName) => {
         if (areaName !== 'local') return;
 
-        // Synchronize auth session state automatically in real-time
         if (changes.voxreview_auth_session) {
           const newSession = changes.voxreview_auth_session.newValue;
           if (newSession && newSession.user) {
             authService.setSession(newSession);
             setCurrentUser(newSession.user);
+
+            authService.refreshCurrentUserProfile().then((liveUser) => {
+              if (liveUser) {
+                setCurrentUser(liveUser);
+              }
+            }).catch(() => {});
+
             setAuthToastMessage("You're now signed in.");
             setTimeout(() => setAuthToastMessage(''), 4000);
           } else {
@@ -250,9 +249,14 @@ export default function PopupPage() {
 
   // Logout clears session and notifies extension to return to Guest Mode
   const handleLogout = () => {
-    authService.logout();
+    setShowLogoutConfirmation(true);
+  };
+
+  const confirmLogout = async () => {
+    await authService.logout();
     setCurrentUser(null);
     setAuthToastMessage('');
+    setShowLogoutConfirmation(false);
   };
 
   const handleSelectSavedItem = () => {
@@ -436,6 +440,7 @@ export default function PopupPage() {
               onLoginClick={handleOpenLogin}
               onRegisterClick={handleOpenRegister}
               onLogout={handleLogout}
+              onProfileUpdated={setCurrentUser}
               theme={theme}
               onThemeToggle={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
             />
@@ -445,6 +450,12 @@ export default function PopupPage() {
         {/* Bottom Navigation */}
         <BottomNavBar activeTab={activeTab} onTabChange={setActiveTab} />
       </div>
+      {showLogoutConfirmation && (
+        <LogoutConfirmationModalExtension
+          onCancel={() => setShowLogoutConfirmation(false)}
+          onConfirm={confirmLogout}
+        />
+      )}
     </div>
   );
 }

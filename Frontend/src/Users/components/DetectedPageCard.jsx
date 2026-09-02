@@ -64,7 +64,7 @@ export default function DetectedPageCard({
                 <Globe size={11} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
                 {plat.label}
               </span>
-              <span className="page-category-tag">{category}</span>
+              <span className="page-category-tag" title={category}>{category}</span>
             </div>
 
             <h2 className="page-title-text" title={pageTitle}>
@@ -115,7 +115,7 @@ export default function DetectedPageCard({
               <Globe size={11} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
               {plat.label}
             </span>
-            <span className="page-category-tag">{category}</span>
+            <span className="page-category-tag" title={category}>{category}</span>
           </div>
 
           {/* Product Title */}

@@ -3,7 +3,7 @@ import { CheckCircle2, AlertCircle, Globe, Activity, Layers, Clock, ShieldCheck,
 import Header from '../components/Header.jsx';
 import Sidebar from '../components/Sidebar.jsx';
 import TopActions from '../components/TopActions.jsx';
-import { fetchPlatformHealth, getCachedPlatformHealth, FALLBACK_PLATFORMS } from '../data/platforms.js';
+import { fetchPlatformHealth, requestPlatformHealth, getCachedPlatformHealth, FALLBACK_PLATFORMS } from '../data/platforms.js';
 import { mockCurrentUser } from '../data/users.js';
 import '../css/dashboard.css';
 import '../css/sidebar.css';
@@ -30,20 +30,52 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
   const [platformLoading, setPlatformLoading] = useState({});
   const [backendAvailable, setBackendAvailable] = useState(true);
 
+  const getPlatformCode = (platform) => platform.platform || ({
+    Shopee: 'shopee',
+    Lazada: 'lazada',
+    'Google Maps': 'google',
+    'Google Play Store': 'googleplay',
+    Steam: 'steam',
+  }[platform.name]);
+
+  const checkPlatformHealth = async (platform) => {
+    if (platformLoading[platform.name]) return;
+    const platformCode = getPlatformCode(platform);
+    if (!platformCode) return;
+
+    setPlatformLoading((current) => ({ ...current, [platform.name]: true }));
+    try {
+      await requestPlatformHealth(platformCode);
+      const refreshedPlatforms = await fetchPlatformHealth();
+      setPlatforms(refreshedPlatforms);
+      setBackendAvailable(true);
+    } catch (err) {
+      console.warn('VoxReview: Active health check failed:', err.message);
+      setBackendAvailable(false);
+      setPlatforms((current) => current.map((item) => (
+        item.name === platform.name
+          ? { ...item, scrapingStatus: 'Unavailable', status: 'Unavailable' }
+          : item
+      )));
+    } finally {
+      setPlatformLoading((current) => {
+        const next = { ...current };
+        delete next[platform.name];
+        return next;
+      });
+    }
+  };
+
   useEffect(() => {
     let mounted = true;
 
     const loadHealth = async () => {
-      if (mounted) {
-        const loadingMap = {};
-        platforms.forEach((p) => { loadingMap[p.name] = true; });
-        setPlatformLoading(loadingMap);
-      }
-
       try {
         const data = await fetchPlatformHealth();
         if (mounted) {
-          setPlatforms(data);
+          if (Array.isArray(data) && data.length > 0) {
+            setPlatforms(data);
+          }
           setBackendAvailable(true);
         }
       } catch (err) {
@@ -52,7 +84,6 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
       } finally {
         if (mounted) {
           setLoading(false);
-          setPlatformLoading({});
         }
       }
     };
@@ -71,6 +102,7 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
           title="Supported Platforms"
           subtitle="Monitor platform integration health, scraping status, and pipeline diagnostics."
           user={mockCurrentUser}
+          onNavigate={setActiveTab}
         />
 
         <section className="admin-content-grid">
@@ -173,6 +205,25 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
                             Scraping: {platform.scrapingStatus || platform.status || 'Unavailable'}
                           </span>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => checkPlatformHealth(platform)}
+                          disabled={isPlatformChecking}
+                          style={{
+                            border: '1px solid rgba(148,163,184,0.35)',
+                            borderRadius: '6px',
+                            padding: '5px 9px',
+                            background: 'transparent',
+                            color: 'inherit',
+                            cursor: isPlatformChecking ? 'wait' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                          }}
+                        >
+                          {isPlatformChecking && <Loader2 size={12} className="spin-icon" />}
+                          {isPlatformChecking ? 'Checking...' : 'Check Health'}
+                        </button>
                       </div>
                     </div>
 

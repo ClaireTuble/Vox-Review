@@ -66,8 +66,14 @@ create table if not exists public.user_activities (
   auth_user_id uuid references auth.users(id) on delete cascade,
   platform text not null,
   activity_type text not null check (activity_type in ('Used', 'Analyzed')),
+  product_title text,
+  product_url text,
   created_at timestamp with time zone default now()
 );
+
+alter table public.user_activities
+  add column if not exists product_title text,
+  add column if not exists product_url text;
 
 create index if not exists idx_user_activities_user_id on public.user_activities(user_id);
 create index if not exists idx_user_activities_auth_user_id on public.user_activities(auth_user_id);

@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { WifiOff } from 'lucide-react';
 import authService from '../../services/authService.js';
 import Header from '../components/Header.jsx';
@@ -11,7 +10,7 @@ import PlatformUsageChart from '../components/PlatformUsageChart.jsx';
 import AnalysisActivityChart from '../components/AnalysisActivityChart.jsx';
 import RecentActivityFeed from '../components/RecentActivityFeed.jsx';
 import { mockCurrentUser } from '../data/users.js';
-import { fetchPlatformHealth, getCachedPlatformHealth, FALLBACK_PLATFORMS } from '../data/platforms.js';
+import { fetchPlatformHealth } from '../data/platforms.js';
 import '../css/dashboard.css';
 import '../css/sidebar.css';
 import '../css/header.css';
@@ -21,19 +20,12 @@ import '../css/responsive.css';
 
 const HEALTH_POLL_INTERVAL = 30_000;
 
-export default function Dashboard({ activeTab, setActiveTab }) {
-  const navigate = useNavigate();
-  const cachedData = getCachedPlatformHealth();
-  const [platforms, setPlatforms] = useState(cachedData || FALLBACK_PLATFORMS);
+export default function Dashboard({ activeTab, setActiveTab, onSignOut }) {
+  const [platforms, setPlatforms] = useState([]);
   const [backendAvailable, setBackendAvailable] = useState(true);
   const [dashboardStats, setDashboardStats] = useState(null);
   const [recentUsers, setRecentUsers] = useState([]);
   const [recentActivities, setRecentActivities] = useState([]);
-
-  const handleSignOut = () => {
-    authService.logout('superadmin');
-    navigate('/');
-  };
 
   useEffect(() => {
     let mounted = true;
@@ -51,6 +43,14 @@ export default function Dashboard({ activeTab, setActiveTab }) {
               setDashboardStats(data.stats);
               setRecentUsers(data.recentUsers || []);
               setRecentActivities(data.recentActivities || []);
+              const platformUsage = data.stats?.platformUsage || {};
+              setPlatforms((currentPlatforms) => currentPlatforms.map((platform) => {
+                const usageKey = platform.name || platform.platform;
+                const hasUsage = Object.prototype.hasOwnProperty.call(platformUsage, usageKey);
+                return hasUsage
+                  ? { ...platform, usageCount: platformUsage[usageKey] }
+                  : platform;
+              }));
             }
           }
         }
@@ -63,7 +63,19 @@ export default function Dashboard({ activeTab, setActiveTab }) {
       try {
         const data = await fetchPlatformHealth();
         if (mounted) {
-          setPlatforms(data);
+          setPlatforms((currentPlatforms) => data.map((healthPlatform) => {
+            const platformKey = healthPlatform.name || healthPlatform.platform;
+            const currentPlatform = currentPlatforms.find((platform) => (
+              (platform.name || platform.platform) === platformKey
+            ));
+            return {
+              ...currentPlatform,
+              ...healthPlatform,
+              ...(currentPlatform?.usageCount !== undefined && healthPlatform.usageCount === undefined
+                ? { usageCount: currentPlatform.usageCount }
+                : {}),
+            };
+          }));
           setBackendAvailable(true);
         }
       } catch (err) {
@@ -84,13 +96,14 @@ export default function Dashboard({ activeTab, setActiveTab }) {
 
   return (
     <div className="superadmin-page-container">
-      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} onSignOut={handleSignOut} />
+      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} onSignOut={onSignOut} />
 
       <main className="superadmin-viewport">
         <Header
           title="System Overview"
           subtitle="Monitor users, supported platforms, and review-analysis activity."
           user={mockCurrentUser}
+          onNavigate={setActiveTab}
         />
 
         <section className="admin-content-grid">
@@ -149,10 +162,10 @@ export default function Dashboard({ activeTab, setActiveTab }) {
               <div className="panel-header">
                 <div>
                   <h3>Analysis Activity</h3>
-                  <p className="panel-subtitle">Reviews analysed · last 7 days · demo data</p>
+                  <p className="panel-subtitle">Reviews analysed · last 7 days · live data</p>
                 </div>
               </div>
-              <AnalysisActivityChart />
+              <AnalysisActivityChart activity={dashboardStats?.analysisActivity || []} />
             </article>
           </div>
 

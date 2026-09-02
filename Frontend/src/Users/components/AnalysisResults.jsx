@@ -85,12 +85,12 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
     totalReviews: normalizedReviews.length > 0 ? normalizedReviews.length : 1420,
     dominantEmotion: { label: 'Happy', emoji: '😊', percentage: 45, confidence: '98.4%' },
     emotions: [
-      { id: 'angry', label: 'Angry', emoji: '😠', percentage: 18, count: 255, confidence: '96.7%', keywords: ['"terrible"', '"waste of money"', '"very disappointed"', '"muffled mic"'], color: '#EF4444' },
       { id: 'happy', label: 'Happy', emoji: '😊', percentage: 45, count: 639, confidence: '98.4%', keywords: ['"amazing ANC"', '"super comfortable"', '"battery lasts forever"', '"worth it"'], color: '#EAB308' },
-      { id: 'sarcastic', label: 'Sarcastic', emoji: '😒', percentage: 10, count: 142, confidence: '91.2%', keywords: ['"great if you love bricks"', '"brilliant case design"', '"sure why not"'], color: '#A855F7' },
-      { id: 'disgust', label: 'Disgust', emoji: '🤢', percentage: 12, count: 170, confidence: '94.5%', keywords: ['"sweaty ear pads"', '"smells like plastic"', '"sticky cushion"'], color: '#16A34A' },
       { id: 'sad', label: 'Sad', emoji: '😢', percentage: 8, count: 113, confidence: '89.6%', keywords: ['"headache after 1 hr"', '"squeezes too tight"', '"wanted to love these"'], color: '#3B82F6' },
-      { id: 'envy', label: 'Envy', emoji: '😔', percentage: 7, count: 101, confidence: '87.1%', keywords: ['"friend got black version"', '"looks way sleeker"', '"wish I bought dark"'], color: '#EC4899' },
+      { id: 'anger', label: 'Anger', emoji: '😠', percentage: 18, count: 255, confidence: '96.7%', keywords: ['"terrible"', '"waste of money"', '"very disappointed"', '"muffled mic"'], color: '#EF4444' },
+      { id: 'disgust', label: 'Disgust', emoji: '🤢', percentage: 12, count: 170, confidence: '94.5%', keywords: ['"sweaty ear pads"', '"smells like plastic"', '"sticky cushion"'], color: '#16A34A' },
+      { id: 'fear', label: 'Fear', emoji: '😨', percentage: 7, count: 101, confidence: '87.1%', keywords: ['"afraid it will break"', '"worried it is unsafe"', '"unsafe after one use"'], color: '#F97316' },
+      { id: 'sarcastic', label: 'Sarcastic', emoji: '😒', percentage: 10, count: 142, confidence: '91.2%', keywords: ['"great if you love bricks"', '"brilliant case design"', '"sure why not"'], color: '#A855F7' },
     ],
     drivers: [
       { id: 'battery', name: 'Battery Performance', score: 92, emotion: 'Happy', emoji: '😊', color: '#EAB308' },
@@ -115,15 +115,16 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
         })
       : [
           { id: 1, emotion: 'Happy', emoji: '😊', driver: 'Battery', text: 'Battery easily lasts 30+ hours of continuous travel ANC!', author: 'Review Source' },
-          { id: 2, emotion: 'Angry', emoji: '😠', driver: 'Microphone', text: 'Microphone is terrible and picks up every background noise during Zoom calls.', author: 'Review Source' },
+          { id: 2, emotion: 'Anger', emoji: '😠', driver: 'Microphone', text: 'Microphone is terrible and picks up every background noise during Zoom calls.', author: 'Review Source' },
           { id: 3, emotion: 'Sarcastic', emoji: '😒', driver: 'Case', text: 'Love carrying a giant suitcase just to store my headphones.', author: 'Review Source' },
           { id: 4, emotion: 'Disgust', emoji: '🤢', driver: 'Cushions', text: 'Ear cushion leather gets hot and sticky after 20 minutes.', author: 'Review Source' },
           { id: 5, emotion: 'Sad', emoji: '😢', driver: 'Comfort', text: 'Headband squeezes a bit too tight for long listening sessions.', author: 'Review Source' },
+          { id: 6, emotion: 'Fear', emoji: '😨', driver: 'Build', text: 'I am worried the product may break after just a few uses.', author: 'Review Source' },
         ],
   };
 
   const data = emotionData || defaultData;
-  const activeHover = hoveredEmotion || data.emotions[1];
+  const activeHover = hoveredEmotion || data.emotions[0];
   const radius = 50;
   const circumference = 2 * Math.PI * radius;
 
