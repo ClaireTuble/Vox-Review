@@ -152,6 +152,9 @@ async function reportUserActivityToBackend(platform, productTitle = "", productU
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("VoxReview installed");
+  if (typeof chrome !== "undefined" && chrome.sidePanel) {
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+  }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -189,6 +192,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // ── reviewsScraped ──────────────────────────────────────────────────────────
   if (message?.type === "reviewsScraped") {
+    console.log("[BACKGROUND] reviewsScraped received:", {
+      platform: message.platform,
+      reviewCount: Array.isArray(message.reviews) ? message.reviews.length : 0,
+      tabId: sender.tab?.id ?? null,
+    });
     const {
       platform,
       productTitle = "",
@@ -198,6 +206,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       reviews = [],
       url = "",
       ratingFilter = "all",
+      forceRefresh = false,
     } = message;
 
     if (!platform || !VALID_PLATFORMS.has(String(platform).toLowerCase())) {
@@ -248,13 +257,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const isDifferentProduct = currentScrape.productTitle && currentScrape.productTitle !== productTitle;
       const isDifferentUrl = currentScrape.url && pageUrl && currentScrape.url !== pageUrl;
       const isDifferentFilter = currentScrape.ratingFilter !== undefined && currentScrape.ratingFilter !== ratingFilter;
-      const productChanged = isDifferentProduct || isDifferentUrl || isDifferentFilter || !currentScrape.sessionId;
+      const productChanged = forceRefresh || isDifferentProduct || isDifferentUrl || isDifferentFilter || !currentScrape.sessionId;
 
       let finalReviews = reviews; // always replace on filter/product change
-      let sessionId = currentScrape.sessionId;
+      const sessionId = Date.now();
 
       if (productChanged) {
-        sessionId = Date.now();
         finalReviews = reviews; // clear old session reviews completely
       } else {
         // Same product & same filter: deduplicate & merge
@@ -283,6 +291,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       chrome.storage.local.set({ voxreviewLastScrape: scrapeData }, () => {
         console.log("Stored scrape data to chrome.storage.local:", scrapeData);
+        console.log("[BACKGROUND] storage updated:", { platform, reviewCount: finalReviews.length, tabId: scrapeData.tabId });
       });
     });
 
@@ -364,22 +373,83 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // ── rescanPage ──────────────────────────────────────────────────────────────
   if (message?.type === "rescanPage") {
-    // Forward rescan request to the content script on the active tab
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const tab = tabs?.[0];
-      if (!tab?.id) {
-        sendResponse({ ok: false, reason: "no active tab" });
-        return;
+    const scraperFileByPlatform = {
+      shopee: "scraper/platforms/shopee.js",
+      lazada: "scraper/platforms/lazada.js",
+      google: "scraper/platforms/google.js",
+      googleplay: "scraper/platforms/googlePlay.js",
+      steam: "scraper/platforms/steam.js",
+    };
+
+    const recoverContentScript = async (tabId) => {
+      if (!chrome.scripting?.executeScript) {
+        throw new Error("Content script is unavailable and scripting recovery is not supported.");
       }
-      chrome.tabs.sendMessage(tab.id, { type: "rescanPage" }, (response) => {
+
+      const platform = String(message.platform || "").toLowerCase();
+      const scraperFile = scraperFileByPlatform[platform];
+      if (!scraperFile) throw new Error("No scraper is configured for the current platform.");
+
+      let hasScraper = false;
+      try {
+        const result = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => typeof scrapeReviews === "function",
+        });
+        hasScraper = result?.[0]?.result === true;
+      } catch (error) {
+        console.warn("VoxReview: Could not inspect content-script state:", error.message);
+      }
+
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: hasScraper
+          ? ["content.js"]
+          : ["scraper/detector.js", scraperFile, "scraper/scraperManager.js", "content.js"],
+      });
+    };
+
+    const forwardToTab = (tabId) => {
+      console.log("[RESCAN] forwarding to tab:", { tabId, url: message.url, platform: message.platform });
+      chrome.tabs.sendMessage(tabId, { type: "rescanPage", url: message.url, platform: message.platform }, (response) => {
         if (chrome.runtime?.lastError) {
-          console.warn("VoxReview rescan error:", chrome.runtime.lastError.message);
-          sendResponse({ ok: false, reason: chrome.runtime.lastError.message });
+          const initialError = chrome.runtime.lastError.message;
+          console.warn("VoxReview rescan delivery failed:", initialError);
+          recoverContentScript(tabId)
+            .then(() => new Promise((resolve, reject) => {
+              chrome.tabs.sendMessage(tabId, { type: "rescanPage", url: message.url, platform: message.platform }, (retryResponse) => {
+                if (chrome.runtime?.lastError) reject(new Error(chrome.runtime.lastError.message));
+                else resolve(retryResponse || { ok: true, recovered: true });
+              });
+            }))
+            .then(sendResponse)
+            .catch((error) => sendResponse({ ok: false, reason: error.message || initialError }));
         } else {
+          console.log("[RESCAN] content script reached:", { tabId });
           sendResponse(response || { ok: true });
         }
       });
-    });
+    };
+
+    if (message.tabId) {
+      forwardToTab(message.tabId);
+    } else {
+      chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+        const tab = tabs?.[0];
+        if (!tab?.id) {
+          chrome.tabs.query({ active: true, currentWindow: true }, (fallbackTabs) => {
+            const fallbackTab = fallbackTabs?.[0];
+            if (!fallbackTab?.id) {
+              sendResponse({ ok: false, reason: "no active tab" });
+              return;
+            }
+            forwardToTab(fallbackTab.id);
+          });
+          return;
+        }
+        forwardToTab(tab.id);
+      });
+    }
     return true; // keep channel open for async sendResponse
   }
 

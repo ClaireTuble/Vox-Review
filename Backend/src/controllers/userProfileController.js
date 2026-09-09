@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { verificationService } from "../services/verificationService.js";
-import supabaseClient from "../config/supabase.js";
+import { passwordService } from "../services/passwordService.js";
 import { createAuditLog, extractClientIp, extractDeviceInfo } from "../utils/auditLogger.js";
 
 export async function getUserProfile(req, res) {
@@ -156,54 +155,20 @@ export async function updateUserProfile(req, res) {
  */
 export async function changePassword(req, res) {
   try {
-    const authUserId = req.authUser?.id;
-    const userEmail = req.authUser?.email;
-    if (!authUserId || !userEmail) {
-      return res.status(401).json({ success: false, error: "Authenticated user identity missing." });
-    }
-
-    const { currentPassword, newPassword } = req.body;
-    if (!currentPassword) {
-      return res.status(400).json({ success: false, error: "Current password is required." });
-    }
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ success: false, error: "New password must be at least 6 characters long." });
-    }
-
-    // 1. Verify current password against Supabase Auth
-    const { error: pwdErr } = await supabaseClient.auth.signInWithPassword({
-      email: userEmail,
-      password: currentPassword,
+    await passwordService.changePassword({
+      authUser: req.authUser,
+      currentPassword: req.body?.currentPassword,
+      newPassword: req.body?.newPassword,
     });
-
-    if (pwdErr) {
-      return res.status(400).json({
-        success: false,
-        error: "Current password is incorrect. Please check your password and try again.",
-      });
-    }
-
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-
-    // 2. Update password in Supabase Auth via Admin API
-    const { error: passwordUpdateErr } = await adminSupabase.auth.admin.updateUserById(
-      authUserId,
-      { password: newPassword }
-    );
-
-    if (passwordUpdateErr) {
-      console.error("Error updating password:", passwordUpdateErr);
-      return res.status(500).json({ success: false, error: passwordUpdateErr.message });
-    }
 
     return res.status(200).json({
       success: true,
       message: "Password updated successfully.",
     });
   } catch (err) {
+    if (err.statusCode === 400 || err.statusCode === 401) {
+      return res.status(err.statusCode).json({ success: false, error: err.message });
+    }
     console.error("Change password error:", err);
     return res.status(500).json({ success: false, error: err.message || "Failed to update password." });
   }

@@ -6,15 +6,13 @@ function detectPlatform() {
     const path = window.location.pathname.toLowerCase();
     const href = window.location.href.toLowerCase();
 
-    if (host === "store.steampowered.com" || host.endsWith(".steampowered.com")) {
-        const steamAppMatch = href.match(/https?:\/\/store\.steampowered\.com\/app\/(\d+)(?:\/|$)/i);
-        if (steamAppMatch && path.startsWith("/app/")) {
-            return "steam";
-        }
+    // Steam Store (store.steampowered.com)
+    if (host === "store.steampowered.com" || host.endsWith(".steampowered.com") || host.includes("steampowered.com")) {
+        return "steam";
     }
 
     // Google Play must be checked BEFORE generic Google to avoid mis-detection.
-    if (host === "play.google.com" || host.startsWith("play.google.")) {
+    if (host === "play.google.com" || host.startsWith("play.google.") || host.includes("play.google")) {
         return "googleplay";
     }
 
@@ -28,7 +26,7 @@ function detectPlatform() {
 
     // Google Maps: must be on a maps URL, not just any google.com page.
     if (
-        (host === "www.google.com" || host === "maps.google.com" || host.endsWith(".google.com") || host.endsWith(".google.com.ph")) &&
+        (host === "www.google.com" || host === "maps.google.com" || host.endsWith(".google.com") || host.endsWith(".google.com.ph") || host.includes("google.")) &&
         (path.startsWith("/maps") || host.startsWith("maps."))
     ) {
         return "google";

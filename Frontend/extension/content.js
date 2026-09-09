@@ -1,4 +1,8 @@
-console.log("VoxReview content loaded");
+if (globalThis.__voxreviewContentScriptInitialized) {
+  console.log("VoxReview content already initialized.");
+} else {
+  globalThis.__voxreviewContentScriptInitialized = true;
+  console.log("VoxReview content loaded");
 
 // ── Extension context guard ──────────────────────────────────────────────────
 function isExtensionContextValid() {
@@ -50,7 +54,6 @@ if (window.location.hostname === "localhost" || window.location.hostname === "12
     }));
   });
 }
-
 // ── Platform ─────────────────────────────────────────────────────────────────
 const platform = detectPlatform();
 console.log("VoxReview detected platform:", platform);
@@ -71,6 +74,7 @@ if (platform === "unknown") {
   // ── State tracking ─────────────────────────────────────────────────────────
   let lastSentSignature = ""; // tracks last sent (url + filter + reviewCount)
   let isScraping = false;
+  let rescanQueued = false;
   let debounceTimer = null;
 
   // Observer stays alive for the whole page session — NEVER disconnected
@@ -78,17 +82,24 @@ if (platform === "unknown") {
   let domObserver = null;
 
   // ── Core: scrape current DOM state and send if anything changed ─────────────
-  async function scrapeAndSend() {
+  async function scrapeAndSend(force = false) {
     if (!isExtensionContextValid()) {
       console.warn("VoxReview: Context gone, stopping observer.");
       if (domObserver) { domObserver.disconnect(); domObserver = null; }
       return;
     }
 
-    if (isScraping) return;
+    if (isScraping) {
+      if (force) rescanQueued = true;
+      return;
+    }
     isScraping = true;
+    if (force) lastSentSignature = "";
+    console.log("[SCRAPE] scrapeAndSend started", { platform, force });
 
     try {
+      console.log("[SCRAPE] scraper selected:", platform);
+      console.log("[SCRAPE] scraper started:", platform);
       const raw = (typeof scrapeReviews === "function")
         ? await scrapeReviews(platform)
         : null;
@@ -105,6 +116,7 @@ if (platform === "unknown") {
       const ratingFilter = Array.isArray(raw) ? "all" : (raw.ratingFilter || "all");
       const productUrl = Array.isArray(raw) ? window.location.href
         : (raw.productUrl || window.location.href);
+      console.log("[SCRAPE] reviews returned:", reviews.length);
 
       // Decoupled Activity Dispatch: notify background as soon as product/place page is detected
       if (isProductPage && platform) {
@@ -140,8 +152,9 @@ if (platform === "unknown") {
         `reviews:${reviews.length} url:${productUrl.slice(-40)}`
       );
 
-      await safeSendMessage({
+      const response = await safeSendMessage({
         type: "reviewsScraped",
+        forceRefresh: force,
         platform: platform,
         isProductPage: isProductPage,
         productTitle: productTitle,
@@ -152,6 +165,7 @@ if (platform === "unknown") {
         url: productUrl,
         reviews: reviews,   // always the FULL current visible set
       });
+      console.log("[SCRAPE] reviewsScraped sent:", response?.ok !== false);
 
     } catch (err) {
       console.error("VoxReview scrapeAndSend error:", err);
@@ -165,6 +179,10 @@ if (platform === "unknown") {
       });
     } finally {
       isScraping = false;
+      if (rescanQueued) {
+        rescanQueued = false;
+        setTimeout(() => scrapeAndSend(true), 0);
+      }
     }
   }
 
@@ -281,9 +299,11 @@ if (platform === "unknown") {
 
     if (message?.type === "rescanPage") {
       console.log("VoxReview: Manual rescan requested.");
-      lastSentSignature = ""; // force re-send regardless of DOM changes
-      scrapeAndSend();
-      sendResponse({ ok: true });
+      console.log("[RESCAN] content script reached:", { platform });
+      // Queue behind an in-flight scrape instead of dropping the user's request.
+      scrapeAndSend(true);
+      sendResponse({ ok: true, queued: isScraping });
     }
   });
+}
 }

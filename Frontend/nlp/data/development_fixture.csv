@@ -1,0 +1,31 @@
+review_id,raw_review,preprocessed_review,emotion,emotion_code,evaluator_notes,evaluator_id,evaluator_emotion,evaluator_emotion_code,final_emotion,final_emotion_code
+DEV_001,SOBRANG GANDAAAA!!! sulit na sulit 😍❤️,,Happy,1,Clear positive emotion. Repeated letters and emojis.,DEV_FIXTURE,Happy,1,Happy,1
+DEV_002,gr8 quality lng talaga! hnd ako pwedeng mag complain :),,Happy,1,"Text-speak (gr8) and abbreviations (lng, hnd). Emoticon.",DEV_FIXTURE,Happy,1,Happy,1
+DEV_003,excellent product! very nice ng packaging at ang quality talaga,,Happy,1,Pure positive. Mixed English-Tagalog (Taglish).,DEV_FIXTURE,Happy,1,Happy,1
+DEV_004,perfect parfect perfect 👍 worth every peso!,,Happy,1,"Misspelling (parfect), repeated word, thumbs up emoji.",DEV_FIXTURE,Happy,1,Happy,1
+DEV_005,"ung quality is amazing, ok na ok kami <3",,Happy,1,"Abbreviation (ung), slang (ok na ok), heart emoticon.",DEV_FIXTURE,Happy,1,Happy,1
+DEV_006,sakit sa ulo at hindi ko na maenjoy 😭😭😭,,Sad,2,Sad emotion with repeated emoji.,DEV_FIXTURE,Sad,2,Sad,2
+DEV_007,disappointing :( hnd talaga ang quality na inexpect ko,,Sad,2,Sad emoticon. Abbreviation (hnd). Mixed language.,DEV_FIXTURE,Sad,2,Sad,2
+DEV_008,really sad about this purchase basaag agad,,Sad,2,Straightforward sad emotion. Simple text.,DEV_FIXTURE,Sad,2,Sad,2
+DEV_009,"brokeeeeeen pagdating, very disappointing pala :'(",,Sad,2,Repeated letters (brokeeeeeen). Sad emoticon :'(,DEV_FIXTURE,Sad,2,Sad,2
+DEV_010,malungkot talaga. hindi worth it ang presyo 😢,,Sad,2,Taglish. Direct sad expression. Sad emoji.,DEV_FIXTURE,Sad,2,Sad,2
+DEV_011,GALIT NA GALIT AKO!!! ang bastos ng seller grrrr,,Anger,3,"Clear anger. Caps, repeated letters (grrrr).",DEV_FIXTURE,Anger,3,Anger,3
+DEV_012,"napaka-bastos, walang respect 😡😡 hindi ko accept ito!",,Anger,3,Angry emojis. Strong negative sentiment.,DEV_FIXTURE,Anger,3,Anger,3
+DEV_013,SCAM!!! hindi talaga yan ang lala ng kasinungalingan :@,,Anger,3,Accusatory. Anger emoticon :@,DEV_FIXTURE,Anger,3,Anger,3
+DEV_014,"furious sa seller, pwede bang mag request ng refund?! 😠",,Anger,3,Angry emoji. Demanding tone.,DEV_FIXTURE,Anger,3,Anger,3
+DEV_015,napakainis! ang mahal at pangittt pa ang quality,,Anger,3,Taglish. Misspelling (pangittt→pangit). Frustrated tone.,DEV_FIXTURE,Anger,3,Anger,3
+DEV_016,naninikip at mabaho yung product 😒 ew talaga,,Disgust,4,Disgusted emoji. Gross/disgusted reaction.,DEV_FIXTURE,Disgust,4,Disgust,4
+DEV_017,"disgusting quality, feels cheap and gross",,Disgust,4,Direct disgust words. Plain English.,DEV_FIXTURE,Disgust,4,Disgust,4
+DEV_018,yugggg hindi ako makatitig 😷 panget talaga,,Disgust,4,Repeated letter (yugggg). Sick emoji. Taglish.,DEV_FIXTURE,Disgust,4,Disgust,4
+DEV_019,"repulsive, di ko kayang i-display sa bahay",,Disgust,4,Strong negative. Abbreviation (di).,DEV_FIXTURE,Disgust,4,Disgust,4
+DEV_020,ang lalasap nito pangettttt talaga :/ waste of money,,Disgust,4,Repeated letters. Confused/disgusted emoticon :/,DEV_FIXTURE,Disgust,4,Disgust,4
+DEV_021,"baka masira agad, takot ako magamit nito 😨",,Fear,5,Fearful emoji. Worried about durability.,DEV_FIXTURE,Fear,5,Fear,5
+DEV_022,"unsafe, concerned sa potential hazard. hnd secure ito",,Fear,5,Safety concerns. Abbreviation (hnd).,DEV_FIXTURE,Fear,5,Fear,5
+DEV_023,frightening quality. worried ito may dangerous materials 😰,,Fear,5,Fear-related vocabulary. Anxious emoji.,DEV_FIXTURE,Fear,5,Fear,5
+DEV_024,takot na takot ako! baka damaged 😟 lng puwede gawin,,Fear,5,Repeated word (takot na takot). Abbreviation (lng).,DEV_FIXTURE,Fear,5,Fear,5
+DEV_025,"nervous about using this, seem risky talaga ang durability",,Fear,5,Mixed language. Concern about safety.,DEV_FIXTURE,Fear,5,Fear,5
+DEV_026,wow ang ganda naman talaga. basag pagdating. amazing 🙄,,Sarcastic,6,Clear sarcasm. Praise followed by negative reality.,DEV_FIXTURE,Sarcastic,6,Sarcastic,6
+DEV_027,perfect! :D hnd talaga yan ang sira naming natanggap,,Sarcastic,6,Sarcastic happy emoticon. Contradiction. Abbreviation (hnd).,DEV_FIXTURE,Sarcastic,6,Sarcastic,6
+DEV_028,"such wonderful quality, ok na ok kami sa defects lol",,Sarcastic,6,Sarcastic praise. Slang (ok na ok). Lol indicator.,DEV_FIXTURE,Sarcastic,6,Sarcastic,6
+DEV_029,amazing service! only took 3 weeks :) so fast talaga,,Sarcastic,6,Sarcastic about slowness. Happy emoticon used sarcastically.,DEV_FIXTURE,Sarcastic,6,Sarcastic,6
+DEV_030,best purchase ever! ... hindi lang talaga badtrip,,Sarcastic,6,Sarcasm with ellipsis. Slang (badtrip). Mixed language.,DEV_FIXTURE,Sarcastic,6,Sarcastic,6

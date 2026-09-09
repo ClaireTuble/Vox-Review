@@ -125,7 +125,17 @@ export async function getAdminUsers(req, res) {
       const activities = activitiesMap.get(user.user_id) || [];
       const sortedActivities = [...activities].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
       const lastSeenAt = sortedActivities[0]?.created_at ? new Date(sortedActivities[0].created_at) : null;
-      const accountStatus = user.status === "Inactive" ? "Inactive" : "Active";
+      
+      // Calculate Active/Inactive status based on last activity timestamp
+      // Active: activity within last 30 days | Inactive: no activity or activity older than 30 days
+      let accountStatus = "Inactive";
+      if (lastSeenAt) {
+        const now = new Date();
+        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+        const timeSinceLastActivity = now.getTime() - lastSeenAt.getTime();
+        accountStatus = timeSinceLastActivity <= thirtyDaysMs ? "Active" : "Inactive";
+      }
+      
       const now = Date.now();
       const isOnline = lastSeenAt && now - lastSeenAt.getTime() <= 5 * 60 * 1000;
 

@@ -13,9 +13,15 @@
 
   "permissions": [
     "activeTab",
+    "tabs",
     "storage",
-    "scripting"
+    "scripting",
+    "sidePanel"
   ],
+
+  "side_panel": {
+    "default_path": "popup.html"
+  },
 
   "host_permissions": [
     "http://localhost/*",
@@ -94,7 +100,8 @@
     },
     {
       "matches": [
-        "https://store.steampowered.com/app/*"
+        "https://store.steampowered.com/*",
+        "https://*.steampowered.com/*"
       ],
       "js": [
         "scraper/detector.js",

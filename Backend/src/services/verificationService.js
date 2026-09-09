@@ -61,7 +61,7 @@ function decryptPayload(encryptedStr) {
 /**
  * Send transactional email via Brevo API
  */
-async function sendBrevoEmail({ toEmail, subject, htmlContent }) {
+async function sendBrevoEmail({ toEmail, subject, htmlContent, textContent, errorMessage = "Failed to send verification email. Please try again later." }) {
   const brevoApiKey = process.env.BREVO_API_KEY;
   if (!brevoApiKey) {
     console.warn("[VerificationService] BREVO_API_KEY is missing. Email delivery is unavailable.");
@@ -83,19 +83,43 @@ async function sendBrevoEmail({ toEmail, subject, htmlContent }) {
       to: [{ email: toEmail }],
       subject: subject,
       htmlContent: htmlContent,
+      ...(textContent ? { textContent } : {}),
     }),
   });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     console.error("[VerificationService] Brevo API Error Status:", response.status, errorData.message || "");
-    throw new Error("Failed to send verification email. Please try again later.");
+    throw new Error(errorMessage);
   }
 
   return true;
 }
 
 export const verificationService = {
+  sendPasswordChangedNotification: async ({ email, userName }) => {
+    const greeting = userName ? `Hello ${userName},` : "Hello,";
+    const textContent = `${greeting}\n\nYour VoxReview account password was successfully changed.\n\nIf you made this change, no further action is needed.\n\nIf you did not make this change, please secure your account immediately.\n\n— VoxReview`;
+    const escapedUserName = userName
+      ? userName.replace(/[&<>'"]/g, (character) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          "'": "&#39;",
+          '"': "&quot;",
+        }[character]))
+      : "";
+    const htmlGreeting = escapedUserName ? `Hello ${escapedUserName},` : "Hello,";
+
+    await sendBrevoEmail({
+      toEmail: email,
+      subject: "Your VoxReview password was changed",
+      textContent,
+      htmlContent: `<p>${htmlGreeting}</p><p>Your VoxReview account password was successfully changed.</p><p>If you made this change, no further action is needed.</p><p>If you did not make this change, please secure your account immediately.</p><p>&mdash; VoxReview</p>`,
+      errorMessage: "Failed to send password-change notification.",
+    });
+  },
+
   /**
    * Request signup email verification code.
    * Securely stores encrypted pending signup details and sends Brevo email code.

@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import authService, { openWebAppAuth } from '../../services/authService.js';
+import { getAnalysisForPage, saveAnalysisForPage, getPageKey } from '../../services/pageAnalysisStorage.js';
 import Header from '../components/Header.jsx';
 import DetectedPageCard from '../components/DetectedPageCard.jsx';
 import AnalysisResults from '../components/AnalysisResults.jsx';
@@ -13,9 +14,30 @@ import LogoutConfirmationModalExtension from '../components/LogoutConfirmationMo
 import '../css/PopupPage.css';
 
 /**
+ * Resolves the currently active tab at the exact moment of execution.
+ * Prioritizes lastFocusedWindow (accurate for Side Panel & multi-window setups)
+ * with a fallback to currentWindow.
+ */
+async function resolveCurrentActiveTab() {
+  if (typeof chrome === 'undefined' || !chrome.tabs?.query) return null;
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+      if (tabs && tabs.length > 0 && tabs[0]?.id) {
+        resolve(tabs[0]);
+        return;
+      }
+      chrome.tabs.query({ active: true, currentWindow: true }, (fallbackTabs) => {
+        resolve(fallbackTabs?.[0] || null);
+      });
+    });
+  });
+}
+
+/**
  * General URL rule for website support detection.
  * Evaluates the hostname/URL of the active tab.
  * If the hostname is NOT in the supported list -> returns 'unknown'.
+ * Platform support is determined SOLELY by this detector.
  */
 function detectPlatformFromUrl(urlStr) {
   if (!urlStr) return 'unknown';
@@ -24,16 +46,13 @@ function detectPlatformFromUrl(urlStr) {
     const host = url.hostname.toLowerCase();
     const path = url.pathname.toLowerCase();
 
-    // Steam Store product pages only
-    if (host === 'store.steampowered.com' || host.endsWith('.steampowered.com')) {
-      const steamAppMatch = url.pathname.match(/^\/app\/(\d+)(?:\/|$)/i);
-      if (steamAppMatch) {
-        return 'steam';
-      }
+    // Steam Store (store.steampowered.com)
+    if (host === 'store.steampowered.com' || host.endsWith('.steampowered.com') || host.includes('steampowered.com')) {
+      return 'steam';
     }
 
     // Google Play Store
-    if (host === 'play.google.com' || host.startsWith('play.google.')) {
+    if (host === 'play.google.com' || host.startsWith('play.google.') || host.includes('play.google')) {
       return 'googleplay';
     }
 
@@ -49,7 +68,7 @@ function detectPlatformFromUrl(urlStr) {
 
     // Google Maps
     if (
-      (host === 'www.google.com' || host === 'maps.google.com' || host.endsWith('.google.com') || host.endsWith('.google.com.ph')) &&
+      (host === 'www.google.com' || host === 'maps.google.com' || host.endsWith('.google.com') || host.endsWith('.google.com.ph') || host.includes('google.')) &&
       (path.startsWith('/maps') || host.startsWith('maps.'))
     ) {
       return 'google';
@@ -72,8 +91,10 @@ export default function PopupPage() {
   const [theme, setTheme] = useState(() => localStorage.getItem('voxreview-theme') || 'light');
   const [authToastMessage, setAuthToastMessage] = useState('');
   const [activeTab, setActiveTab] = useState('analyze');
-  const [isSiteUnsupported, setIsSiteUnsupported] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState('idle');
+  const [activeTabUrl, setActiveTabUrl] = useState('');
+  const [hasResolvedActiveTab, setHasResolvedActiveTab] = useState(false);
+  const isSiteUnsupported = hasResolvedActiveTab && detectPlatformFromUrl(activeTabUrl) === 'unknown';
 
   // Scrape data read from chrome.storage.local (set by background.js)
   const [detectedPlatform, setDetectedPlatform] = useState('');
@@ -86,33 +107,117 @@ export default function PopupPage() {
   const [scrapedHasError, setScrapedHasError] = useState(false);
   const [scrapedErrorMessage, setScrapedErrorMessage] = useState('');
 
-  const [currentSessionId, setCurrentSessionId] = useState(null);
+  // Real-time refs to avoid closure staleness during async events
+  const activeTabUrlRef = useRef(activeTabUrl);
+  const detectedPlatformRef = useRef(detectedPlatform);
+  const activeContextRef = useRef({ tabId: null, url: '', platform: 'unknown', pageKey: null, generation: 0, isResolved: false });
+  const pendingScrapeDataRef = useRef(null);
 
-  const syncScrapeData = (data) => {
+  useEffect(() => {
+    activeTabUrlRef.current = activeTabUrl;
+  }, [activeTabUrl]);
+
+  useEffect(() => {
+    detectedPlatformRef.current = detectedPlatform;
+  }, [detectedPlatform]);
+
+  const syncScrapeData = async (data) => {
     if (!data) return;
-    if (data.sessionId && data.sessionId !== currentSessionId) {
-      // New session detected: clear all old product data first
-      setCurrentSessionId(data.sessionId);
-      setAnalysisStatus('idle');
-      setDetectedPlatform('');
-      setScrapedIsProductPage(false);
-      setScrapedProductTitle(null);
-      setScrapedCategory(null);
-      setScrapedRating(null);
-      setScrapedProductImage(null);
-      setScrapedReviews([]);
-      setScrapedHasError(false);
-      setScrapedErrorMessage('');
+
+    console.log('[POPUP] storage payload received:', {
+      platform: data.platform,
+      reviewCount: Array.isArray(data.reviews) ? data.reviews.length : 0,
+      tabId: data.tabId ?? null,
+      url: data.url || ''
+    });
+
+    const currentContext = activeContextRef.current;
+    if (!currentContext.isResolved) {
+      console.log('[POPUP] active context not resolved yet, queuing scrape data');
+      pendingScrapeDataRef.current = data;
+      return;
     }
+
+    const scrapeUrl = data.url || '';
+    const scrapePlatform = String(data.platform || '').toLowerCase();
+    const currentActiveUrl = currentContext.url || activeTabUrlRef.current;
+    const currentActivePlat = String(currentContext.platform || detectedPlatformRef.current || '').toLowerCase();
+
+    // 1. Always update page-specific persistent storage record with fresh reviews & timestamp
+    if (scrapePlatform && scrapeUrl && Array.isArray(data.reviews) && data.reviews.length > 0) {
+      try {
+        const existingRecord = await getAnalysisForPage(scrapePlatform, scrapeUrl);
+        if (existingRecord) {
+          await saveAnalysisForPage({
+            ...existingRecord,
+            reviews: data.reviews,
+            productTitle: data.productTitle || existingRecord.productTitle,
+            rating: data.rating || existingRecord.rating,
+            category: data.category || existingRecord.category,
+            productImage: data.productImage || existingRecord.productImage,
+            timestamp: Date.now()
+          });
+        }
+      } catch (err) {
+        console.warn('VoxReview: Error updating page analysis storage:', err);
+      }
+    }
+
+    // 2. Check if data belongs to the currently active tab / page
+    const isForCurrentTab = (() => {
+      if (scrapePlatform && currentActivePlat && currentActivePlat !== 'unknown' && scrapePlatform !== currentActivePlat) {
+        return false;
+      }
+
+      // A. Same tab ID
+      if (data.tabId != null && currentContext.tabId != null && Number(data.tabId) === Number(currentContext.tabId)) {
+        return true;
+      }
+
+      // B. Normalized page key match
+      if (scrapeUrl && currentActiveUrl) {
+        if (scrapeUrl === currentActiveUrl) return true;
+        const currentKey = currentContext.pageKey || getPageKey(currentActivePlat, currentActiveUrl);
+        const scrapeKey = getPageKey(scrapePlatform, scrapeUrl);
+        console.log('[POPUP] page key comparison:', { currentKey, scrapeKey });
+        if (currentKey && scrapeKey && currentKey === scrapeKey) return true;
+      }
+
+      // C. Relaxed URL origin + pathname comparison
+      if (scrapeUrl && currentActiveUrl) {
+        try {
+          const u1 = new URL(scrapeUrl);
+          const u2 = new URL(currentActiveUrl);
+          if (u1.origin === u2.origin && u1.pathname.replace(/\/+$/, '') === u2.pathname.replace(/\/+$/, '')) {
+            return true;
+          }
+        } catch {}
+      }
+
+      // D. Matching platform with active tab
+      if (currentActivePlat && currentActivePlat === scrapePlatform && !currentActiveUrl) {
+        return true;
+      }
+
+      return false;
+    })();
+
+    if (!isForCurrentTab) {
+      console.log('[POPUP] scrape data is for another tab/page, preserving current view');
+      return;
+    }
+
+    console.log('[POPUP] applying reviews:', Array.isArray(data.reviews) ? data.reviews.length : 0);
     if (data.platform) setDetectedPlatform(data.platform);
     if (data.isProductPage !== undefined) setScrapedIsProductPage(data.isProductPage);
-    if (data.productTitle) setScrapedProductTitle(data.productTitle);
-    if (data.category) setScrapedCategory(data.category);
-    if (data.rating) setScrapedRating(data.rating);
-    if (data.productImage) setScrapedProductImage(data.productImage);
+    if (data.productTitle !== undefined) setScrapedProductTitle(data.productTitle);
+    if (data.category !== undefined) setScrapedCategory(data.category);
+    if (data.rating !== undefined) setScrapedRating(data.rating);
+    if (data.productImage !== undefined) setScrapedProductImage(data.productImage);
     if (Array.isArray(data.reviews)) setScrapedReviews(data.reviews);
     if (data.hasError !== undefined) setScrapedHasError(!!data.hasError);
-    if (data.errorMessage) setScrapedErrorMessage(data.errorMessage);
+    if (data.errorMessage !== undefined) setScrapedErrorMessage(data.errorMessage);
+    console.log('[POPUP] final review count:', Array.isArray(data.reviews) ? data.reviews.length : 0);
   };
 
   useEffect(() => {
@@ -125,104 +230,179 @@ export default function PopupPage() {
   }, [theme]);
 
   useEffect(() => {
-    // 1. Check active tab URL directly — this is the AUTHORITATIVE source
-    //    for whether the current site is supported. Storage-based status is
-    //    secondary and must not override a positive URL detection.
-    let urlBasedPlatform = 'unknown';
+    const updateActiveTabContext = async () => {
+      const activeTabObj = await resolveCurrentActiveTab();
+      const activeUrl = activeTabObj?.url || '';
+      if (!activeUrl) return;
 
-    if (typeof chrome !== 'undefined' && chrome.tabs?.query) {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const activeTabObj = tabs?.[0];
-        const activeUrl = activeTabObj?.url || '';
-        urlBasedPlatform = detectPlatformFromUrl(activeUrl);
+      const urlBasedPlatform = detectPlatformFromUrl(activeUrl);
+      const newPageKey = getPageKey(urlBasedPlatform, activeUrl);
+      const previousContext = activeContextRef.current;
 
-        if (urlBasedPlatform === 'unknown') {
-          setIsSiteUnsupported(true);
-        } else {
-          // URL says this is a supported platform — trust it unconditionally
-          setIsSiteUnsupported(false);
+      const pageGenuinelyChanged = previousContext.isResolved && (
+        previousContext.tabId !== activeTabObj.id ||
+        (previousContext.pageKey && newPageKey && previousContext.pageKey !== newPageKey) ||
+        (previousContext.platform !== urlBasedPlatform)
+      );
+
+      const context = {
+        tabId: activeTabObj.id,
+        url: activeUrl,
+        platform: urlBasedPlatform,
+        pageKey: newPageKey,
+        generation: pageGenuinelyChanged ? previousContext.generation + 1 : previousContext.generation,
+        isResolved: true,
+      };
+      activeContextRef.current = context;
+      setActiveTabUrl(activeUrl);
+      setHasResolvedActiveTab(true);
+
+      console.log('[POPUP] current tab:', { tabId: context.tabId, url: activeUrl, platform: urlBasedPlatform });
+      console.log('[POPUP] page key:', newPageKey);
+
+      if (urlBasedPlatform === 'unknown') {
+        setDetectedPlatform('');
+        setScrapedIsProductPage(false);
+        setScrapedProductTitle(null);
+        setScrapedCategory(null);
+        setScrapedRating(null);
+        setScrapedProductImage(null);
+        setScrapedReviews([]);
+        setScrapedHasError(false);
+        setScrapedErrorMessage('');
+        setAnalysisStatus('idle');
+        return;
+      }
+
+      setDetectedPlatform(urlBasedPlatform);
+
+      if (pageGenuinelyChanged) {
+        setScrapedIsProductPage(false);
+        setScrapedProductTitle(null);
+        setScrapedCategory(null);
+        setScrapedRating(null);
+        setScrapedProductImage(null);
+        setScrapedReviews([]);
+        setScrapedHasError(false);
+        setScrapedErrorMessage('');
+        setAnalysisStatus('idle');
+      }
+
+      const existingAnalysis = await getAnalysisForPage(urlBasedPlatform, activeUrl);
+      if (activeContextRef.current.generation !== context.generation) return;
+
+      if (existingAnalysis) {
+        if (existingAnalysis.productTitle) setScrapedProductTitle(existingAnalysis.productTitle);
+        if (existingAnalysis.reviews) setScrapedReviews(existingAnalysis.reviews);
+        if (existingAnalysis.rating) setScrapedRating(existingAnalysis.rating);
+        if (existingAnalysis.category) setScrapedCategory(existingAnalysis.category);
+        if (existingAnalysis.productImage) setScrapedProductImage(existingAnalysis.productImage);
+        setScrapedHasError(false);
+        setScrapedErrorMessage('');
+        setAnalysisStatus('completed');
+      } else {
+        if (pendingScrapeDataRef.current) {
+          const pending = pendingScrapeDataRef.current;
+          pendingScrapeDataRef.current = null;
+          syncScrapeData(pending);
+        } else if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+          chrome.storage.local.get(['voxreviewLastScrape'], (res) => {
+            const lastScrape = res?.voxreviewLastScrape;
+            if (
+              activeContextRef.current.generation === context.generation &&
+              lastScrape &&
+              Array.isArray(lastScrape.reviews)
+            ) {
+              syncScrapeData(lastScrape);
+            }
+          });
         }
-      });
-    }
+      }
+    };
 
-    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-      // 2. Initial load from storage on popup mount
-      chrome.storage.local.get(['voxreviewLastScrape', 'voxreviewSiteStatus', 'voxreview_auth_session'], async (result) => {
-        console.log('Popup loaded storage:', result?.voxreviewLastScrape);
-        syncScrapeData(result?.voxreviewLastScrape);
+    updateActiveTabContext();
 
-        const siteStatus = result?.voxreviewSiteStatus;
-        if (siteStatus?.unsupported === true) {
-          setIsSiteUnsupported((prev) => prev);
-        } else if (siteStatus?.unsupported === false) {
-          setIsSiteUnsupported(false);
+    if (typeof chrome !== 'undefined') {
+      const handleTabActivated = () => updateActiveTabContext();
+      const handleTabUpdated = (tabId, changeInfo) => {
+        if (changeInfo.status === 'complete' || changeInfo.url) {
+          updateActiveTabContext();
         }
-
-        const extSession = result?.voxreview_auth_session;
-        if (extSession?.user && extSession?.token) {
-          authService.setSession(extSession);
-          setCurrentUser(extSession.user);
-
-          const liveUser = await authService.refreshCurrentUserProfile();
-          if (liveUser) {
-            setCurrentUser(liveUser);
-          }
-        } else {
-          setCurrentUser(null);
-        }
-      });
-
-      // 3. Real-time listener: sync UI automatically when background.js or web app updates storage
-      const handleStorageChange = (changes, areaName) => {
-        if (areaName !== 'local') return;
-
-        if (changes.voxreview_auth_session) {
-          const newSession = changes.voxreview_auth_session.newValue;
-          if (newSession && newSession.user) {
-            authService.setSession(newSession);
-            setCurrentUser(newSession.user);
-
-            authService.refreshCurrentUserProfile().then((liveUser) => {
-              if (liveUser) {
-                setCurrentUser(liveUser);
-              }
-            }).catch(() => {});
-
-            setAuthToastMessage("You're now signed in.");
-            setTimeout(() => setAuthToastMessage(''), 4000);
-          } else {
-            authService.logout();
-            setCurrentUser(null);
-            setAuthToastMessage('');
-          }
-        }
-
-        if (changes.voxreviewLastScrape) {
-          const newScrape = changes.voxreviewLastScrape.newValue;
-          syncScrapeData(newScrape);
-          // If we just received valid scrape data for a known platform,
-          // this is a supported site — clear the unsupported flag.
-          if (newScrape?.platform && newScrape.platform !== 'unknown') {
-            setIsSiteUnsupported(false);
-          }
-        }
-
-        if (changes.voxreviewSiteStatus) {
-          const newStatus = changes.voxreviewSiteStatus.newValue;
-          if (newStatus?.unsupported === true) {
-            setIsSiteUnsupported(true);
-          } else if (newStatus?.unsupported === false) {
-            setIsSiteUnsupported(false);
-          }
+      };
+      const handleWindowFocusChanged = (windowId) => {
+        if (windowId !== chrome.windows?.WINDOW_ID_NONE) {
+          updateActiveTabContext();
         }
       };
 
-      if (chrome.storage.onChanged) {
-        chrome.storage.onChanged.addListener(handleStorageChange);
-        return () => chrome.storage.onChanged.removeListener(handleStorageChange);
+      chrome.tabs?.onActivated?.addListener(handleTabActivated);
+      chrome.tabs?.onUpdated?.addListener(handleTabUpdated);
+      chrome.windows?.onFocusChanged?.addListener(handleWindowFocusChanged);
+
+      let handleStorageChange;
+      if (chrome.storage?.local) {
+        chrome.storage.local.get(['voxreviewLastScrape', 'voxreview_auth_session'], async (result) => {
+          syncScrapeData(result?.voxreviewLastScrape);
+
+          const extSession = result?.voxreview_auth_session;
+          if (extSession?.user && extSession?.token) {
+            authService.setSession(extSession);
+            setCurrentUser(extSession.user);
+
+            const liveUser = await authService.refreshCurrentUserProfile();
+            if (liveUser) {
+              setCurrentUser(liveUser);
+            }
+          } else {
+            setCurrentUser(null);
+          }
+        });
+
+        handleStorageChange = (changes, areaName) => {
+          if (areaName !== 'local') return;
+
+          if (changes.voxreview_auth_session) {
+            const newSession = changes.voxreview_auth_session.newValue;
+            if (newSession && newSession.user) {
+              authService.setSession(newSession);
+              setCurrentUser(newSession.user);
+
+              authService.refreshCurrentUserProfile().then((liveUser) => {
+                if (liveUser) {
+                  setCurrentUser(liveUser);
+                }
+              }).catch(() => {});
+
+              setAuthToastMessage("You're now signed in.");
+              setTimeout(() => setAuthToastMessage(''), 4000);
+            } else {
+              authService.logout();
+              setCurrentUser(null);
+              setAuthToastMessage('');
+            }
+          }
+
+          if (changes.voxreviewLastScrape) {
+            const newScrape = changes.voxreviewLastScrape.newValue;
+            syncScrapeData(newScrape);
+          }
+        };
+
+        if (chrome.storage.onChanged) {
+          chrome.storage.onChanged.addListener(handleStorageChange);
+        }
       }
+
+      return () => {
+        chrome.tabs?.onActivated?.removeListener(handleTabActivated);
+        chrome.tabs?.onUpdated?.removeListener(handleTabUpdated);
+        chrome.windows?.onFocusChanged?.removeListener(handleWindowFocusChanged);
+        if (handleStorageChange && chrome.storage?.onChanged) {
+          chrome.storage.onChanged.removeListener(handleStorageChange);
+        }
+      };
     }
-  }, [currentSessionId]);
+  }, []);
 
   const platformLabel = (() => {
     const value = String(detectedPlatform || '').toLowerCase();
@@ -235,10 +415,27 @@ export default function PopupPage() {
     return 'Current Source';
   })();
 
-  const handleAnalyzeClick = () => {
+  const handleAnalyzeClick = async () => {
     if (analysisStatus === 'analyzing') return;
     setAnalysisStatus('analyzing');
-    setTimeout(() => setAnalysisStatus('completed'), 1800);
+
+    setTimeout(async () => {
+      const record = {
+        platform: platformLabel,
+        page_url: activeTabUrl || window.location.href,
+        targetTitle: scrapedProductTitle || 'Product Review',
+        productTitle: scrapedProductTitle || 'Product Review',
+        dominantEmotion: 'Happy',
+        percentage: '65%',
+        reviews: scrapedReviews,
+        rating: scrapedRating,
+        category: scrapedCategory,
+        productImage: scrapedProductImage,
+        timestamp: Date.now()
+      };
+      await saveAnalysisForPage(record);
+      setAnalysisStatus('completed');
+    }, 1800);
   };
 
   const handleClearAnalysis = () => setAnalysisStatus('idle');
@@ -264,16 +461,83 @@ export default function PopupPage() {
     setAnalysisStatus('completed');
   };
 
-  // Manual rescan — tells the content script to re-run the scraper
+  // Manual rescan — ALWAYS targets the currently active browser tab resolved at click time
   const [isRescanning, setIsRescanning] = useState(false);
-  const handleRescanPage = () => {
+  const handleRescanPage = async () => {
     if (isRescanning) return;
-    if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) return;
     setIsRescanning(true);
-    chrome.runtime.sendMessage({ type: 'rescanPage' }, () => {
-      // Ignore lastError — popup auto-updates via storage.onChanged
-      setTimeout(() => setIsRescanning(false), 1200);
-    });
+
+    try {
+      // 1. Resolve the CURRENT active tab at the exact time of clicking
+      const activeTabObj = await resolveCurrentActiveTab();
+      if (!activeTabObj || !activeTabObj.id) {
+        console.warn('VoxReview: No active tab found to rescan.');
+        setIsRescanning(false);
+        setScrapedHasError(true);
+        setScrapedErrorMessage('No active browser tab found.');
+        return;
+      }
+
+      const currentUrl = activeTabObj.url || activeTabUrlRef.current;
+      if (!currentUrl) {
+        setIsRescanning(false);
+        setScrapedHasError(true);
+        setScrapedErrorMessage('Unable to determine the current browser page.');
+        return;
+      }
+      const plat = detectPlatformFromUrl(currentUrl);
+      console.log('[RESCAN] clicked', { tabId: activeTabObj.id, url: currentUrl, platform: plat });
+      const newPageKey = getPageKey(plat, currentUrl);
+      const previousContext = activeContextRef.current;
+      const contextChanged = previousContext.tabId !== activeTabObj.id || previousContext.pageKey !== newPageKey;
+      activeContextRef.current = {
+        tabId: activeTabObj.id,
+        url: currentUrl,
+        platform: plat,
+        pageKey: newPageKey,
+        generation: contextChanged ? previousContext.generation + 1 : previousContext.generation,
+        isResolved: true,
+      };
+
+      // 2. If the current tab URL remains unsupported after re-detection:
+      if (plat === 'unknown') {
+        setActiveTabUrl(currentUrl);
+        setHasResolvedActiveTab(true);
+        setDetectedPlatform('');
+        setTimeout(() => setIsRescanning(false), 600);
+        return;
+      }
+
+      // 3. Tab is supported: update active state and clear unsupported flag
+      setActiveTabUrl(currentUrl);
+      setHasResolvedActiveTab(true);
+      setDetectedPlatform(plat);
+      setScrapedHasError(false);
+      setScrapedErrorMessage('');
+
+      // 4. Use the established background-to-content-script forwarding path.
+      chrome.runtime.sendMessage(
+        { type: 'rescanPage', tabId: activeTabObj.id, url: currentUrl, platform: plat },
+        (response) => {
+          if (chrome.runtime?.lastError) {
+            console.warn('VoxReview rescan error:', chrome.runtime.lastError.message);
+            setIsRescanning(false);
+            setScrapedHasError(true);
+            setScrapedErrorMessage('VoxReview cannot access this page. Please refresh the page and try again.');
+          } else if (response && response.ok === false) {
+            console.warn('VoxReview rescan failed:', response.reason);
+            setIsRescanning(false);
+            setScrapedHasError(true);
+            setScrapedErrorMessage(response.reason || 'Failed to rescan current page.');
+          } else {
+            setTimeout(() => setIsRescanning(false), 800);
+          }
+        }
+      );
+    } catch (err) {
+      console.error('VoxReview: Error during handleRescanPage:', err);
+      setIsRescanning(false);
+    }
   };
 
   return (
@@ -311,7 +575,10 @@ export default function PopupPage() {
             <>
               {/* ── 1. Website Not Supported (FIRST CHECK) ── */}
               {isSiteUnsupported ? (
-                <UnsupportedSiteView />
+                <UnsupportedSiteView
+                  onRescan={handleRescanPage}
+                  isRescanning={isRescanning}
+                />
               ) : scrapedHasError ? (
                 /* ── 2. Scraper Error / Exception ── */
                 <div className="no-reviews-view">
@@ -338,6 +605,8 @@ export default function PopupPage() {
               !scrapedIsProductPage || scrapedReviews.length === 0 ? (
                 <NoReviewsView
                   platform={detectedPlatform}
+                  isProductPage={scrapedIsProductPage}
+                  productTitle={scrapedProductTitle}
                   onRescan={handleRescanPage}
                   isRescanning={isRescanning}
                 />

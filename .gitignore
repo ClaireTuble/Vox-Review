@@ -21,3 +21,17 @@ Backend/set-superadmin-role.mjs
 
 __pycache__/
 *.pyc
+
+# Local Python environments and test caches
+.venv/
+.pytest_cache/
+
+# Generated NLP model artifacts and dataset staging output
+Frontend/nlp/models/**/*.pt
+Frontend/nlp/models/**/*.joblib
+Frontend/nlp/models/**/*.safetensors
+Frontend/nlp/models/**/*.bin
+Frontend/nlp/models/**/*.onnx
+Frontend/nlp/models/xlmr_model/
+Frontend/nlp/data/raw/
+Frontend/nlp/data/processed/
