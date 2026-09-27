@@ -141,6 +141,28 @@ export async function clearReadNotifications() {
   }
 }
 
+// Clear all notifications
+export async function clearAllNotifications() {
+  try {
+    const headers = await getSuperAdminHeaders();
+    const response = await fetch('http://localhost:5000/api/admin/notifications', {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (!response.ok) {
+      throw new Error('Unable to clear all notifications.');
+    }
+
+    saveStoredNotifications([]);
+    return [];
+  } catch (error) {
+    console.warn('VoxReview: Clear all notifications failed:', error?.message || error);
+    saveStoredNotifications([]);
+    return [];
+  }
+}
+
 // Custom React Hook to manage notification state reactively across components
 export function useSuperAdminNotifications() {
   const [notifications, setNotifications] = useState(() => getStoredNotifications());
@@ -177,5 +199,6 @@ export function useSuperAdminNotifications() {
     toggleRead: toggleNotificationRead,
     markAllAsRead: markAllNotificationsAsRead,
     clearRead: clearReadNotifications,
+    clearAll: clearAllNotifications,
   };
 }

@@ -1,9 +1,25 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { useVoxLogo } from '../../utils/useVoxLogo.js';
+import authService from '../../services/authService.js';
 import '../css/Navigation.css';
 
 export default function Navigation({ activePage = 'home' }) {
   const logo = useVoxLogo();
+  const navigate = useNavigate();
+  const [isAuthenticated, setIsAuthenticated] = useState(() => authService.isAuthenticated());
+
+  useEffect(() => {
+    const handleAuthSync = () => setIsAuthenticated(authService.isAuthenticated());
+
+    window.addEventListener('voxreview_auth_sync', handleAuthSync);
+    return () => window.removeEventListener('voxreview_auth_sync', handleAuthSync);
+  }, []);
+
+  const handleSignOut = async () => {
+    await authService.logout('user');
+    navigate('/', { replace: true });
+  };
 
   return (
     <header className="landing-header">
@@ -29,12 +45,20 @@ export default function Navigation({ activePage = 'home' }) {
         </nav>
 
         <div className="landing-nav-actions">
-          <Link to="/login" className="nav-link login-btn">
-            Sign In
-          </Link>
-          <Link to="/register" className="nav-link register-btn">
-            Get Started
-          </Link>
+          {isAuthenticated ? (
+            <>
+              <Link to="/after-login" className="nav-link login-btn">
+                Getting Started
+              </Link>
+              <button type="button" onClick={handleSignOut} className="nav-link login-btn">
+                Sign Out
+              </button>
+            </>
+          ) : (
+            <Link to="/login" className="nav-link login-btn">
+              Sign In
+            </Link>
+          )}
         </div>
       </div>
     </header>

@@ -35,10 +35,15 @@ export default function LandingPage() {
           </p>
 
           <div className="hero-cta-group">
-            <Link to="/register" className="cta-primary">
+            <button
+              type="button"
+              className="cta-primary"
+              style={{ border: 'none', fontFamily: 'inherit', cursor: 'pointer' }}
+              onClick={(e) => e.preventDefault()}
+            >
               <Download size={16} />
               <span>Add to Chrome</span>
-            </Link>
+            </button>
             <a href="#features" className="cta-secondary">
               <span>Learn More</span>
             </a>

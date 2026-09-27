@@ -47,7 +47,7 @@ export default function ProtectedRoute({ children, allowedRole }) {
       return <Navigate to="/superadmin/dashboard" replace />;
     }
 
-    return <Navigate to="/user/dashboard" replace />;
+    return <Navigate to="/after-login" replace />;
   }
 
   return children;

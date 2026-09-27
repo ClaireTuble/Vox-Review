@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Lock, Globe, Trash2, RefreshCw, Search, Filter, ChevronDown } from 'lucide-react';
-import { getPageAnalyses, saveAnalysisForPage, deleteAnalysisForPage } from '../../services/pageAnalysisStorage.js';
+import { clearAllPageAnalyses, getPageAnalyses, getPageKey, deleteAnalysisForPage } from '../../services/pageAnalysisStorage.js';
 import '../css/SavedAnalysesView.css';
 import '../css/ExtensionConfirmationModal.css';
 
 const ALL_PLATFORMS = ['Shopee', 'Lazada', 'Google', 'Google Play', 'Steam'];
 const ALL_EMOTIONS = ['Happy', 'Sad', 'Anger', 'Disgust', 'Fear', 'Sarcastic'];
 
-export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, onSelectSaved }) {
+export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, onSelectSaved, onRefreshSaved, onSavedCountChange }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlatforms, setSelectedPlatforms] = useState([...ALL_PLATFORMS]);
   const [selectedEmotions, setSelectedEmotions] = useState([...ALL_EMOTIONS]);
@@ -16,80 +16,31 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
   const [itemToDelete, setItemToDelete] = useState(null);
   const [refreshingId, setRefreshingId] = useState(null);
   const [refreshErrorMap, setRefreshErrorMap] = useState({});
+  const [deleteError, setDeleteError] = useState('');
+  const [clearAllError, setClearAllError] = useState('');
+  const [showClearAllConfirmation, setShowClearAllConfirmation] = useState(false);
+  const [isClearingAll, setIsClearingAll] = useState(false);
+  const [savedItems, setSavedItems] = useState([]);
 
-  const [savedItems, setSavedItems] = useState([
-    {
-      id: 1,
-      targetTitle: 'Sony WH-1000XM5 Wireless Headphones Review',
-      platform: 'Google Play',
-      page_url: 'https://play.google.com/store/apps/details?id=com.sony.songpal.mdr',
-      dominantEmotion: 'Happy',
-      percentage: '45%',
-      date: '2 hours ago'
-    },
-    {
-      id: 2,
-      targetTitle: 'Anker Magnetic Wireless Power Bank 10,000mAh',
-      platform: 'Shopee',
-      page_url: 'https://shopee.ph/Anker-Magnetic-Wireless-Power-Bank-i.123456.789012',
-      dominantEmotion: 'Anger',
-      percentage: '62%',
-      date: 'Yesterday'
-    },
-    {
-      id: 3,
-      targetTitle: 'Logitech MX Master 3S Ergonomic Mouse',
-      platform: 'Lazada',
-      page_url: 'https://www.lazada.com.ph/products/logitech-mx-master-3s-i345678.html',
-      dominantEmotion: 'Sarcastic',
-      percentage: '28%',
-      date: '3 days ago'
-    },
-    {
-      id: 4,
-      targetTitle: 'Starbucks Coffee - Greenbelt 3 Branch',
-      platform: 'Google',
-      page_url: 'https://www.google.com/maps/place/Starbucks+Greenbelt+3',
-      dominantEmotion: 'Disgust',
-      percentage: '85%',
-      date: '4 days ago'
-    },
-    {
-      id: 5,
-      targetTitle: 'Cyberpunk 2077 Update 2.1 Reviews',
-      platform: 'Steam',
-      page_url: 'https://store.steampowered.com/app/1091500/Cyberpunk_2077/',
-      dominantEmotion: 'Fear',
-      percentage: '78%',
-      date: '1 week ago'
-    },
-    {
-      id: 6,
-      targetTitle: 'Samsung Galaxy Earbuds FE',
-      platform: 'Shopee',
-      page_url: 'https://shopee.ph/Samsung-Galaxy-Earbuds-FE-i.123456.999999',
-      dominantEmotion: 'Sad',
-      percentage: '54%',
-      date: '2 weeks ago'
-    }
-  ]);
+  const reloadSavedItems = async () => {
+    const storedMap = await getPageAnalyses();
+    const storedItems = Object.values(storedMap);
+    setSavedItems(storedItems);
+    onSavedCountChange?.(Object.keys(storedMap).length);
+  };
 
   useEffect(() => {
     let isMounted = true;
     getPageAnalyses().then((storedMap) => {
       if (!isMounted) return;
-      const storedList = Object.values(storedMap);
-      if (storedList.length > 0) {
-        setSavedItems((prev) => {
-          const map = new Map();
-          prev.forEach((item) => map.set(item.pageKey || item.id, item));
-          storedList.forEach((item) => map.set(item.pageKey || item.id, item));
-          return Array.from(map.values());
-        });
-      }
+      const storedItems = Object.values(storedMap);
+      setSavedItems(storedItems);
+      onSavedCountChange?.(Object.keys(storedMap).length);
+    }).catch((error) => {
+      if (import.meta.env.DEV) console.error('VoxReview: Could not load saved analyses:', error);
     });
     return () => { isMounted = false; };
-  }, []);
+  }, [onSavedCountChange]);
 
   const togglePlatform = (plat) => {
     if (selectedPlatforms.includes(plat)) {
@@ -144,81 +95,50 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
 
   const confirmDelete = async () => {
     if (!itemToDelete) return;
-    const targetKey = itemToDelete.pageKey || itemToDelete.id;
-    await deleteAnalysisForPage(targetKey);
-    setSavedItems((prevItems) => prevItems.filter((i) => (i.pageKey || i.id) !== targetKey));
-    setItemToDelete(null);
+    const targetKey = getPageKey(itemToDelete.platform, itemToDelete.page_url) || itemToDelete.pageKey;
+    try {
+      await deleteAnalysisForPage(targetKey);
+      await reloadSavedItems();
+      setDeleteError('');
+      setItemToDelete(null);
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('VoxReview: Could not delete saved analysis:', error);
+      setDeleteError('Unable to delete this saved analysis. Please try again.');
+    }
+  };
+
+  const confirmClearAll = async () => {
+    if (isClearingAll) return;
+    setIsClearingAll(true);
+    setClearAllError('');
+    try {
+      await clearAllPageAnalyses();
+      await reloadSavedItems();
+      setShowClearAllConfirmation(false);
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('VoxReview: Could not clear saved analyses:', error);
+      setClearAllError('Unable to clear saved analyses. Please try again.');
+    } finally {
+      setIsClearingAll(false);
+    }
   };
 
   const handleRefreshItem = async (e, item) => {
     e.stopPropagation();
     if (refreshingId) return;
+    const itemKey = getPageKey(item.platform, item.page_url) || item.pageKey;
 
-    setRefreshingId(item.id);
-    setRefreshErrorMap((prev) => ({ ...prev, [item.id]: null }));
+    setRefreshingId(itemKey);
+    setRefreshErrorMap((prev) => ({ ...prev, [itemKey]: null }));
 
     try {
-      let freshScrape = null;
-
-      if (typeof chrome !== 'undefined' && chrome.tabs?.query) {
-        const tabs = await new Promise((resolve) => {
-          chrome.tabs.query({}, (result) => resolve(result || []));
-        });
-
-        const targetTab = tabs.find((t) => {
-          if (!t.url || !item.page_url) return false;
-          try {
-            const savedHost = new URL(item.page_url).hostname;
-            return t.url === item.page_url || t.url.includes(savedHost);
-          } catch {
-            return t.url === item.page_url;
-          }
-        });
-
-        if (targetTab && targetTab.id) {
-          const response = await new Promise((resolve) => {
-            chrome.tabs.sendMessage(targetTab.id, { type: 'rescanPage' }, (res) => {
-              if (chrome.runtime?.lastError) resolve(null);
-              else resolve(res);
-            });
-          });
-
-          if (response?.ok) {
-            const storageResult = await new Promise((resolve) => {
-              chrome.storage.local.get(['voxreviewLastScrape'], (res) => resolve(res?.voxreviewLastScrape));
-            });
-            if (storageResult && storageResult.reviews?.length > 0) {
-              freshScrape = storageResult;
-            }
-          }
-        }
-      }
-
-      const emotionsList = ['Happy', 'Sad', 'Anger', 'Disgust', 'Fear', 'Sarcastic'];
-      const updatedEmotion = freshScrape?.dominantEmotion || emotionsList[(item.id + Math.floor(Date.now() / 1000)) % emotionsList.length];
-      const updatedPercentage = freshScrape?.percentage || `${Math.floor(42 + (Math.random() * 45))}%`;
-
-      await new Promise((resolve) => setTimeout(resolve, 1100));
-
-      const updatedRecord = {
-        ...item,
-        dominantEmotion: updatedEmotion,
-        percentage: updatedPercentage,
-        date: 'Just now',
-        timestamp: Date.now()
-      };
-
-      await saveAnalysisForPage(updatedRecord);
-
-      setSavedItems((prevItems) =>
-        prevItems.map((i) =>
-          (i.pageKey || i.id) === (item.pageKey || item.id) ? updatedRecord : i
-        )
-      );
+      const refreshed = await onRefreshSaved?.(item);
+      if (!refreshed) throw new Error('Saved page is not open in an accessible tab.');
     } catch (err) {
+      if (import.meta.env.DEV) console.error('VoxReview: Could not rescan saved page:', err);
       setRefreshErrorMap((prev) => ({
         ...prev,
-        [item.id]: 'Unable to refresh this analysis. Please open the original supported page and try again.'
+        [itemKey]: err.message || 'Unable to refresh this analysis. Please open the original supported page and try again.'
       }));
     } finally {
       setRefreshingId(null);
@@ -269,15 +189,15 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
         ? true
         : selectedEmotions.length === 0
         ? false
-        : selectedEmotions.some((e) => e.toLowerCase() === item.dominantEmotion.toLowerCase());
+        : selectedEmotions.some((e) => e.toLowerCase() === String(item.dominantEmotion || '').toLowerCase());
 
     // Search query matching
     const query = searchQuery.trim().toLowerCase();
     const matchesSearch =
       !query ||
-      item.targetTitle.toLowerCase().includes(query) ||
-      item.platform.toLowerCase().includes(query) ||
-      item.dominantEmotion.toLowerCase().includes(query);
+      String(item.targetTitle || '').toLowerCase().includes(query) ||
+      String(item.platform || '').toLowerCase().includes(query) ||
+      String(item.dominantEmotion || '').toLowerCase().includes(query);
 
     return matchesPlatform && matchesEmotion && matchesSearch;
   });
@@ -286,10 +206,25 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
     <div className="saved-view-container">
       <div className="saved-view-header">
         <span className="saved-view-title">Saved Analyses</span>
-        <span style={{ fontSize: '10px', color: 'var(--accent-color)', fontWeight: 600 }}>
-          {filteredItems.length} {filteredItems.length === 1 ? 'item' : 'items'}
-        </span>
+        <div className="saved-view-header-actions">
+          <span className="saved-count-chip">
+            {savedItems.length} {savedItems.length === 1 ? 'item' : 'items'}
+          </span>
+          <button
+            type="button"
+            className="saved-clear-all-btn"
+            onClick={() => { setClearAllError(''); setShowClearAllConfirmation(true); }}
+            disabled={savedItems.length === 0 || isClearingAll}
+            title={savedItems.length === 0 ? 'No saved analyses to clear' : 'Clear all saved analyses'}
+          >
+            <Trash2 size={12} className="saved-clear-icon" />
+            <span>Clear All</span>
+          </button>
+        </div>
       </div>
+
+      {deleteError && <p role="alert" className="saved-refresh-error-msg">{deleteError}</p>}
+      {clearAllError && <p role="alert" className="saved-refresh-error-msg">{clearAllError}</p>}
 
       <div className="saved-controls-container">
         <div className="saved-search-wrap">
@@ -426,8 +361,8 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
             <span>No saved analyses found.</span>
           </div>
         ) : (
-          filteredItems.map((item) => (
-            <div key={item.id} className="saved-card" onClick={() => onSelectSaved(item)}>
+            filteredItems.map((item) => (
+            <div key={getPageKey(item.platform, item.page_url) || item.pageKey || item.id} className="saved-card" onClick={() => onSelectSaved(item)}>
               <div className="saved-card-info">
                 <span className="saved-card-title">{item.targetTitle}</span>
                 <div className="saved-card-meta">
@@ -440,19 +375,19 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                 <div className="saved-card-actions-bottom">
                   <button
                     type="button"
-                    className={`saved-refresh-btn ${refreshingId === item.id ? 'refreshing' : ''}`}
+                    className={`saved-refresh-btn ${refreshingId === (getPageKey(item.platform, item.page_url) || item.pageKey) ? 'refreshing' : ''}`}
                     onClick={(e) => handleRefreshItem(e, item)}
-                    disabled={refreshingId === item.id}
+                    disabled={refreshingId === (getPageKey(item.platform, item.page_url) || item.pageKey)}
                     title="Retrieve latest reviews from source page"
                   >
-                    <RefreshCw size={11} className={refreshingId === item.id ? 'spin' : ''} />
-                    <span>{refreshingId === item.id ? 'Refreshing...' : 'Refresh'}</span>
+                    <RefreshCw size={11} className={refreshingId === (getPageKey(item.platform, item.page_url) || item.pageKey) ? 'spin' : ''} />
+                    <span>{refreshingId === (getPageKey(item.platform, item.page_url) || item.pageKey) ? 'Refreshing...' : 'Refresh'}</span>
                   </button>
                 </div>
 
-                {refreshErrorMap[item.id] && (
+                {refreshErrorMap[getPageKey(item.platform, item.page_url) || item.pageKey] && (
                   <div className="saved-refresh-error-msg">
-                    {refreshErrorMap[item.id]}
+                    {refreshErrorMap[getPageKey(item.platform, item.page_url) || item.pageKey]}
                   </div>
                 )}
               </div>
@@ -498,6 +433,39 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                 onClick={confirmDelete}
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showClearAllConfirmation && (
+        <div className="extension-modal-backdrop" role="presentation" onClick={() => !isClearingAll && setShowClearAllConfirmation(false)}>
+          <div
+            className="extension-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="clear-all-analyses-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="clear-all-analyses-title">Clear All Saved Analyses?</h2>
+            <p>Are you sure you want to delete all saved analyses? This action cannot be undone.</p>
+            <div className="extension-modal-actions">
+              <button
+                type="button"
+                className="extension-modal-button extension-modal-button-secondary"
+                onClick={() => setShowClearAllConfirmation(false)}
+                disabled={isClearingAll}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="extension-modal-button extension-modal-button-danger"
+                onClick={confirmClearAll}
+                disabled={isClearingAll}
+              >
+                {isClearingAll ? 'Deleting…' : 'Delete All'}
               </button>
             </div>
           </div>

@@ -75,6 +75,7 @@ if (platform === "unknown") {
   let lastSentSignature = ""; // tracks last sent (url + filter + reviewCount)
   let isScraping = false;
   let rescanQueued = false;
+  let queuedRescanRequestId = null;
   let debounceTimer = null;
 
   // Observer stays alive for the whole page session — NEVER disconnected
@@ -82,7 +83,7 @@ if (platform === "unknown") {
   let domObserver = null;
 
   // ── Core: scrape current DOM state and send if anything changed ─────────────
-  async function scrapeAndSend(force = false) {
+  async function scrapeAndSend(force = false, rescanRequestId = null) {
     if (!isExtensionContextValid()) {
       console.warn("VoxReview: Context gone, stopping observer.");
       if (domObserver) { domObserver.disconnect(); domObserver = null; }
@@ -90,7 +91,10 @@ if (platform === "unknown") {
     }
 
     if (isScraping) {
-      if (force) rescanQueued = true;
+      if (force) {
+        rescanQueued = true;
+        queuedRescanRequestId = rescanRequestId;
+      }
       return;
     }
     isScraping = true;
@@ -164,6 +168,7 @@ if (platform === "unknown") {
         ratingFilter: ratingFilter,
         url: productUrl,
         reviews: reviews,   // always the FULL current visible set
+        rescanRequestId,
       });
       console.log("[SCRAPE] reviewsScraped sent:", response?.ok !== false);
 
@@ -176,12 +181,16 @@ if (platform === "unknown") {
         platform: platform,
         errorStage: "Review Extraction",
         errorMessage: err.message || "An unknown error occurred during scraping.",
+        url: window.location.href,
+        rescanRequestId,
       });
     } finally {
       isScraping = false;
       if (rescanQueued) {
         rescanQueued = false;
-        setTimeout(() => scrapeAndSend(true), 0);
+        const requestId = queuedRescanRequestId;
+        queuedRescanRequestId = null;
+        setTimeout(() => scrapeAndSend(true, requestId), 0);
       }
     }
   }
@@ -301,7 +310,7 @@ if (platform === "unknown") {
       console.log("VoxReview: Manual rescan requested.");
       console.log("[RESCAN] content script reached:", { platform });
       // Queue behind an in-flight scrape instead of dropping the user's request.
-      scrapeAndSend(true);
+      scrapeAndSend(true, message.requestId || null);
       sendResponse({ ok: true, queued: isScraping });
     }
   });

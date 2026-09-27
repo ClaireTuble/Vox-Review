@@ -13,6 +13,7 @@ const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value || '').
 
 /* ─── LOGIN FORM ─────────────────────────────────────────── */
 function LoginForm({ onSwitchToRegister }) {
+  const navigate = useNavigate();
   const [role, setRole] = useState('user');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -130,10 +131,7 @@ function LoginForm({ onSwitchToRegister }) {
       const res = await authService.login(email, password, 'user');
       setSubmitting(false);
       if (res.success) {
-        // Session is synced to chrome.storage.local via authService.
-        // Stay on this page and show a toast — do NOT redirect to dashboard.
-        setSuccess('Login successful! Your VoxReview account is now connected to the extension.');
-        setTimeout(() => setSuccess(''), 8000);
+        navigate('/after-login');
       }
     } catch (err) {
       setSubmitting(false);
@@ -497,6 +495,13 @@ export default function AuthPage({ initialMode = 'login' }) {
   useEffect(() => {
     setMode(pathMode);
   }, [pathMode]);
+
+  // Redirect authenticated regular users to /after-login
+  useEffect(() => {
+    if (authService.isAuthenticated() && authService.checkRole() === 'user') {
+      navigate('/after-login', { replace: true });
+    }
+  }, [navigate]);
 
   const switchTo = (target) => {
     if (animating || mode === target) return;

@@ -1,0 +1,116 @@
+/* ============================================================
+   AuthNavigation — Authenticated Pages Navbar (AfterLogPage)
+   Visually consistent with VoxReview design system.
+   Separate from the public Landing Page Navigation.
+   ============================================================ */
+
+.auth-nav-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  width: 100%;
+  height: 68px;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05);
+  box-sizing: border-box;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.auth-nav-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  height: 100%;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+}
+
+/* ── Brand ─────────────────────────────────────────────────── */
+.auth-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  font-size: 19px;
+  font-weight: 800;
+  color: #0F172A;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+}
+
+.auth-nav-logo-img {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+
+.auth-nav-brand-name {
+  color: #0F172A;
+}
+
+/* ── Nav Links ──────────────────────────────────────────────── */
+.auth-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.auth-nav-link {
+  color: #64748B;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 0.2s ease;
+}
+
+.auth-nav-link:hover,
+.auth-nav-link.active {
+  color: #2563EB;
+}
+
+/* ── Actions ────────────────────────────────────────────────── */
+.auth-nav-actions {
+  display: flex;
+  align-items: center;
+}
+
+.auth-nav-signout-btn {
+  /* Reset native button styles */
+  background: none;
+  border: 1px solid #E2E8F0;
+  cursor: pointer;
+  font-family: inherit;
+
+  /* Visual style — matches nav login-btn */
+  color: #334155;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  line-height: 1;
+}
+
+.auth-nav-signout-btn:hover {
+  color: #DC2626;
+  border-color: #FECACA;
+  background: #FEF2F2;
+}
+
+/* ── Mobile Responsive ──────────────────────────────────────── */
+@media (max-width: 640px) {
+  .auth-nav-links {
+    display: none;
+  }
+
+  .auth-nav-brand-name {
+    display: none;
+  }
+}

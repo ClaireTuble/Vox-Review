@@ -73,7 +73,11 @@
 }
 
 .nav-link.login-btn {
+  background: transparent;
+  border: none;
   color: #334155;
+  cursor: pointer;
+  font-family: inherit;
   font-weight: 600;
   padding: 8px 16px;
   border-radius: 8px;

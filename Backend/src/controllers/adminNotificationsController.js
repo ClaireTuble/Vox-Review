@@ -144,3 +144,29 @@ export async function clearReadAdminNotifications(req, res) {
     });
   }
 }
+
+export async function clearAllAdminNotifications(req, res) {
+  try {
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    const { error } = await adminSupabase
+      .from("notifications")
+      .delete()
+      .neq("id", "00000000-0000-0000-0000-000000000000");
+
+    if (error) {
+      throw error;
+    }
+
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: error.message || "Unable to clear all notifications.",
+    });
+  }
+}
+

@@ -285,6 +285,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         reviews: finalReviews,
         reviewCount: finalReviews.length,
         url: pageUrl,
+        rescanRequestId: message.rescanRequestId || null,
         timestamp: Date.now(),
         tabId: sender.tab?.id ?? null,
       };
@@ -322,6 +323,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           errorMessage: errorMessage || "An unknown error occurred during scraping.",
           reviews: [],
           reviewCount: 0,
+          url: sender.tab?.url || "",
+          tabId: sender.tab?.id ?? null,
+          rescanRequestId: message.rescanRequestId || null,
           timestamp: Date.now(),
         },
       });
@@ -411,13 +415,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     const forwardToTab = (tabId) => {
       console.log("[RESCAN] forwarding to tab:", { tabId, url: message.url, platform: message.platform });
-      chrome.tabs.sendMessage(tabId, { type: "rescanPage", url: message.url, platform: message.platform }, (response) => {
+      chrome.tabs.sendMessage(tabId, { type: "rescanPage", url: message.url, platform: message.platform, requestId: message.requestId }, (response) => {
         if (chrome.runtime?.lastError) {
           const initialError = chrome.runtime.lastError.message;
           console.warn("VoxReview rescan delivery failed:", initialError);
           recoverContentScript(tabId)
             .then(() => new Promise((resolve, reject) => {
-              chrome.tabs.sendMessage(tabId, { type: "rescanPage", url: message.url, platform: message.platform }, (retryResponse) => {
+              chrome.tabs.sendMessage(tabId, { type: "rescanPage", url: message.url, platform: message.platform, requestId: message.requestId }, (retryResponse) => {
                 if (chrome.runtime?.lastError) reject(new Error(chrome.runtime.lastError.message));
                 else resolve(retryResponse || { ok: true, recovered: true });
               });

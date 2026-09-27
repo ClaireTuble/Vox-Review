@@ -1,7 +1,13 @@
 import { Router } from "express";
 import { getAdminUsers } from "../controllers/adminUsersController.js";
 import { getAdminDashboardStats } from "../controllers/adminDashboardController.js";
-import { getAdminNotifications, toggleAdminNotificationRead, markAllAdminNotificationsRead, clearReadAdminNotifications } from "../controllers/adminNotificationsController.js";
+import {
+  getAdminNotifications,
+  toggleAdminNotificationRead,
+  markAllAdminNotificationsRead,
+  clearReadAdminNotifications,
+  clearAllAdminNotifications,
+} from "../controllers/adminNotificationsController.js";
 import { getAdminActivityLogs } from "../controllers/adminAuditController.js";
 import { logSuperAdminLoginSuccess, logSuperAdminLogout, logSuperAdminLoginFailure } from "../controllers/authAuditController.js";
 import { requireSuperAdmin } from "../middleware/superAdminAuth.js";
@@ -19,6 +25,7 @@ router.get("/overview", requireSuperAdmin, getAdminDashboardStats);
 router.get("/notifications", requireSuperAdmin, getAdminNotifications);
 router.patch("/notifications/:id/read", requireSuperAdmin, toggleAdminNotificationRead);
 router.patch("/notifications/read-all", requireSuperAdmin, markAllAdminNotificationsRead);
+router.delete("/notifications", requireSuperAdmin, clearAllAdminNotifications);
 router.delete("/notifications/read", requireSuperAdmin, clearReadAdminNotifications);
 router.get("/audit-logs", requireSuperAdmin, getAdminActivityLogs);
 

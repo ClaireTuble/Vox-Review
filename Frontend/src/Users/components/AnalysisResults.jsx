@@ -1,24 +1,32 @@
 import { useState } from 'react';
 import {
   Sparkles, Trash2, Lock, BookmarkPlus,
-  BatteryFull, Banknote, Package, Headphones, Heart, Wrench, MessageSquare
+  MessageSquare, Tag
 } from 'lucide-react';
+import { aggregateTopicsForReviews } from '../utils/reviewTopics.js';
+import { calculateReviewPriorities, sortPriorityReviews } from '../utils/priorityEngine.js';
 import '../css/AnalysisResults.css';
 
-/* ── Driver ID → Lucide icon ──────────────────────────────────── */
-const DRIVER_ICON_MAP = {
-  battery: BatteryFull,
-  price: Banknote,
-  delivery: Package,
-  sound: Headphones,
-  comfort: Heart,
-  build: Wrench,
+const EMOTION_CATEGORY_BY_ID = {
+  happy: 1,
+  sad: 2,
+  anger: 3,
+  disgust: 4,
+  fear: 5,
+  sarcastic: 6,
+};
+const PRIORITY_BADGES = {
+  CRITICAL: { icon: '🔴', className: 'critical' },
+  HIGH: { icon: '🟠', className: 'high' },
+  MEDIUM: { icon: '🟡', className: 'medium' },
+  LOW: { icon: '⚪', className: 'low' },
 };
 
-export default function AnalysisResults({ status = 'idle', isLoggedIn = false, onSaveRedirect, emotionData, scrapedReviews = [], onClearAnalysis, platform = '' }) {
-  const [hoveredEmotion, setHoveredEmotion] = useState(null);
+export default function AnalysisResults({ status = 'idle', isLoggedIn = false, onSaveRedirect, onSaveAnalysis, isSaving = false, hasSavedAnalysis = false, saveError = '', emotionData, topicAnalysis, scrapedReviews = [], onClearAnalysis, platform = '' }) {
+  const [selectedEmotion, setSelectedEmotion] = useState(null);
+  const [selectedTopic, setSelectedTopic] = useState(null);
   const [selectedQuoteFilter, setSelectedQuoteFilter] = useState('all');
-  const [guestNotice, setGuestNotice] = useState('');
+  const [quoteSortMode, setQuoteSortMode] = useState('priority');
   const [userToast, setUserToast] = useState('');
 
   const getPlatformName = (review, fallbackPlatform = '') => {
@@ -47,20 +55,6 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
     if (reviewerName) return reviewerName;
     const platformName = getPlatformName(review, fallbackPlatform);
     return `${platformName} Reviewer`;
-  };
-
-  const getReviewDate = (review) => {
-    if (typeof review === 'object' && review !== null) {
-      return review.date || review.reviewDate || review.posted || '';
-    }
-    return '';
-  };
-
-  const getReviewHelpful = (review) => {
-    if (typeof review === 'object' && review !== null) {
-      return review.helpfulCount || review.helpful || review.likes || null;
-    }
-    return null;
   };
 
   const getReviewText = (review) => {
@@ -124,22 +118,67 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
   };
 
   const data = emotionData || defaultData;
-  const activeHover = hoveredEmotion || data.emotions[0];
+  const activeEmotion = data.emotions.find((emotion) => emotion.id === selectedEmotion?.id) || data.emotions[0];
+  const selectedCategory = selectedEmotion
+    ? selectedEmotion.category ?? EMOTION_CATEGORY_BY_ID[selectedEmotion.id]
+    : null;
+  const topicReviewEntries = data.quotes.map((quote, index) => ({
+    review: normalizedReviews[index] ?? quote,
+    category: quote.category ?? EMOTION_CATEGORY_BY_ID[quote.emotion?.toLowerCase()],
+    topicResultIndex: Number.isInteger(quote.topicResultIndex) ? quote.topicResultIndex : index,
+  }));
+  const emotionTopicReviewEntries = selectedCategory == null
+    ? topicReviewEntries
+    : topicReviewEntries.filter((entry) => entry.category === selectedCategory);
+  const hasValidTopicResults = Array.isArray(topicAnalysis?.results) &&
+    topicAnalysis.results.length === data.quotes.length &&
+    topicAnalysis.results.every((result, index) => (
+      (result?.reviewIndex == null || result.reviewIndex === index) &&
+      Array.isArray(result?.topics) && result.topics.every((topic) => (
+      typeof topic?.label === 'string' && typeof topic?.score === 'number'
+      ))
+    ));
+  const topicStatus = hasValidTopicResults ? 'ready' : data.topicStatus;
+  const scopedTopics = aggregateTopicsForReviews(topicReviewEntries, topicAnalysis, selectedCategory);
+  const visibleTopics = scopedTopics.filter((topic) => topic.count > 0);
+  const activeTopic = visibleTopics.find((topic) => topic.id === selectedTopic?.id) || visibleTopics[0];
+  const topicSubtitle = selectedEmotion
+    ? `Topics discussed in the ${emotionTopicReviewEntries.length} ${activeEmotion.label} reviews.`
+    : 'Topics discussed across all analyzed reviews.';
+  const activeKeywords = activeEmotion?.keywords || [];
+  const topicKeywords = activeTopic?.keywords || [];
   const radius = 50;
   const circumference = 2 * Math.PI * radius;
 
-  const filteredQuotes = selectedQuoteFilter === 'all'
-    ? data.quotes
-    : data.quotes.filter(q => q.emotion.toLowerCase() === selectedQuoteFilter.toLowerCase());
+  const reviewPriorities = calculateReviewPriorities(data.quotes, topicAnalysis);
+  const quoteEntries = data.quotes.map((quote, originalIndex) => ({
+    quote,
+    priority: reviewPriorities[originalIndex],
+    sourceReview: normalizedReviews[originalIndex] ?? quote,
+    originalIndex,
+  }));
+  const filteredQuoteEntries = selectedQuoteFilter === 'all'
+    ? quoteEntries
+    : quoteEntries.filter(({ quote }) => quote.emotion.toLowerCase() === selectedQuoteFilter.toLowerCase());
+  const sortedQuoteEntries = sortPriorityReviews(filteredQuoteEntries, quoteSortMode);
 
-  const handleActionClick = (actionName) => {
+  const selectEmotion = (emotion) => {
+    const isAlreadySelected = selectedEmotion?.id === emotion.id;
+    setSelectedEmotion(isAlreadySelected ? null : emotion);
+    setSelectedQuoteFilter(isAlreadySelected ? 'all' : emotion.label.toLowerCase());
+  };
+
+  const handleActionClick = async (actionName) => {
     if (!isLoggedIn) {
       // Guest trying to save → redirect to login
       if (onSaveRedirect) onSaveRedirect();
       return;
     }
-    if (actionName === 'Save Analysis') setUserToast('Analysis saved to your account!');
-    else if (actionName === 'Export PDF') setUserToast('Exporting PDF Analysis Report...');
+    if (actionName === 'Save Analysis') {
+      const saved = await onSaveAnalysis?.();
+      if (!saved) return;
+      setUserToast('Analysis saved successfully.');
+    } else if (actionName === 'Export PDF') setUserToast('Exporting PDF Analysis Report...');
     else if (actionName === 'Export CSV') setUserToast('Exporting CSV dataset...');
     setTimeout(() => setUserToast(''), 3000);
   };
@@ -213,21 +252,18 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
         <button
           className={`action-tool-btn primary-save ${!isLoggedIn ? 'locked' : ''}`}
           onClick={() => handleActionClick('Save Analysis')}
+          disabled={isSaving || hasSavedAnalysis}
+          title={hasSavedAnalysis ? 'This analysis is saved. Rescan before saving an updated version.' : 'Save the current analysis for this page'}
         >
           {!isLoggedIn ? <Lock size={13} /> : <BookmarkPlus size={13} />}
-          <span>Save Analysis</span>
+          <span>{isSaving ? 'Saving…' : hasSavedAnalysis ? 'Saved' : 'Save Analysis'}</span>
         </button>
       </div>
 
-      {/* Guest lock notice */}
-      {!isLoggedIn && guestNotice && (
-        <div className="guest-lock-banner">
-          <span className="guest-lock-text">
-            <Lock size={13} />
-            <span>{guestNotice}</span>
-          </span>
-          <button className="guest-unlock-btn" onClick={onSaveRedirect}>Log In</button>
-        </div>
+      {saveError && (
+        <p role="alert" style={{ color: '#b91c1c', fontSize: '11px', margin: 0 }}>
+          {saveError}
+        </p>
       )}
 
       {/* Auth toast */}
@@ -265,16 +301,15 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
                     fill="none" stroke={item.color} strokeWidth="14"
                     strokeDasharray={strokeDasharray}
                     strokeDashoffset={strokeDashoffset}
-                    onMouseEnter={() => setHoveredEmotion(item)}
-                    onClick={() => setHoveredEmotion(item)}
+                    onClick={() => selectEmotion(item)}
                   />
                 );
               })}
             </svg>
             <div className="donut-center-info">
-              <span className="donut-center-emoji emotion-icon-animated">{activeHover.emoji}</span>
-              <span className="donut-center-score">{activeHover.percentage}%</span>
-              <span className="donut-center-label">{activeHover.label}</span>
+              <span className="donut-center-emoji emotion-icon-animated">{activeEmotion.emoji}</span>
+              <span className="donut-center-score">{activeEmotion.percentage}%</span>
+              <span className="donut-center-label">{activeEmotion.label}</span>
             </div>
           </div>
 
@@ -282,81 +317,201 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
             {data.emotions.map((item) => (
               <div
                 key={item.id}
-                className={`legend-item ${activeHover.id === item.id ? 'active' : ''}`}
-                onMouseEnter={() => setHoveredEmotion(item)}
-                onClick={() => setHoveredEmotion(item)}
+                className={`legend-item ${selectedEmotion?.id === item.id ? 'active' : ''}`}
+                onClick={() => selectEmotion(item)}
+                role="button"
+                tabIndex={0}
               >
                 <div className="legend-label-group">
                   <span className="legend-dot" style={{ backgroundColor: item.color }} />
                   <span>{item.emoji} {item.label}</span>
                 </div>
-                <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{item.percentage}%</span>
+                <span style={{ fontWeight: 700, color: 'var(--text-primary)', textAlign: 'right' }}>
+                  {item.percentage}%
+                  <span style={{ display: 'block', fontSize: '9px', fontWeight: 500, color: 'var(--text-muted)' }}>
+                    {item.count} reviews
+                  </span>
+                </span>
               </div>
             ))}
           </div>
         </div>
 
-        {activeHover && (
+        {activeEmotion && (
           <div className="emotion-intelligence-card">
             <div className="intel-card-header">
               <div className="intel-emotion-badge">
-                <span className="emotion-icon-animated">{activeHover.emoji}</span>
-                <span>Emotion Detected: {activeHover.label}</span>
+                <span className="emotion-icon-animated">{activeEmotion.emoji}</span>
+                <span>Emotion Detected: {activeEmotion.label}</span>
               </div>
               <div className="intel-confidence-box">
                 <span className="confidence-dot"></span>
-                <span>Confidence: {activeHover.confidence || '96.7%'}</span>
+                <span>Confidence: {activeEmotion.confidence || 'SVM'}</span>
               </div>
             </div>
             <div className="intel-keywords-section">
               <span className="intel-label">Common Keywords</span>
               <div className="keywords-tags-row">
-                {(activeHover.keywords || ['"terrible"', '"waste of money"']).map((kw, i) => (
-                  <span key={i} className="keyword-tag">{kw}</span>
-                ))}
+                {activeKeywords.length > 0
+                  ? activeKeywords.map((kw, i) => (
+                      <span key={i} className="keyword-tag">{kw}</span>
+                    ))
+                  : (
+                    <span className="keyword-empty-message">
+                      {activeEmotion.count === 0
+                        ? `No reviews were classified into ${activeEmotion.label}, so no common keywords are available for this emotion.`
+                        : 'No meaningful emotion keywords found.'}
+                    </span>
+                  )}
               </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* 4. Emotion Drivers — Lucide category icons, emotion emojis kept */}
+      {/* 4. Independent review-topic classification */}
       <div className="analysis-glass-card">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '3px' }}>
           <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            Emotion Drivers
+            What People Are Talking About
           </span>
-          <span style={{ fontSize: '10px', color: 'var(--accent-color)', fontWeight: 600 }}>{data.drivers.length} Drivers</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{topicSubtitle}</span>
+          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Tap a topic to inspect details</span>
         </div>
 
-        <div className="aspects-grid">
-          {data.drivers.map((driver) => {
-            const DriverIcon = DRIVER_ICON_MAP[driver.id] || Wrench;
+        {topicStatus === 'pending' && (
+          <div className="topic-pending-container" role="status" aria-live="polite">
+            <div className="topic-pending-header">
+              <div className="topic-pulsing-dots" aria-hidden="true">
+                <span className="topic-dot" />
+                <span className="topic-dot" />
+                <span className="topic-dot" />
+              </div>
+              <span className="topic-pending-title">Analyzing review topics…</span>
+            </div>
+            <p className="topic-pending-subtitle">
+              This may take a few minutes. You can continue reviewing the emotion results.
+            </p>
+            <div className="topic-skeleton-grid" aria-hidden="true">
+              <div className="topic-skeleton-card">
+                <div className="topic-skeleton-row">
+                  <div className="topic-skeleton-icon skeleton-box" />
+                  <div className="topic-skeleton-label skeleton-box" />
+                  <div className="topic-skeleton-count skeleton-box" />
+                </div>
+                <div className="topic-skeleton-bar skeleton-box" />
+              </div>
+              <div className="topic-skeleton-card">
+                <div className="topic-skeleton-row">
+                  <div className="topic-skeleton-icon skeleton-box" />
+                  <div className="topic-skeleton-label skeleton-box" style={{ width: '55%' }} />
+                  <div className="topic-skeleton-count skeleton-box" />
+                </div>
+                <div className="topic-skeleton-bar skeleton-box" style={{ width: '60%' }} />
+              </div>
+              <div className="topic-skeleton-card">
+                <div className="topic-skeleton-row">
+                  <div className="topic-skeleton-icon skeleton-box" />
+                  <div className="topic-skeleton-label skeleton-box" style={{ width: '45%' }} />
+                  <div className="topic-skeleton-count skeleton-box" />
+                </div>
+                <div className="topic-skeleton-bar skeleton-box" style={{ width: '40%' }} />
+              </div>
+            </div>
+          </div>
+        )}
+        {topicStatus === 'unavailable' && (
+          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+            Topic insights are temporarily unavailable.
+          </p>
+        )}
+        {topicStatus === 'disabled' && (
+          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0' }}>
+            Review topic analysis is disabled by configuration.
+          </p>
+        )}
+        {topicStatus === 'not-analyzed' && (
+          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0' }}>
+            Topic predictions are not available for this saved analysis.
+          </p>
+        )}
+        {topicStatus === 'ready' && selectedEmotion && emotionTopicReviewEntries.length === 0 && (
+          <p className="keyword-empty-message">No reviews are available for this emotion.</p>
+        )}
+        {topicStatus === 'ready' && visibleTopics.length > 0 && <div className="aspects-grid">
+          {visibleTopics.map((topic) => {
             return (
-              <div key={driver.id} className="aspect-card">
+              <button
+                key={topic.id}
+                type="button"
+                className={`aspect-card topic-card ${activeTopic?.id === topic.id ? 'active' : ''}`}
+                onClick={() => setSelectedTopic(topic)}
+              >
                 <div className="aspect-card-header">
                   <div className="aspect-title-group">
-                    <span className="aspect-icon"><DriverIcon size={14} strokeWidth={2} /></span>
-                    <span className="aspect-name">{driver.name}</span>
+                    <span className="aspect-icon"><Tag size={14} strokeWidth={2} /></span>
+                    <span className="aspect-name">{topic.label}</span>
                   </div>
-                  <div className="aspect-emotion-badge">
-                    <span className="emotion-icon-sm">{driver.emoji}</span>
-                    <span>{driver.emotion}</span>
-                  </div>
+                  <span className="aspect-score-text topic-review-count">
+                    {topic.count} {topic.count === 1 ? 'review' : 'reviews'}
+                  </span>
                 </div>
                 <div className="aspect-progress-row">
                   <div className="aspect-bar-track">
                     <div
                       className="aspect-bar-fill"
-                      style={{ width: `${driver.score}%`, background: '#2563EB' }}
+                      style={{ width: `${topic.percentage}%`, background: '#2563EB' }}
                     />
                   </div>
-                  <span className="aspect-score-text">{driver.score}%</span>
+                  <span className="aspect-score-text">{topic.percentage.toFixed(1)}%</span>
                 </div>
-              </div>
+              </button>
             );
           })}
-        </div>
+        </div>}
+        {topicStatus === 'ready' && emotionTopicReviewEntries.length > 0 && visibleTopics.length === 0 && (
+          <p className="keyword-empty-message">
+            {selectedEmotion
+              ? 'No topics detected in the selected reviews.'
+              : 'No topics detected in the analyzed reviews.'}
+          </p>
+        )}
+        {!data.topicStatus && (!data.topics || data.topics.length === 0) && (
+          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0' }}>
+            Topic analysis is not available for this saved analysis.
+          </p>
+        )}
+        {topicStatus === 'ready' && activeTopic && (
+          <div className="emotion-intelligence-card topic-detail-card">
+            <div className="intel-card-header">
+              <div className="intel-emotion-badge">
+                <span className="aspect-icon"><Tag size={14} /></span>
+                <span>Selected Topic: {activeTopic.label}</span>
+              </div>
+              <div className="intel-confidence-box">
+                <span>
+                  {activeTopic.percentage.toFixed(1)}% · {activeTopic.count} {activeTopic.count === 1 ? 'review' : 'reviews'}
+                </span>
+              </div>
+            </div>
+            <div className="intel-keywords-section">
+              <span className="intel-label">Common Keywords</span>
+              <div className="keywords-tags-row">
+                {topicKeywords.length > 0
+                  ? topicKeywords.map((keyword) => <span key={keyword} className="keyword-tag">{keyword}</span>)
+                  : <span className="keyword-empty-message">{activeTopic.count === 0
+                    ? 'No reviews were classified into this topic, so no common keywords are available.'
+                    : 'No meaningful topic keywords found.'}</span>}
+              </div>
+            </div>
+            {activeTopic.reviews?.length > 0 && (
+              <div className="topic-evidence-section">
+                <span className="intel-label">Representative Reviews</span>
+                {activeTopic.reviews.map((review, index) => <p key={`${review}-${index}`} className="quote-text">"{review}"</p>)}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 5. AI Insights — filter buttons keep emotion emojis */}
@@ -387,9 +542,37 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
           ))}
         </div>
 
+        <label className="review-sort-control">
+          <span>Sort by:</span>
+          <select
+            aria-label="Sort reviews"
+            value={quoteSortMode}
+            onChange={(event) => setQuoteSortMode(event.target.value)}
+          >
+            <option value="priority">Priority</option>
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+          </select>
+        </label>
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {filteredQuotes.map((q) => (
-            <div key={q.id} className="quote-bubble">
+          {sortedQuoteEntries.map(({ quote: q, priority }) => {
+            const priorityBadge = PRIORITY_BADGES[priority.level];
+            return (
+            <div key={q.id ?? priority.reviewIndex} className="quote-bubble">
+              <div className="review-priority-row">
+                <span
+                  className={`review-priority-badge review-priority-badge--${priorityBadge.className}`}
+                  title={priority.explanation}
+                  aria-label={`Priority: ${priority.level}`}
+                >
+                  <span aria-hidden="true">{priorityBadge.icon}</span>
+                  <span>{priority.level}</span>
+                </span>
+                {import.meta.env.DEV && (
+                  <span className="review-priority-debug">Score {priority.score}</span>
+                )}
+              </div>
               <p className="quote-text">"{q.text}"</p>
               <div className="quote-meta-row">
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
@@ -409,7 +592,8 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

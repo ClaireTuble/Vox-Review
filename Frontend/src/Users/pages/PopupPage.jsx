@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import authService, { openWebAppAuth } from '../../services/authService.js';
-import { getAnalysisForPage, saveAnalysisForPage, getPageKey } from '../../services/pageAnalysisStorage.js';
+import { getAnalysisForPage, getSavedAnalysisCount, saveAnalysisForPage, getPageKey } from '../../services/pageAnalysisStorage.js';
 import Header from '../components/Header.jsx';
 import DetectedPageCard from '../components/DetectedPageCard.jsx';
 import AnalysisResults from '../components/AnalysisResults.jsx';
@@ -11,7 +11,271 @@ import BottomNavBar from '../components/BottomNavBar.jsx';
 import UnsupportedSiteView from '../components/UnsupportedSiteView.jsx';
 import NoReviewsView from '../components/NoReviewsView.jsx';
 import LogoutConfirmationModalExtension from '../components/LogoutConfirmationModalExtension.jsx';
+import { aggregateTopicsForReviews, getMeaningfulKeywords, getReviewText } from '../utils/reviewTopics.js';
+import { attachReviewPriorities } from '../utils/priorityEngine.js';
+import { isMatchingRescanScrape } from '../utils/analysisScrapeState.js';
 import '../css/PopupPage.css';
+
+const SVM_API_URL = 'http://localhost:5000/api/nlp/svm/predict';
+const TOPIC_API_URL = 'http://localhost:5000/api/nlp/topics/predict';
+const ENABLE_TOPIC_ANALYSIS = import.meta.env.VITE_ENABLE_TOPIC_ANALYSIS !== 'false';
+const TOPIC_REQUEST_TIMEOUT_BASE_MS = 75000;
+const TOPIC_REQUEST_TIMEOUT_PER_REVIEW_MS = 12000;
+const VALID_CATEGORIES = new Set([1, 2, 3, 4, 5, 6]);
+const CATEGORY_DISPLAY = {
+  1: { label: 'Happy', emoji: '😊', color: '#EAB308' },
+  2: { label: 'Sad', emoji: '😢', color: '#3B82F6' },
+  3: { label: 'Anger', emoji: '😠', color: '#EF4444' },
+  4: { label: 'Disgust', emoji: '🤢', color: '#16A34A' },
+  5: { label: 'Fear', emoji: '😨', color: '#F97316' },
+  6: { label: 'Sarcastic', emoji: '😒', color: '#A855F7' },
+};
+const VALID_TOPIC_LABELS = new Set([
+  'Quality', 'Performance / Functionality', 'Features / Content', 'Service / Support',
+  'Delivery / Transaction', 'Price / Value', 'Usability / Experience',
+  'Accuracy / Expectations', 'Availability / Accessibility', 'Environment / Location', 'Other / General',
+]);
+const CATEGORY_BY_EMOTION_ID = new Map(
+  Object.entries(CATEGORY_DISPLAY).map(([category, display]) => [display.label.toLowerCase(), Number(category)]),
+);
+
+function hasValidTopicAnalysis(topicAnalysis, expectedReviewCount) {
+  return Array.isArray(topicAnalysis?.results) &&
+    topicAnalysis.results.length === expectedReviewCount &&
+    topicAnalysis.results.every((result) => Array.isArray(result?.topics) && result.topics.every((topic) => (
+      VALID_TOPIC_LABELS.has(topic?.label) && typeof topic.score === 'number'
+    )));
+}
+
+function getTopicRequestTimeoutMs(reviewCount) {
+  return TOPIC_REQUEST_TIMEOUT_BASE_MS + reviewCount * TOPIC_REQUEST_TIMEOUT_PER_REVIEW_MS;
+}
+
+function getTopicReviewTextStats(reviewTexts, platform) {
+  const stringLengths = [];
+  const textEncoder = new TextEncoder();
+  let emptyReviewCount = 0;
+  let nullReviewCount = 0;
+  let nonStringReviewCount = 0;
+  let totalCharacterCount = 0;
+  let totalUtf8ByteCount = 0;
+  let containsObjectStringification = false;
+  const reviewsAbove = { 500: 0, 1000: 0, 2000: 0, 4000: 0 };
+
+  reviewTexts.forEach((reviewText) => {
+    if (reviewText == null) nullReviewCount += 1;
+    if (typeof reviewText !== 'string') {
+      nonStringReviewCount += 1;
+      return;
+    }
+
+    const textLength = reviewText.length;
+    stringLengths.push(textLength);
+    totalCharacterCount += textLength;
+    totalUtf8ByteCount += textEncoder.encode(reviewText).length;
+    if (reviewText === '') emptyReviewCount += 1;
+    if (reviewText.includes('[object Object]')) containsObjectStringification = true;
+    Object.keys(reviewsAbove).forEach((limit) => {
+      if (textLength > Number(limit)) reviewsAbove[limit] += 1;
+    });
+  });
+
+  const stringReviewCount = stringLengths.length;
+  return {
+    platform,
+    totalReviewCount: reviewTexts.length,
+    emptyNullOrNonStringCount: emptyReviewCount + nonStringReviewCount,
+    emptyReviewCount,
+    nullReviewCount,
+    nonStringReviewCount,
+    minReviewTextLength: stringReviewCount ? Math.min(...stringLengths) : 0,
+    maxReviewTextLength: stringReviewCount ? Math.max(...stringLengths) : 0,
+    averageReviewTextLength: stringReviewCount ? totalCharacterCount / stringReviewCount : 0,
+    totalCharacterCount,
+    totalUtf8ByteCount,
+    reviewsAbove,
+    hasExactlyEmptyReviewText: emptyReviewCount > 0,
+    containsObjectStringification,
+    hasNonPrimitiveStringValue: nonStringReviewCount > 0,
+  };
+}
+
+async function requestTopicAnalysis(reviewTexts, signal, platform) {
+  const requestStartedAt = performance.now();
+  const reviewTextStats = getTopicReviewTextStats(reviewTexts, platform);
+  console.log('[TOPIC REQUEST START]', {
+    ...reviewTextStats,
+    reviewCount: reviewTexts.length,
+    requestUrl: TOPIC_API_URL,
+  });
+  let response;
+  try {
+    response = await fetch(TOPIC_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reviews: reviewTexts }),
+      signal,
+    });
+  } catch (error) {
+    console.error('[TOPIC DIAGNOSTIC] request failed before response', {
+      httpStatus: null,
+      responseOk: null,
+      statusText: null,
+      responseBody: null,
+      reviewCount: reviewTexts.length,
+      platform,
+      requestUrl: TOPIC_API_URL,
+      errorName: error?.name || 'Error',
+      errorMessage: error?.message || String(error),
+      elapsedMs: Math.round(performance.now() - requestStartedAt),
+      ...reviewTextStats,
+    });
+    throw error;
+  }
+
+  const elapsedMs = Math.round(performance.now() - requestStartedAt);
+  console.log('[TOPIC REQUEST RESPONSE]', {
+    platform,
+    reviewCount: reviewTexts.length,
+    httpStatus: response.status,
+    responseOk: response.ok,
+    statusText: response.statusText,
+    elapsedMs,
+  });
+  const responseContentType = response.headers.get('content-type');
+  const responseBodyPromise = response.clone().text().catch(() => '[response body unavailable]');
+  let payload;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    const responseBody = await responseBodyPromise;
+    console.error('[TOPIC DIAGNOSTIC] response JSON parsing failed', {
+      httpStatus: response.status,
+      responseOk: response.ok,
+      statusText: response.statusText,
+      responseBody: responseBody.slice(0, 2000),
+      reviewCount: reviewTexts.length,
+      platform,
+      requestUrl: TOPIC_API_URL,
+      responseBodyContentType: responseContentType,
+      jsonParseSucceeded: false,
+      elapsedMs,
+      errorName: error?.name || 'Error',
+      errorMessage: error?.message || String(error),
+    });
+    throw error;
+  }
+  const responseBody = await responseBodyPromise;
+  const results = Array.isArray(payload?.results) ? payload.results : [];
+  const assignmentCount = results.reduce((total, result) => (
+    total + (Array.isArray(result?.topics) ? result.topics.length : 0)
+  ), 0);
+  if (response.ok) {
+    console.log('[TOPIC REQUEST RESULT]', {
+      platform,
+      reviewCount: reviewTexts.length,
+      responseBodyContentType: responseContentType,
+      jsonParseSucceeded: true,
+      returnedTopicResultsCount: results.length,
+      topicAssignmentCount: assignmentCount,
+    });
+  }
+  if (!response.ok || !payload?.success || !hasValidTopicAnalysis(payload, reviewTexts.length)) {
+    console.error('[TOPIC DIAGNOSTIC] response rejected', {
+      httpStatus: response.status,
+      responseOk: response.ok,
+      statusText: response.statusText,
+      responseBody: responseBody.slice(0, 2000),
+      reviewCount: reviewTexts.length,
+      platform,
+      requestUrl: TOPIC_API_URL,
+    });
+    throw new Error(payload?.error || 'Review topic response was invalid.');
+  }
+  console.log('[TOPIC TEST] response-status', response.status);
+  console.log('[TOPIC TEST] response-time', `${elapsedMs} ms`);
+  console.log('[TOPIC TEST] response-results-length', results.length);
+  console.log('[TOPIC TEST] response-topic-assignment-count', assignmentCount);
+  return payload;
+}
+
+function getReviewerName(review, platform) {
+  if (review && typeof review === 'object') {
+    return review.reviewer || review.author || review.userName || review.reviewerName || `${platform || 'Current Source'} Reviewer`;
+  }
+  return `${platform || 'Current Source'} Reviewer`;
+}
+
+function getPlatformLabel(platform) {
+  const labels = {
+    googleplay: 'Google Play',
+    google: 'Google Reviews',
+    lazada: 'Lazada',
+    shopee: 'Shopee',
+    steam: 'Steam',
+    agoda: 'Agoda',
+  };
+  return labels[String(platform || '').toLowerCase()] || 'Current Source';
+}
+
+function buildEmotionData(reviews, predictions, platform, topicResponse = null, topicStatus = 'pending') {
+  const counts = predictions.reduce((summary, category) => {
+    summary[category] += 1;
+    return summary;
+  }, { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 });
+  const totalReviews = predictions.length;
+  const dominantCategory = Number(Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0]);
+  const dominantDisplay = CATEGORY_DISPLAY[dominantCategory];
+
+  const emotions = Object.entries(CATEGORY_DISPLAY).map(([category, display]) => ({
+    id: display.label.toLowerCase(),
+    category: Number(category),
+    label: display.label,
+    emoji: display.emoji,
+    percentage: totalReviews ? Math.round((counts[category] / totalReviews) * 100) : 0,
+    count: counts[category],
+    confidence: 'SVM',
+    keywords: getMeaningfulKeywords(reviews.filter((review, index) => predictions[index] === Number(category))),
+    color: display.color,
+  }));
+
+  const topics = aggregateTopicsForReviews(
+    reviews.map((review, topicResultIndex) => ({ review, topicResultIndex })),
+    topicResponse,
+  );
+  const quotes = reviews.map((review, index) => {
+    const category = predictions[index];
+    const display = CATEGORY_DISPLAY[category];
+    return {
+      id: index + 1,
+      topicResultIndex: index,
+      category,
+      emotion: display.label,
+      emoji: display.emoji,
+      driver: `${platform || 'Current Source'} Review`,
+      text: getReviewText(review),
+      author: getReviewerName(review, platform),
+      date: review?.date || review?.reviewDate || '',
+      rating: review?.rating ?? null,
+    };
+  });
+
+  return {
+    totalReviews,
+    dominantEmotion: {
+      label: dominantDisplay.label,
+      emoji: dominantDisplay.emoji,
+      percentage: totalReviews ? Math.round((counts[dominantCategory] / totalReviews) * 100) : 0,
+      confidence: 'SVM',
+    },
+    emotions,
+    topics,
+    topicStatus,
+    topicModel: topicResponse?.model || null,
+    topicThreshold: topicResponse?.threshold ?? null,
+    quotes: attachReviewPriorities(quotes, topicResponse),
+  };
+}
 
 /**
  * Resolves the currently active tab at the exact moment of execution.
@@ -92,6 +356,15 @@ export default function PopupPage() {
   const [authToastMessage, setAuthToastMessage] = useState('');
   const [activeTab, setActiveTab] = useState('analyze');
   const [analysisStatus, setAnalysisStatus] = useState('idle');
+  const [emotionData, setEmotionData] = useState(null);
+  const [topicAnalysis, setTopicAnalysis] = useState(null);
+  const [currentAnalysisRecord, setCurrentAnalysisRecord] = useState(null);
+  const [isSavingAnalysis, setIsSavingAnalysis] = useState(false);
+  const [hasSavedAnalysis, setHasSavedAnalysis] = useState(false);
+  const [saveAnalysisError, setSaveAnalysisError] = useState('');
+  const [savedAnalysisCount, setSavedAnalysisCount] = useState(0);
+  const [analysisViewRevision, setAnalysisViewRevision] = useState(0);
+  const [isRescanning, setIsRescanning] = useState(false);
   const [activeTabUrl, setActiveTabUrl] = useState('');
   const [hasResolvedActiveTab, setHasResolvedActiveTab] = useState(false);
   const isSiteUnsupported = hasResolvedActiveTab && detectPlatformFromUrl(activeTabUrl) === 'unknown';
@@ -112,6 +385,50 @@ export default function PopupPage() {
   const detectedPlatformRef = useRef(detectedPlatform);
   const activeContextRef = useRef({ tabId: null, url: '', platform: 'unknown', pageKey: null, generation: 0, isResolved: false });
   const pendingScrapeDataRef = useRef(null);
+  const lastScrapedReviewsRef = useRef([]);
+  const rescanAnalysisPendingRef = useRef(null);
+  const rescanTimeoutRef = useRef(null);
+  const rescanRequestCounterRef = useRef(0);
+  const ignoreAutomaticScrapesRef = useRef(false);
+  const analysisRevisionRef = useRef(0);
+  const analysisResolvedPageKeyRef = useRef(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const refreshCount = () => {
+      getSavedAnalysisCount().then((count) => {
+        if (isMounted) setSavedAnalysisCount(count);
+      }).catch((error) => {
+        if (import.meta.env.DEV) console.error('VoxReview: Could not count saved analyses:', error);
+      });
+    };
+
+    refreshCount();
+    const handleStorageChange = (changes, areaName) => {
+      if (areaName !== 'local' || !changes.voxreview_page_analyses) return;
+      setSavedAnalysisCount(Object.keys(changes.voxreview_page_analyses.newValue || {}).length);
+    };
+    globalThis.chrome?.storage?.onChanged?.addListener(handleStorageChange);
+
+    return () => {
+      isMounted = false;
+      globalThis.chrome?.storage?.onChanged?.removeListener(handleStorageChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'saved') return;
+    getSavedAnalysisCount().then(setSavedAnalysisCount).catch((error) => {
+      if (import.meta.env.DEV) console.error('VoxReview: Could not refresh saved count:', error);
+    });
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!topicAnalysis) return;
+    console.log('[TOPIC TEST] topicAnalysis-after-response', topicAnalysis);
+    console.log('[TOPIC TEST] topicAnalysis-results-length', topicAnalysis.results?.length ?? 0);
+    console.log('[TOPIC TEST] topicStatus', emotionData?.topicStatus || 'ready');
+  }, [topicAnalysis, emotionData?.topicStatus]);
 
   useEffect(() => {
     activeTabUrlRef.current = activeTabUrl;
@@ -121,8 +438,10 @@ export default function PopupPage() {
     detectedPlatformRef.current = detectedPlatform;
   }, [detectedPlatform]);
 
-  const syncScrapeData = async (data) => {
+  const syncScrapeData = (data) => {
     if (!data) return;
+    const scrapeStartedAt = performance.now();
+    console.log('[Analyze] scrape start');
 
     console.log('[POPUP] storage payload received:', {
       platform: data.platform,
@@ -143,44 +462,25 @@ export default function PopupPage() {
     const currentActiveUrl = currentContext.url || activeTabUrlRef.current;
     const currentActivePlat = String(currentContext.platform || detectedPlatformRef.current || '').toLowerCase();
 
-    // 1. Always update page-specific persistent storage record with fresh reviews & timestamp
-    if (scrapePlatform && scrapeUrl && Array.isArray(data.reviews) && data.reviews.length > 0) {
-      try {
-        const existingRecord = await getAnalysisForPage(scrapePlatform, scrapeUrl);
-        if (existingRecord) {
-          await saveAnalysisForPage({
-            ...existingRecord,
-            reviews: data.reviews,
-            productTitle: data.productTitle || existingRecord.productTitle,
-            rating: data.rating || existingRecord.rating,
-            category: data.category || existingRecord.category,
-            productImage: data.productImage || existingRecord.productImage,
-            timestamp: Date.now()
-          });
-        }
-      } catch (err) {
-        console.warn('VoxReview: Error updating page analysis storage:', err);
-      }
-    }
-
-    // 2. Check if data belongs to the currently active tab / page
+    // Check if data belongs to the currently active tab / page.
     const isForCurrentTab = (() => {
       if (scrapePlatform && currentActivePlat && currentActivePlat !== 'unknown' && scrapePlatform !== currentActivePlat) {
         return false;
       }
 
-      // A. Same tab ID
-      if (data.tabId != null && currentContext.tabId != null && Number(data.tabId) === Number(currentContext.tabId)) {
-        return true;
-      }
-
-      // B. Normalized page key match
+      // A. Normalized page identity must win over tab ID for SPA navigation races.
       if (scrapeUrl && currentActiveUrl) {
         if (scrapeUrl === currentActiveUrl) return true;
         const currentKey = currentContext.pageKey || getPageKey(currentActivePlat, currentActiveUrl);
         const scrapeKey = getPageKey(scrapePlatform, scrapeUrl);
         console.log('[POPUP] page key comparison:', { currentKey, scrapeKey });
         if (currentKey && scrapeKey && currentKey === scrapeKey) return true;
+        if (currentKey && scrapeKey && currentKey !== scrapeKey) return false;
+      }
+
+      // B. Same tab ID, only after confirming there is no page-key conflict.
+      if (data.tabId != null && currentContext.tabId != null && Number(data.tabId) === Number(currentContext.tabId)) {
+        return true;
       }
 
       // C. Relaxed URL origin + pathname comparison
@@ -207,6 +507,29 @@ export default function PopupPage() {
       return;
     }
 
+    const pendingRescan = rescanAnalysisPendingRef.current;
+    if (!pendingRescan && ignoreAutomaticScrapesRef.current) {
+      console.log('[POPUP] ignoring ambient scrape after Clear Analysis');
+      return;
+    }
+    if (!pendingRescan && currentContext.pageKey &&
+      analysisResolvedPageKeyRef.current === currentContext.pageKey) {
+      console.log('[POPUP] ignoring automatic scrape update for an already resolved analysis');
+      return;
+    }
+    if (pendingRescan) {
+      if (!isMatchingRescanScrape(data, pendingRescan)) {
+        console.log('[RESCAN] ignoring stale or unrelated scrape update', {
+          platform: scrapePlatform,
+          tabId: data.tabId ?? null,
+          pageKey: getPageKey(scrapePlatform, scrapeUrl),
+          timestamp: data.timestamp ?? null,
+          requestMatches: data.rescanRequestId === pendingRescan.requestId,
+        });
+        return;
+      }
+    }
+
     console.log('[POPUP] applying reviews:', Array.isArray(data.reviews) ? data.reviews.length : 0);
     if (data.platform) setDetectedPlatform(data.platform);
     if (data.isProductPage !== undefined) setScrapedIsProductPage(data.isProductPage);
@@ -214,10 +537,40 @@ export default function PopupPage() {
     if (data.category !== undefined) setScrapedCategory(data.category);
     if (data.rating !== undefined) setScrapedRating(data.rating);
     if (data.productImage !== undefined) setScrapedProductImage(data.productImage);
-    if (Array.isArray(data.reviews)) setScrapedReviews(data.reviews);
+    if (Array.isArray(data.reviews)) {
+      setScrapedReviews(data.reviews);
+      lastScrapedReviewsRef.current = data.reviews;
+    }
     if (data.hasError !== undefined) setScrapedHasError(!!data.hasError);
     if (data.errorMessage !== undefined) setScrapedErrorMessage(data.errorMessage);
     console.log('[POPUP] final review count:', Array.isArray(data.reviews) ? data.reviews.length : 0);
+    console.log(`[Analyze] scrape: ${Math.round(performance.now() - scrapeStartedAt)} ms`);
+
+    if (pendingRescan) {
+      rescanAnalysisPendingRef.current = null;
+      if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
+      rescanTimeoutRef.current = null;
+      setIsRescanning(false);
+      if (data.hasError) {
+        setEmotionData(null);
+        setTopicAnalysis(null);
+        setCurrentAnalysisRecord(null);
+        setHasSavedAnalysis(false);
+        setIsSavingAnalysis(false);
+        setSaveAnalysisError('');
+        setAnalysisStatus('idle');
+      } else if (data.isProductPage !== false && Array.isArray(data.reviews) && data.reviews.length > 0) {
+        void handleAnalyzeClick(data.reviews, data);
+      } else {
+        setEmotionData(null);
+        setTopicAnalysis(null);
+        setCurrentAnalysisRecord(null);
+        setHasSavedAnalysis(false);
+        setIsSavingAnalysis(false);
+        setSaveAnalysisError('');
+        setAnalysisStatus('idle');
+      }
+    }
   };
 
   useEffect(() => {
@@ -240,10 +593,14 @@ export default function PopupPage() {
       const previousContext = activeContextRef.current;
 
       const pageGenuinelyChanged = previousContext.isResolved && (
-        previousContext.tabId !== activeTabObj.id ||
         (previousContext.pageKey && newPageKey && previousContext.pageKey !== newPageKey) ||
         (previousContext.platform !== urlBasedPlatform)
       );
+      if (pageGenuinelyChanged) {
+        analysisRevisionRef.current += 1;
+        analysisResolvedPageKeyRef.current = null;
+      }
+      const restoreRevision = analysisRevisionRef.current;
 
       const context = {
         tabId: activeTabObj.id,
@@ -261,6 +618,11 @@ export default function PopupPage() {
       console.log('[POPUP] page key:', newPageKey);
 
       if (urlBasedPlatform === 'unknown') {
+        ignoreAutomaticScrapesRef.current = false;
+        rescanAnalysisPendingRef.current = null;
+        if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
+        rescanTimeoutRef.current = null;
+        setIsRescanning(false);
         setDetectedPlatform('');
         setScrapedIsProductPage(false);
         setScrapedProductTitle(null);
@@ -268,8 +630,14 @@ export default function PopupPage() {
         setScrapedRating(null);
         setScrapedProductImage(null);
         setScrapedReviews([]);
+        lastScrapedReviewsRef.current = [];
         setScrapedHasError(false);
         setScrapedErrorMessage('');
+        setEmotionData(null);
+        setTopicAnalysis(null);
+        setCurrentAnalysisRecord(null);
+        setHasSavedAnalysis(false);
+        analysisResolvedPageKeyRef.current = null;
         setAnalysisStatus('idle');
         return;
       }
@@ -277,30 +645,157 @@ export default function PopupPage() {
       setDetectedPlatform(urlBasedPlatform);
 
       if (pageGenuinelyChanged) {
+        ignoreAutomaticScrapesRef.current = false;
+        rescanAnalysisPendingRef.current = null;
+        if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
+        rescanTimeoutRef.current = null;
+        setIsRescanning(false);
         setScrapedIsProductPage(false);
         setScrapedProductTitle(null);
         setScrapedCategory(null);
         setScrapedRating(null);
         setScrapedProductImage(null);
         setScrapedReviews([]);
+        lastScrapedReviewsRef.current = [];
         setScrapedHasError(false);
         setScrapedErrorMessage('');
+        setEmotionData(null);
+        setTopicAnalysis(null);
+        setCurrentAnalysisRecord(null);
+        setHasSavedAnalysis(false);
         setAnalysisStatus('idle');
       }
 
       const existingAnalysis = await getAnalysisForPage(urlBasedPlatform, activeUrl);
-      if (activeContextRef.current.generation !== context.generation) return;
+      if (activeContextRef.current.generation !== context.generation || analysisRevisionRef.current !== restoreRevision) return;
+      if (analysisResolvedPageKeyRef.current === context.pageKey) return;
 
       if (existingAnalysis) {
+        analysisResolvedPageKeyRef.current = context.pageKey;
+        setCurrentAnalysisRecord(existingAnalysis);
+        setHasSavedAnalysis(hasValidTopicAnalysis(existingAnalysis.topicAnalysis, existingAnalysis.reviews || []) || !ENABLE_TOPIC_ANALYSIS);
+        setSaveAnalysisError('');
         if (existingAnalysis.productTitle) setScrapedProductTitle(existingAnalysis.productTitle);
-        if (existingAnalysis.reviews) setScrapedReviews(existingAnalysis.reviews);
+        if (existingAnalysis.reviews) {
+          setScrapedReviews(existingAnalysis.reviews);
+          lastScrapedReviewsRef.current = existingAnalysis.reviews;
+          setScrapedIsProductPage(existingAnalysis.reviews.length > 0);
+        }
         if (existingAnalysis.rating) setScrapedRating(existingAnalysis.rating);
         if (existingAnalysis.category) setScrapedCategory(existingAnalysis.category);
         if (existingAnalysis.productImage) setScrapedProductImage(existingAnalysis.productImage);
+        if (existingAnalysis.emotionData) {
+          const savedReviews = Array.isArray(existingAnalysis.reviews) ? existingAnalysis.reviews : [];
+          const savedReviewAnalysis = Array.isArray(existingAnalysis.reviewAnalysis) ? existingAnalysis.reviewAnalysis : [];
+          const savedTopics = existingAnalysis.topicAnalysis;
+          const hasSavedTopicResults = hasValidTopicAnalysis(savedTopics, savedReviews.length);
+          const restoredQuotes = attachReviewPriorities(savedReviewAnalysis.length === savedReviews.length
+            ? savedReviewAnalysis.map((analysis, index) => {
+                const review = savedReviews[index] ?? analysis.review;
+                const category = analysis.category;
+                const display = CATEGORY_DISPLAY[category];
+                return {
+                  id: review?.id ?? review?.reviewId ?? index + 1,
+                  topicResultIndex: index,
+                  category,
+                  emotion: display?.label || 'Pending',
+                  emoji: display?.emoji || '💬',
+                  driver: `${existingAnalysis.platform || 'Current Source'} Review`,
+                  text: getReviewText(review),
+                  author: getReviewerName(review, existingAnalysis.platform),
+                  rating: review?.rating ?? null,
+                };
+              })
+            : (existingAnalysis.emotionData.quotes || []).map((quote, index) => ({
+                ...quote,
+                id: quote.id ?? index + 1,
+                topicResultIndex: index,
+                category: quote.category ?? CATEGORY_BY_EMOTION_ID.get(quote.emotion?.toLowerCase()),
+                rating: savedReviews[index]?.rating ?? quote.rating ?? null,
+              })), savedTopics);
+          const savedEmotions = (existingAnalysis.emotionData.emotions || []).map((emotion) => ({
+            ...emotion,
+            category: emotion.category ?? CATEGORY_BY_EMOTION_ID.get(emotion.id),
+          }));
+          const restoredEmotionData = {
+            ...existingAnalysis.emotionData,
+            emotions: savedEmotions,
+            quotes: restoredQuotes,
+            ...(hasSavedTopicResults
+              ? {
+                  topics: aggregateTopicsForReviews(
+                    savedReviews.map((review, topicResultIndex) => ({ review, topicResultIndex })),
+                    savedTopics,
+                  ),
+                  topicStatus: 'ready',
+                  topicModel: savedTopics.model || null,
+                  topicThreshold: savedTopics.threshold ?? null,
+                }
+                : {
+                    topicStatus: !ENABLE_TOPIC_ANALYSIS
+                      ? 'disabled'
+                      : savedReviews.length > 0 ? 'pending' : 'not-analyzed',
+                  }),
+          };
+          setEmotionData(restoredEmotionData);
+          setTopicAnalysis(hasSavedTopicResults ? savedTopics : null);
+          const savedReviewTexts = savedReviews.map(getReviewText);
+          if (ENABLE_TOPIC_ANALYSIS && !hasSavedTopicResults && savedReviewTexts.length > 0 && savedReviewTexts.every((text) => text.trim())) {
+            analysisResolvedPageKeyRef.current = context.pageKey;
+            const topicRevision = ++analysisRevisionRef.current;
+            const topicAbortController = new AbortController();
+            const topicTimeout = setTimeout(
+              () => topicAbortController.abort(),
+              getTopicRequestTimeoutMs(savedReviewTexts.length),
+            );
+            void requestTopicAnalysis(
+              savedReviewTexts,
+              topicAbortController.signal,
+              getPlatformLabel(existingAnalysis.platform || urlBasedPlatform),
+            )
+              .then(async (topicPayload) => {
+                if (analysisRevisionRef.current !== topicRevision) return;
+                const topicData = {
+                  ...restoredEmotionData,
+                  quotes: attachReviewPriorities(restoredEmotionData.quotes, topicPayload),
+                  topics: aggregateTopicsForReviews(
+                    savedReviews.map((review, topicResultIndex) => ({ review, topicResultIndex })),
+                    topicPayload,
+                  ),
+                  topicStatus: 'ready',
+                  topicModel: topicPayload.model || null,
+                  topicThreshold: topicPayload.threshold ?? null,
+                };
+                analysisRevisionRef.current += 1;
+                setTopicAnalysis(topicPayload);
+                setEmotionData(topicData);
+                setCurrentAnalysisRecord((currentRecord) => currentRecord
+                  ? { ...currentRecord, topicAnalysis: topicPayload, emotionData: topicData }
+                  : currentRecord);
+                setHasSavedAnalysis(false);
+              })
+              .catch((topicError) => {
+                if (analysisRevisionRef.current !== topicRevision) return;
+                console.warn('VoxReview: legacy topic analysis unavailable:', topicError);
+                analysisRevisionRef.current += 1;
+                setEmotionData((currentData) => currentData
+                  ? { ...currentData, topicStatus: 'unavailable' }
+                  : currentData);
+              })
+              .finally(() => clearTimeout(topicTimeout));
+          }
+        } else {
+          setEmotionData(null);
+          setTopicAnalysis(null);
+        }
         setScrapedHasError(false);
         setScrapedErrorMessage('');
         setAnalysisStatus('completed');
       } else {
+        setEmotionData(null);
+        setTopicAnalysis(null);
+        setCurrentAnalysisRecord(null);
+        setHasSavedAnalysis(false);
         if (pendingScrapeDataRef.current) {
           const pending = pendingScrapeDataRef.current;
           pendingScrapeDataRef.current = null;
@@ -404,41 +899,239 @@ export default function PopupPage() {
     }
   }, []);
 
-  const platformLabel = (() => {
-    const value = String(detectedPlatform || '').toLowerCase();
-    if (value === 'googleplay') return 'Google Play';
-    if (value === 'google') return 'Google Reviews';
-    if (value === 'lazada') return 'Lazada';
-    if (value === 'shopee') return 'Shopee';
-    if (value === 'steam') return 'Steam';
-    if (value === 'agoda') return 'Agoda';
-    return 'Current Source';
-  })();
+  const platformLabel = getPlatformLabel(detectedPlatform);
 
-  const handleAnalyzeClick = async () => {
+  const handleAnalyzeClick = async (reviewsToAnalyze = scrapedReviews, scrapeMetadata = null) => {
     if (analysisStatus === 'analyzing') return;
+    console.log('[TOPIC TEST] analyze-start');
+    const analyzeStartedAt = performance.now();
+    const analysisRevision = ++analysisRevisionRef.current;
+    analysisResolvedPageKeyRef.current = activeContextRef.current.pageKey || getPageKey(
+      detectedPlatform,
+      scrapeMetadata?.url || activeTabUrlRef.current,
+    );
+    const analysisReviews = Array.isArray(reviewsToAnalyze) && reviewsToAnalyze.length > 0
+      ? reviewsToAnalyze
+      : scrapedReviews.length > 0 ? scrapedReviews : lastScrapedReviewsRef.current;
+    const analysisPlatformLabel = scrapeMetadata?.platform
+      ? getPlatformLabel(scrapeMetadata.platform)
+      : platformLabel;
+    setCurrentAnalysisRecord(null);
+    setHasSavedAnalysis(false);
+    setSaveAnalysisError('');
+    setIsSavingAnalysis(false);
+    setScrapedReviews(analysisReviews);
+    setTopicAnalysis(null);
     setAnalysisStatus('analyzing');
 
-    setTimeout(async () => {
+    try {
+      const reviewTexts = analysisReviews.map(getReviewText);
+      console.log('[TOPIC REVIEW TEXT STATS]', getTopicReviewTextStats(reviewTexts, analysisPlatformLabel));
+      console.log('[TOPIC TEST] review-count', reviewTexts.length);
+      if (reviewTexts.length === 0 || reviewTexts.some((review) => !review.trim())) {
+        throw new Error('No usable review text was available for SVM analysis.');
+      }
+
+      const svmStartedAt = performance.now();
+      console.log('[Analyze] SVM request start');
+      const response = await fetch(SVM_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviews: reviewTexts }),
+      });
+      const payload = await response.json();
+      console.log(`[Analyze] SVM: ${Math.round(performance.now() - svmStartedAt)} ms`);
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || 'SVM analysis failed.');
+      }
+      if (!Array.isArray(payload.predictions) ||
+        payload.predictions.length !== analysisReviews.length ||
+        payload.predictions.some((category) => !VALID_CATEGORIES.has(category))) {
+        throw new Error('SVM returned an invalid Category prediction payload.');
+      }
+      if (analysisRevisionRef.current !== analysisRevision) return;
+
+      const explanationResults = Array.isArray(payload.results) && payload.results.length === analysisReviews.length
+        ? payload.results.map((result, index) => ({
+            category: result?.category === payload.predictions[index]
+              ? result.category
+              : payload.predictions[index],
+            emotionDrivers: Array.isArray(result?.emotionDrivers)
+              ? result.emotionDrivers.filter((driver) => typeof driver === 'string')
+              : [],
+          }))
+        : payload.predictions.map((category) => ({ category, emotionDrivers: [] }));
+      const nextEmotionData = buildEmotionData(
+        analysisReviews,
+        payload.predictions,
+        analysisPlatformLabel,
+        null,
+        ENABLE_TOPIC_ANALYSIS ? 'pending' : 'disabled',
+      );
+      setEmotionData(nextEmotionData);
+      setAnalysisStatus('completed');
+      setTimeout(() => {
+        console.log(`[Analyze] UI render: ${Math.round(performance.now() - analyzeStartedAt)} ms`);
+      }, 0);
       const record = {
-        platform: platformLabel,
-        page_url: activeTabUrl || window.location.href,
-        targetTitle: scrapedProductTitle || 'Product Review',
-        productTitle: scrapedProductTitle || 'Product Review',
-        dominantEmotion: 'Happy',
-        percentage: '65%',
-        reviews: scrapedReviews,
-        rating: scrapedRating,
-        category: scrapedCategory,
-        productImage: scrapedProductImage,
+        platform: analysisPlatformLabel,
+        page_url: scrapeMetadata?.url || activeTabUrl || window.location.href,
+        pageKey: getPageKey(
+          scrapeMetadata?.platform || detectedPlatform || activeContextRef.current.platform,
+          scrapeMetadata?.url || activeTabUrl || window.location.href,
+        ),
+        targetTitle: scrapeMetadata?.productTitle || scrapedProductTitle || 'Product Review',
+        productTitle: scrapeMetadata?.productTitle || scrapedProductTitle || 'Product Review',
+        dominantEmotion: nextEmotionData.dominantEmotion.label,
+        percentage: `${nextEmotionData.dominantEmotion.percentage}%`,
+        reviews: analysisReviews,
+        reviewAnalysis: explanationResults.map((result, index) => ({
+          review: analysisReviews[index],
+          category: result.category,
+          emotionDrivers: result.emotionDrivers,
+        })),
+        topicAnalysis: null,
+        emotionData: nextEmotionData,
+        rating: scrapeMetadata?.rating ?? scrapedRating,
+        category: scrapeMetadata?.category ?? scrapedCategory,
+        productImage: scrapeMetadata?.productImage ?? scrapedProductImage,
         timestamp: Date.now()
       };
-      await saveAnalysisForPage(record);
-      setAnalysisStatus('completed');
-    }, 1800);
+      setCurrentAnalysisRecord(record);
+      analysisResolvedPageKeyRef.current = record.pageKey;
+
+      if (!ENABLE_TOPIC_ANALYSIS) {
+        console.log('[Analyze] topics disabled by VITE_ENABLE_TOPIC_ANALYSIS=false');
+        return;
+      }
+
+      const topicStartedAt = performance.now();
+      console.log('[Analyze] topic request start');
+      const topicAbortController = new AbortController();
+      const topicTimeout = setTimeout(
+        () => topicAbortController.abort(),
+        getTopicRequestTimeoutMs(reviewTexts.length),
+      );
+      try {
+        const topicPayload = await requestTopicAnalysis(
+          reviewTexts,
+          topicAbortController.signal,
+          analysisPlatformLabel,
+        );
+        console.log(`[Analyze] Topics: ${Math.round(performance.now() - topicStartedAt)} ms`);
+        if (analysisRevisionRef.current !== analysisRevision) return;
+
+        const topicData = buildEmotionData(
+          analysisReviews,
+          payload.predictions,
+          analysisPlatformLabel,
+          topicPayload,
+          'ready',
+        );
+        if (analysisRevisionRef.current !== analysisRevision) return;
+        analysisRevisionRef.current += 1;
+        analysisResolvedPageKeyRef.current = getPageKey(record.platform, record.page_url);
+        setEmotionData(topicData);
+        setTopicAnalysis(topicPayload);
+        setCurrentAnalysisRecord({ ...record, topicAnalysis: topicPayload, emotionData: topicData });
+        setHasSavedAnalysis(false);
+      } catch (topicError) {
+        if (analysisRevisionRef.current !== analysisRevision) return;
+        console.error('[TOPIC TEST] topicError', topicError);
+        console.warn('VoxReview: review topic analysis unavailable:', topicError);
+        analysisRevisionRef.current += 1;
+        analysisResolvedPageKeyRef.current = getPageKey(record.platform, record.page_url);
+        setTopicAnalysis(null);
+        const unavailableData = buildEmotionData(
+          analysisReviews,
+          payload.predictions,
+          analysisPlatformLabel,
+          null,
+          'unavailable',
+        );
+        setEmotionData(unavailableData);
+        setCurrentAnalysisRecord({ ...record, topicAnalysis: null, emotionData: unavailableData });
+        setHasSavedAnalysis(false);
+      } finally {
+        clearTimeout(topicTimeout);
+      }
+    } catch (error) {
+      if (analysisRevisionRef.current !== analysisRevision) return;
+      console.error('VoxReview: SVM analysis failed:', error);
+      analysisRevisionRef.current += 1;
+      analysisResolvedPageKeyRef.current = null;
+      setEmotionData(null);
+      setTopicAnalysis(null);
+      setCurrentAnalysisRecord(null);
+      setHasSavedAnalysis(false);
+      setAnalysisStatus('idle');
+    }
   };
 
-  const handleClearAnalysis = () => setAnalysisStatus('idle');
+  const handleSaveAnalysis = async () => {
+    if (!currentAnalysisRecord || isSavingAnalysis || hasSavedAnalysis) return false;
+    setIsSavingAnalysis(true);
+    setSaveAnalysisError('');
+    const saveRevision = analysisRevisionRef.current;
+    try {
+      const pageKey = getPageKey(
+        activeContextRef.current.platform || detectedPlatform,
+        currentAnalysisRecord.page_url,
+      ) || currentAnalysisRecord.pageKey;
+      if (!pageKey) throw new Error('Unable to identify this page for saving.');
+      const recordToSave = {
+        ...currentAnalysisRecord,
+        pageKey,
+        reviews: currentAnalysisRecord.reviews || scrapedReviews,
+        emotionData: emotionData || currentAnalysisRecord.emotionData,
+        topicAnalysis,
+        priorityResults: (emotionData?.quotes || currentAnalysisRecord.emotionData?.quotes || [])
+          .map((quote) => quote.priority)
+          .filter(Boolean),
+      };
+      const savedRecord = await saveAnalysisForPage(recordToSave);
+      if (!savedRecord) throw new Error('The current analysis could not be saved.');
+      if (analysisRevisionRef.current === saveRevision) {
+        setCurrentAnalysisRecord(savedRecord);
+        setHasSavedAnalysis(true);
+      }
+      getSavedAnalysisCount().then(setSavedAnalysisCount).catch((error) => {
+        if (import.meta.env.DEV) console.error('VoxReview: Could not refresh saved count after save:', error);
+      });
+      return true;
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('VoxReview: Could not save analysis:', error);
+      if (analysisRevisionRef.current === saveRevision) {
+        setSaveAnalysisError('Unable to save this analysis. Please try again.');
+      }
+      return false;
+    } finally {
+      if (analysisRevisionRef.current === saveRevision) setIsSavingAnalysis(false);
+    }
+  };
+
+  const handleClearAnalysis = () => {
+    analysisRevisionRef.current += 1;
+    analysisResolvedPageKeyRef.current = null;
+    rescanAnalysisPendingRef.current = null;
+    ignoreAutomaticScrapesRef.current = true;
+    if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
+    rescanTimeoutRef.current = null;
+    pendingScrapeDataRef.current = null;
+    setIsRescanning(false);
+    setEmotionData(null);
+    setTopicAnalysis(null);
+    setCurrentAnalysisRecord(null);
+    setHasSavedAnalysis(false);
+    setSaveAnalysisError('');
+    setIsSavingAnalysis(false);
+    setScrapedReviews([]);
+    // Keep the last same-page scrape only as an in-memory source for Analyze Again.
+    setScrapedHasError(false);
+    setScrapedErrorMessage('');
+    setAnalysisStatus('idle');
+    setAnalysisViewRevision((revision) => revision + 1);
+  };
 
   // Log in / Sign up redirects to the existing Web Application authentication routes
   const handleOpenLogin = () => openWebAppAuth('/login');
@@ -456,89 +1149,244 @@ export default function PopupPage() {
     setShowLogoutConfirmation(false);
   };
 
-  const handleSelectSavedItem = () => {
+  const handleSelectSavedItem = (item) => {
+    if (!item) return;
+    analysisRevisionRef.current += 1;
+    const platformFromUrl = detectPlatformFromUrl(item.page_url || '');
+    const restoredPlatform = platformFromUrl !== 'unknown'
+      ? platformFromUrl
+      : String(item.platform || '').toLowerCase().replace('google reviews', 'google').replace('google maps', 'google').replace('google play', 'googleplay');
+    const pageKey = getPageKey(restoredPlatform, item.page_url) || item.pageKey;
+    const savedReviews = Array.isArray(item.reviews) ? item.reviews : [];
+    const savedTopics = item.topicAnalysis;
+    const hasSavedTopicResults = hasValidTopicAnalysis(savedTopics, savedReviews.length);
+    const savedReviewAnalysis = Array.isArray(item.reviewAnalysis) ? item.reviewAnalysis : [];
+    const quotes = savedReviewAnalysis.length === savedReviews.length
+      ? savedReviewAnalysis.map((analysis, index) => {
+          const review = savedReviews[index] ?? analysis.review;
+          const category = analysis.category;
+          const display = CATEGORY_DISPLAY[category];
+          return {
+            id: review?.id ?? review?.reviewId ?? index + 1,
+            topicResultIndex: index,
+            category,
+            emotion: display?.label || 'Pending',
+            emoji: display?.emoji || '💬',
+            driver: `${item.platform || 'Current Source'} Review`,
+            text: getReviewText(review),
+            author: getReviewerName(review, item.platform),
+            rating: review?.rating ?? null,
+          };
+        })
+      : (item.emotionData?.quotes || []).map((quote, index) => ({
+          ...quote,
+          id: quote.id ?? index + 1,
+          topicResultIndex: index,
+          category: quote.category ?? CATEGORY_BY_EMOTION_ID.get(quote.emotion?.toLowerCase()),
+          rating: savedReviews[index]?.rating ?? quote.rating ?? null,
+        }));
+    const restoredEmotionData = item.emotionData
+      ? {
+          ...item.emotionData,
+          quotes: attachReviewPriorities(quotes, hasSavedTopicResults ? savedTopics : null),
+          topicStatus: hasSavedTopicResults
+            ? 'ready'
+            : !ENABLE_TOPIC_ANALYSIS ? 'disabled' : savedReviews.length > 0 ? 'pending' : 'not-analyzed',
+        }
+      : null;
+
     setActiveTab('analyze');
-    setAnalysisStatus('completed');
+    activeContextRef.current = {
+      tabId: item.tabId ?? null,
+      url: item.page_url || '',
+      platform: restoredPlatform,
+      pageKey,
+      generation: activeContextRef.current.generation + 1,
+      isResolved: true,
+    };
+    activeTabUrlRef.current = item.page_url || '';
+    setActiveTabUrl(item.page_url || '');
+    setHasResolvedActiveTab(true);
+    setDetectedPlatform(restoredPlatform);
+    setScrapedIsProductPage(savedReviews.length > 0);
+    setScrapedReviews(savedReviews);
+    lastScrapedReviewsRef.current = savedReviews;
+    setScrapedProductTitle(item.productTitle || item.targetTitle || null);
+    setScrapedCategory(item.category ?? null);
+    setScrapedRating(item.rating ?? null);
+    setScrapedProductImage(item.productImage ?? null);
+    setScrapedHasError(false);
+    setScrapedErrorMessage('');
+    setEmotionData(restoredEmotionData);
+    setTopicAnalysis(hasSavedTopicResults ? savedTopics : null);
+    setCurrentAnalysisRecord({ ...item, pageKey, emotionData: restoredEmotionData });
+    setHasSavedAnalysis(hasSavedTopicResults || !ENABLE_TOPIC_ANALYSIS);
+    setSaveAnalysisError('');
+    setIsSavingAnalysis(false);
+    setAnalysisStatus(restoredEmotionData ? 'completed' : 'idle');
+    analysisResolvedPageKeyRef.current = pageKey;
+    setAnalysisViewRevision((revision) => revision + 1);
+
+    if (ENABLE_TOPIC_ANALYSIS && !hasSavedTopicResults && savedReviews.length > 0) {
+      const reviewTexts = savedReviews.map(getReviewText);
+      if (reviewTexts.every((text) => text.trim())) {
+        const topicRevision = analysisRevisionRef.current;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), getTopicRequestTimeoutMs(reviewTexts.length));
+        void requestTopicAnalysis(reviewTexts, controller.signal, getPlatformLabel(restoredPlatform))
+          .then((topicPayload) => {
+            if (analysisRevisionRef.current !== topicRevision) return;
+            const updatedEmotionData = {
+              ...restoredEmotionData,
+              quotes: attachReviewPriorities(restoredEmotionData.quotes, topicPayload),
+              topics: aggregateTopicsForReviews(
+                savedReviews.map((review, topicResultIndex) => ({ review, topicResultIndex })),
+                topicPayload,
+              ),
+              topicStatus: 'ready',
+              topicModel: topicPayload.model || null,
+              topicThreshold: topicPayload.threshold ?? null,
+            };
+            setEmotionData(updatedEmotionData);
+            setTopicAnalysis(topicPayload);
+            setCurrentAnalysisRecord((currentRecord) => currentRecord
+              ? { ...currentRecord, topicAnalysis: topicPayload, emotionData: updatedEmotionData }
+              : currentRecord);
+          })
+          .catch((error) => {
+            if (analysisRevisionRef.current !== topicRevision) return;
+            if (import.meta.env.DEV) console.error('VoxReview: Could not restore missing topic results:', error);
+            setEmotionData((currentData) => currentData ? { ...currentData, topicStatus: 'unavailable' } : currentData);
+          })
+          .finally(() => clearTimeout(timeout));
+      }
+    }
   };
 
-  // Manual rescan — ALWAYS targets the currently active browser tab resolved at click time
-  const [isRescanning, setIsRescanning] = useState(false);
-  const handleRescanPage = async () => {
-    if (isRescanning) return;
+  const handleRescanPage = async (savedItem = null) => {
+    if (isRescanning) return false;
     setIsRescanning(true);
 
     try {
-      // 1. Resolve the CURRENT active tab at the exact time of clicking
-      const activeTabObj = await resolveCurrentActiveTab();
-      if (!activeTabObj || !activeTabObj.id) {
-        console.warn('VoxReview: No active tab found to rescan.');
-        setIsRescanning(false);
-        setScrapedHasError(true);
-        setScrapedErrorMessage('No active browser tab found.');
-        return;
+      let activeTabObj;
+      if (savedItem?.page_url && typeof chrome !== 'undefined' && chrome.tabs?.query) {
+        const tabs = await new Promise((resolve) => chrome.tabs.query({}, (result) => resolve(result || [])));
+        const savedPageKey = getPageKey(savedItem.platform, savedItem.page_url) || savedItem.pageKey;
+        activeTabObj = tabs.find((tab) => tab.id != null && tab.url &&
+          getPageKey(detectPlatformFromUrl(tab.url), tab.url) === savedPageKey);
+        if (!activeTabObj) {
+          setIsRescanning(false);
+          return false;
+        }
+      } else {
+        activeTabObj = await resolveCurrentActiveTab();
       }
 
+      if (!activeTabObj?.id) throw new Error('No active browser tab found.');
       const currentUrl = activeTabObj.url || activeTabUrlRef.current;
-      if (!currentUrl) {
-        setIsRescanning(false);
-        setScrapedHasError(true);
-        setScrapedErrorMessage('Unable to determine the current browser page.');
-        return;
-      }
-      const plat = detectPlatformFromUrl(currentUrl);
-      console.log('[RESCAN] clicked', { tabId: activeTabObj.id, url: currentUrl, platform: plat });
-      const newPageKey = getPageKey(plat, currentUrl);
+      if (!currentUrl) throw new Error('Unable to determine the current browser page.');
+
+      const platform = detectPlatformFromUrl(currentUrl);
+      const pageKey = getPageKey(platform, currentUrl);
+      const requestId = `rescan-${Date.now()}-${++rescanRequestCounterRef.current}`;
+      if (savedItem) setActiveTab('analyze');
       const previousContext = activeContextRef.current;
-      const contextChanged = previousContext.tabId !== activeTabObj.id || previousContext.pageKey !== newPageKey;
+      const generation = previousContext.generation + 1;
+      console.log('[RESCAN] clicked', { tabId: activeTabObj.id, url: currentUrl, platform });
+
+      analysisRevisionRef.current += 1;
+      analysisResolvedPageKeyRef.current = null;
+      pendingScrapeDataRef.current = null;
+      rescanAnalysisPendingRef.current = null;
+      if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
       activeContextRef.current = {
         tabId: activeTabObj.id,
         url: currentUrl,
-        platform: plat,
-        pageKey: newPageKey,
-        generation: contextChanged ? previousContext.generation + 1 : previousContext.generation,
+        platform,
+        pageKey,
+        generation,
         isResolved: true,
       };
-
-      // 2. If the current tab URL remains unsupported after re-detection:
-      if (plat === 'unknown') {
-        setActiveTabUrl(currentUrl);
-        setHasResolvedActiveTab(true);
-        setDetectedPlatform('');
-        setTimeout(() => setIsRescanning(false), 600);
-        return;
-      }
-
-      // 3. Tab is supported: update active state and clear unsupported flag
+      activeTabUrlRef.current = currentUrl;
       setActiveTabUrl(currentUrl);
       setHasResolvedActiveTab(true);
-      setDetectedPlatform(plat);
+      setAnalysisStatus('idle');
+      setEmotionData(null);
+      setTopicAnalysis(null);
+      setCurrentAnalysisRecord(null);
+      setHasSavedAnalysis(false);
+      setSaveAnalysisError('');
+      setIsSavingAnalysis(false);
+      setScrapedReviews([]);
+      lastScrapedReviewsRef.current = [];
+      setScrapedProductTitle(null);
+      setScrapedCategory(null);
+      setScrapedRating(null);
+      setScrapedProductImage(null);
       setScrapedHasError(false);
       setScrapedErrorMessage('');
+      setAnalysisViewRevision((revision) => revision + 1);
 
-      // 4. Use the established background-to-content-script forwarding path.
+      if (platform === 'unknown') {
+        ignoreAutomaticScrapesRef.current = false;
+        setDetectedPlatform('');
+        setScrapedIsProductPage(false);
+        setIsRescanning(false);
+        return true;
+      }
+
+      setDetectedPlatform(platform);
+      setScrapedIsProductPage(true);
+      ignoreAutomaticScrapesRef.current = false;
+      rescanAnalysisPendingRef.current = {
+        pageKey,
+        tabId: activeTabObj.id,
+        requestId,
+        startedAt: Date.now(),
+      };
+      rescanTimeoutRef.current = setTimeout(() => {
+        if (rescanAnalysisPendingRef.current?.pageKey !== pageKey) return;
+        rescanAnalysisPendingRef.current = null;
+        rescanTimeoutRef.current = null;
+        ignoreAutomaticScrapesRef.current = true;
+        setIsRescanning(false);
+        setScrapedHasError(true);
+        setScrapedErrorMessage('Rescan did not return fresh data from this page. Try again.');
+      }, 30000);
+
       chrome.runtime.sendMessage(
-        { type: 'rescanPage', tabId: activeTabObj.id, url: currentUrl, platform: plat },
+        { type: 'rescanPage', tabId: activeTabObj.id, url: currentUrl, platform, requestId },
         (response) => {
-          if (chrome.runtime?.lastError) {
-            console.warn('VoxReview rescan error:', chrome.runtime.lastError.message);
-            setIsRescanning(false);
-            setScrapedHasError(true);
-            setScrapedErrorMessage('VoxReview cannot access this page. Please refresh the page and try again.');
-          } else if (response && response.ok === false) {
-            console.warn('VoxReview rescan failed:', response.reason);
-            setIsRescanning(false);
-            setScrapedHasError(true);
-            setScrapedErrorMessage(response.reason || 'Failed to rescan current page.');
-          } else {
-            setTimeout(() => setIsRescanning(false), 800);
+          if (chrome.runtime?.lastError || response?.ok === false) {
+            const reason = chrome.runtime?.lastError?.message || response?.reason || 'Unable to rescan this page.';
+            if (rescanAnalysisPendingRef.current?.pageKey === pageKey) {
+              rescanAnalysisPendingRef.current = null;
+              ignoreAutomaticScrapesRef.current = true;
+              if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
+              rescanTimeoutRef.current = null;
+              setIsRescanning(false);
+              setScrapedHasError(true);
+              setScrapedErrorMessage(reason);
+            }
           }
-        }
+        },
       );
-    } catch (err) {
-      console.error('VoxReview: Error during handleRescanPage:', err);
+      return true;
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('VoxReview: Error during rescan:', error);
+      rescanAnalysisPendingRef.current = null;
+      ignoreAutomaticScrapesRef.current = true;
+      if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
+      rescanTimeoutRef.current = null;
       setIsRescanning(false);
+      setScrapedHasError(true);
+      setScrapedErrorMessage(error.message || 'Unable to rescan this page.');
+      return false;
     }
   };
+
+  const availableReviewCount = scrapedReviews.length || lastScrapedReviewsRef.current.length;
+  const hasReviewsForAnalysis = scrapedReviews.length > 0 || lastScrapedReviewsRef.current.length > 0;
 
   return (
     <div className="popup-standalone-page">
@@ -602,7 +1450,7 @@ export default function PopupPage() {
                   </button>
                 </div>
               ) : /* ── 3. Supported site, but No Product Reviews / Non-product page ── */
-              !scrapedIsProductPage || scrapedReviews.length === 0 ? (
+              !scrapedIsProductPage || !hasReviewsForAnalysis ? (
                 <NoReviewsView
                   platform={detectedPlatform}
                   isProductPage={scrapedIsProductPage}
@@ -619,7 +1467,7 @@ export default function PopupPage() {
                     category={scrapedCategory || 'Product Reviews'}
                     rating={scrapedRating ? String(scrapedRating) : null}
                     productImage={scrapedProductImage}
-                    reviewsCount={scrapedReviews.length > 0 ? String(scrapedReviews.length) : '0'}
+                    reviewsCount={String(availableReviewCount)}
                     status={analysisStatus}
                   />
 
@@ -682,8 +1530,15 @@ export default function PopupPage() {
                   </div>
 
                   <AnalysisResults
+                    key={analysisViewRevision}
                     status={analysisStatus}
                     isLoggedIn={isLoggedIn}
+                    onSaveAnalysis={handleSaveAnalysis}
+                    isSaving={isSavingAnalysis}
+                    hasSavedAnalysis={hasSavedAnalysis}
+                    saveError={saveAnalysisError}
+                    emotionData={emotionData}
+                    topicAnalysis={topicAnalysis}
                     scrapedReviews={scrapedReviews}
                     onSaveRedirect={handleOpenLogin}
                     onClearAnalysis={handleClearAnalysis}
@@ -699,6 +1554,8 @@ export default function PopupPage() {
               isLoggedIn={isLoggedIn}
               onLoginClick={handleOpenLogin}
               onSelectSaved={handleSelectSavedItem}
+              onRefreshSaved={handleRescanPage}
+              onSavedCountChange={setSavedAnalysisCount}
             />
           )}
 
@@ -717,7 +1574,7 @@ export default function PopupPage() {
         </div>
 
         {/* Bottom Navigation */}
-        <BottomNavBar activeTab={activeTab} onTabChange={setActiveTab} />
+        <BottomNavBar activeTab={activeTab} onTabChange={setActiveTab} savedCount={savedAnalysisCount} />
       </div>
       {showLogoutConfirmation && (
         <LogoutConfirmationModalExtension

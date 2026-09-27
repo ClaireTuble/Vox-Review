@@ -836,7 +836,9 @@ export const authService = {
       const raw = localStorage.getItem(USER_AUTH_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed?.user) return parsed.user;
+        if (parsed?.user && parsed?.token && !isExpiredAccessToken(parsed.token)) {
+          return parsed.user;
+        }
       }
 
       return null;
