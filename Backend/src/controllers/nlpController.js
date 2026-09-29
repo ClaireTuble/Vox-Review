@@ -27,7 +27,6 @@ const pendingTopicRequests = new Map();
 const topicQueue = [];
 const topicRequestDiagnostics = new Map();
 const topicWorkerRequestIds = new WeakMap();
-
 function safeTopicDiagnosticText(value, reviews) {
   let text = String(value ?? "");
   reviews.forEach((review) => {

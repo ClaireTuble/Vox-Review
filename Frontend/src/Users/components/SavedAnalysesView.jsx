@@ -1,11 +1,17 @@
 import { useState, useEffect } from 'react';
 import { Lock, Globe, Trash2, RefreshCw, Search, Filter, ChevronDown } from 'lucide-react';
 import { clearAllPageAnalyses, getPageAnalyses, getPageKey, deleteAnalysisForPage } from '../../services/pageAnalysisStorage.js';
+import {
+  filterSavedAnalyses,
+  SAVED_EMOTION_OPTIONS,
+  SAVED_PLATFORM_OPTIONS,
+  toggleSavedFilterSelection,
+} from '../utils/savedAnalysisFilters.js';
 import '../css/SavedAnalysesView.css';
 import '../css/ExtensionConfirmationModal.css';
 
-const ALL_PLATFORMS = ['Shopee', 'Lazada', 'Google', 'Google Play', 'Steam'];
-const ALL_EMOTIONS = ['Happy', 'Sad', 'Anger', 'Disgust', 'Fear', 'Sarcastic'];
+const ALL_PLATFORMS = SAVED_PLATFORM_OPTIONS;
+const ALL_EMOTIONS = SAVED_EMOTION_OPTIONS;
 
 export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, onSelectSaved, onRefreshSaved, onSavedCountChange }) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -16,6 +22,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
   const [itemToDelete, setItemToDelete] = useState(null);
   const [refreshingId, setRefreshingId] = useState(null);
   const [refreshErrorMap, setRefreshErrorMap] = useState({});
+  const [refreshMessageMap, setRefreshMessageMap] = useState({});
   const [deleteError, setDeleteError] = useState('');
   const [clearAllError, setClearAllError] = useState('');
   const [showClearAllConfirmation, setShowClearAllConfirmation] = useState(false);
@@ -43,46 +50,30 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
   }, [onSavedCountChange]);
 
   const togglePlatform = (plat) => {
-    if (selectedPlatforms.includes(plat)) {
-      setSelectedPlatforms(selectedPlatforms.filter((p) => p !== plat));
-    } else {
-      setSelectedPlatforms([...selectedPlatforms, plat]);
-    }
+    setSelectedPlatforms((current) => toggleSavedFilterSelection(current, plat, ALL_PLATFORMS));
   };
 
   const toggleAllPlatforms = () => {
-    if (selectedPlatforms.length === ALL_PLATFORMS.length) {
-      setSelectedPlatforms([]);
-    } else {
-      setSelectedPlatforms([...ALL_PLATFORMS]);
-    }
+    setSelectedPlatforms([...ALL_PLATFORMS]);
   };
 
   const toggleEmotion = (emo) => {
-    if (selectedEmotions.includes(emo)) {
-      setSelectedEmotions(selectedEmotions.filter((e) => e !== emo));
-    } else {
-      setSelectedEmotions([...selectedEmotions, emo]);
-    }
+    setSelectedEmotions((current) => toggleSavedFilterSelection(current, emo, ALL_EMOTIONS));
   };
 
   const toggleAllEmotions = () => {
-    if (selectedEmotions.length === ALL_EMOTIONS.length) {
-      setSelectedEmotions([]);
-    } else {
-      setSelectedEmotions([...ALL_EMOTIONS]);
-    }
+    setSelectedEmotions([...ALL_EMOTIONS]);
   };
 
   const platformLabel = (() => {
-    if (selectedPlatforms.length === ALL_PLATFORMS.length) return 'All Platforms';
+    if (selectedPlatforms.length === 0 || selectedPlatforms.length === ALL_PLATFORMS.length) return 'All Platforms';
     if (selectedPlatforms.length === 0) return '0 Platforms';
     if (selectedPlatforms.length === 1) return selectedPlatforms[0];
     return `${selectedPlatforms.length} Platforms`;
   })();
 
   const emotionLabel = (() => {
-    if (selectedEmotions.length === ALL_EMOTIONS.length) return 'All Emotions';
+    if (selectedEmotions.length === 0 || selectedEmotions.length === ALL_EMOTIONS.length) return 'All Emotions';
     if (selectedEmotions.length === 0) return '0 Emotions';
     if (selectedEmotions.length === 1) return selectedEmotions[0];
     return `${selectedEmotions.length} Emotions`;
@@ -130,10 +121,15 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
 
     setRefreshingId(itemKey);
     setRefreshErrorMap((prev) => ({ ...prev, [itemKey]: null }));
+    setRefreshMessageMap((prev) => ({ ...prev, [itemKey]: null }));
 
     try {
       const refreshed = await onRefreshSaved?.(item);
-      if (!refreshed) throw new Error('Saved page is not open in an accessible tab.');
+      if (!refreshed?.success) {
+        throw new Error(refreshed?.error || 'Saved page is not open in an accessible tab.');
+      }
+      await reloadSavedItems();
+      setRefreshMessageMap((prev) => ({ ...prev, [itemKey]: refreshed.message }));
     } catch (err) {
       if (import.meta.env.DEV) console.error('VoxReview: Could not rescan saved page:', err);
       setRefreshErrorMap((prev) => ({
@@ -169,37 +165,10 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
     );
   }
 
-  const filteredItems = savedItems.filter((item) => {
-    // Platform matching: OR logic among selected platforms
-    const matchesPlatform =
-      selectedPlatforms.length === ALL_PLATFORMS.length
-        ? true
-        : selectedPlatforms.length === 0
-        ? false
-        : selectedPlatforms.some((p) => {
-            if (p === item.platform) return true;
-            if (p === 'Google Play' && item.platform.startsWith('Google Play')) return true;
-            if (p === 'Google' && (item.platform === 'Google' || item.platform === 'Google Maps' || item.platform === 'Google Reviews')) return true;
-            return false;
-          });
-
-    // Emotion matching: OR logic among selected emotions
-    const matchesEmotion =
-      selectedEmotions.length === ALL_EMOTIONS.length
-        ? true
-        : selectedEmotions.length === 0
-        ? false
-        : selectedEmotions.some((e) => e.toLowerCase() === String(item.dominantEmotion || '').toLowerCase());
-
-    // Search query matching
-    const query = searchQuery.trim().toLowerCase();
-    const matchesSearch =
-      !query ||
-      String(item.targetTitle || '').toLowerCase().includes(query) ||
-      String(item.platform || '').toLowerCase().includes(query) ||
-      String(item.dominantEmotion || '').toLowerCase().includes(query);
-
-    return matchesPlatform && matchesEmotion && matchesSearch;
+  const filteredItems = filterSavedAnalyses(savedItems, {
+    searchQuery,
+    platforms: selectedPlatforms,
+    emotions: selectedEmotions,
   });
 
   return (
@@ -263,7 +232,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                 <label className="saved-popover-option select-all">
                   <input
                     type="checkbox"
-                    checked={selectedPlatforms.length === ALL_PLATFORMS.length}
+                    checked={selectedPlatforms.length === 0 || selectedPlatforms.length === ALL_PLATFORMS.length}
                     onChange={toggleAllPlatforms}
                   />
                   <span>Select All</span>
@@ -283,7 +252,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                 <button
                   type="button"
                   className="saved-popover-clear"
-                  onClick={() => setSelectedPlatforms([])}
+                    onClick={() => setSelectedPlatforms([...ALL_PLATFORMS])}
                 >
                   Clear
                 </button>
@@ -315,7 +284,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                 <label className="saved-popover-option select-all">
                   <input
                     type="checkbox"
-                    checked={selectedEmotions.length === ALL_EMOTIONS.length}
+                    checked={selectedEmotions.length === 0 || selectedEmotions.length === ALL_EMOTIONS.length}
                     onChange={toggleAllEmotions}
                   />
                   <span>Select All</span>
@@ -335,7 +304,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                 <button
                   type="button"
                   className="saved-popover-clear"
-                  onClick={() => setSelectedEmotions([])}
+                  onClick={() => setSelectedEmotions([...ALL_EMOTIONS])}
                 >
                   Clear
                 </button>
@@ -388,6 +357,11 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                 {refreshErrorMap[getPageKey(item.platform, item.page_url) || item.pageKey] && (
                   <div className="saved-refresh-error-msg">
                     {refreshErrorMap[getPageKey(item.platform, item.page_url) || item.pageKey]}
+                  </div>
+                )}
+                {refreshMessageMap[getPageKey(item.platform, item.page_url) || item.pageKey] && (
+                  <div className="saved-refresh-status-msg" role="status">
+                    {refreshMessageMap[getPageKey(item.platform, item.page_url) || item.pageKey]}
                   </div>
                 )}
               </div>

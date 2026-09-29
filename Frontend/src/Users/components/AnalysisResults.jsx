@@ -97,7 +97,6 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
     quotes: normalizedReviews.length > 0
       ? normalizedReviews.map((r, idx) => {
           const reviewText = getReviewText(r);
-          console.log('Rendering review:', r);
           return {
             id: idx + 1,
             emotion: 'Pending',
@@ -150,7 +149,12 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
   const radius = 50;
   const circumference = 2 * Math.PI * radius;
 
-  const reviewPriorities = calculateReviewPriorities(data.quotes, topicAnalysis);
+  const priorityReviews = data.quotes.map((quote, index) => ({
+    ...quote,
+    rating: quote.rating ?? normalizedReviews[index]?.rating,
+    helpfulCount: quote.helpfulCount ?? normalizedReviews[index]?.helpfulCount,
+  }));
+  const reviewPriorities = calculateReviewPriorities(priorityReviews, topicAnalysis);
   const quoteEntries = data.quotes.map((quote, originalIndex) => ({
     quote,
     priority: reviewPriorities[originalIndex],
@@ -498,7 +502,9 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
               <span className="intel-label">Common Keywords</span>
               <div className="keywords-tags-row">
                 {topicKeywords.length > 0
-                  ? topicKeywords.map((keyword) => <span key={keyword} className="keyword-tag">{keyword}</span>)
+                  ? topicKeywords.map((keyword) => (
+                    <span key={keyword} className="keyword-tag">{keyword}</span>
+                  ))
                   : <span className="keyword-empty-message">{activeTopic.count === 0
                     ? 'No reviews were classified into this topic, so no common keywords are available.'
                     : 'No meaningful topic keywords found.'}</span>}
@@ -507,7 +513,13 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
             {activeTopic.reviews?.length > 0 && (
               <div className="topic-evidence-section">
                 <span className="intel-label">Representative Reviews</span>
-                {activeTopic.reviews.map((review, index) => <p key={`${review}-${index}`} className="quote-text">"{review}"</p>)}
+                <div className="topic-evidence-list">
+                  {activeTopic.reviews.map((review, index) => (
+                    <div key={`${review}-${index}`} className="topic-evidence-item">
+                      <p className="quote-text">"{review}"</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

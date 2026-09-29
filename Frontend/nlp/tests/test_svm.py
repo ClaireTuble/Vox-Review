@@ -42,6 +42,7 @@ from svm_pipeline import (
     save_svm_model,
     load_svm_model,
 )
+from svm_model import MODEL_PATH, explain_category, predict_category
 
 
 @pytest.fixture(scope="module")
@@ -316,6 +317,79 @@ def test_special_characters_only(trained_model):
     result = predict_svm(trained_model, "??? !!! @@@ ### $$$")
     assert isinstance(result, dict)
     assert result["emotion_code"] in VALID_EMOTION_CODES
+
+
+@pytest.fixture(scope="module")
+def saved_svm_model():
+    return load_svm_model(MODEL_PATH)
+
+
+@pytest.mark.parametrize(
+    ("review", "expected_term"),
+    [
+        ("The graphics are beautiful and the gameplay is really fun.", "fun"),
+        ("I was disappointed with the poor quality and slow delivery.", "disappointed"),
+        ("Angry ako sa terrible service at broken item.", "broken"),
+    ],
+)
+def test_common_keywords_use_actual_svm_evidence(saved_svm_model, review, expected_term):
+    result = explain_category(review, model=saved_svm_model)
+
+    assert expected_term in {term.casefold() for term in result["emotionDrivers"]}
+    assert all(term.casefold() in review.casefold() for term in result["emotionDrivers"])
+
+
+def test_taglish_keywords_preserve_source_terms(saved_svm_model):
+    review = "Ang ganda ng quality, super sulit and happy ako."
+
+    result = explain_category(review, model=saved_svm_model)
+
+    assert {"ganda", "sulit"}.intersection(term.casefold() for term in result["emotionDrivers"])
+    assert all(term.casefold() in review.casefold() for term in result["emotionDrivers"])
+
+
+def test_common_keywords_follow_svm_margin_contribution_order(saved_svm_model):
+    result = explain_category(
+        "I was disappointed with the poor quality and slow delivery.",
+        model=saved_svm_model,
+    )
+
+    assert result["emotionDrivers"].index("disappointed") < result["emotionDrivers"].index("quality")
+
+
+def test_common_keywords_exclude_general_verbs(saved_svm_model):
+    review = "I bought and used it, played games, received updates, and downloaded the app. I was disappointed with poor quality."
+
+    result = explain_category(review, model=saved_svm_model)
+    excluded = {"buy", "bought", "use", "used", "play", "played", "receive", "received", "download", "downloaded"}
+
+    assert "disappointed" in {term.casefold() for term in result["emotionDrivers"]}
+    assert not excluded.intersection(term.casefold() for term in result["emotionDrivers"])
+
+
+def test_keywords_are_not_selected_by_first_sentence_position(saved_svm_model):
+    review = "The package arrived on Tuesday. I was disappointed with the poor quality."
+
+    result = explain_category(review, model=saved_svm_model)
+    terms = {term.casefold() for term in result["emotionDrivers"]}
+
+    assert "disappointed" in terms
+    assert not {"package", "arrived", "tuesday"}.intersection(terms)
+
+
+def test_explanation_preserves_existing_svm_prediction(saved_svm_model):
+    reviews = [
+        "The graphics are beautiful and the gameplay is really fun.",
+        "I was disappointed with the poor quality and slow delivery.",
+        "Angry ako sa terrible service at broken item.",
+        "Ang ganda ng quality, super sulit and happy ako.",
+    ]
+
+    for review in reviews:
+        assert explain_category(review, model=saved_svm_model)["category"] == predict_category(
+            review,
+            model=saved_svm_model,
+        )
 
 
 # ==============================================================================

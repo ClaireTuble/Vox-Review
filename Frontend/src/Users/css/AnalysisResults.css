@@ -392,17 +392,33 @@
 .keywords-tags-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 6px 7px;
+  align-items: center;
 }
 
 .keyword-tag {
+  display: inline-flex;
+  align-items: center;
   background: var(--accent-light);
   border: 1px solid var(--accent-border);
   color: var(--accent-color);
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 600;
-  padding: 3px 8px;
-  border-radius: 6px;
+  line-height: 1.35;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: normal;
+  word-break: normal;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.keyword-tag:hover {
+  border-color: var(--accent-color);
+}
+
+.keyword-separator {
+  display: none;
 }
 
 /* ── Review topics ───────────────────────────────────────── */
@@ -438,14 +454,48 @@
   background: var(--bg-card);
 }
 
+.topic-detail-card {
+  gap: 12px;
+}
+
+.topic-detail-card .intel-keywords-section {
+  gap: 7px;
+}
+
 .topic-evidence-section {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.topic-evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.topic-evidence-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-left: 3px solid var(--accent-color);
+  border-radius: 8px;
+  padding: 8px 11px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.topic-evidence-item:hover {
+  border-color: var(--accent-border);
 }
 
 .topic-evidence-section .quote-text {
   margin: 0;
+  font-size: 11px;
+  color: var(--text-primary);
+  line-height: 1.45;
+  font-style: italic;
+  word-break: break-word;
 }
 
 .aspect-card-header {

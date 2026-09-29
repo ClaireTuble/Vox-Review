@@ -5,17 +5,48 @@ const TOPIC_LABELS = [
 ];
 
 const COMMON_REVIEW_WORDS = new Set([
-  'about', 'after', 'again', 'also', 'ang', 'and', 'are', 'been', 'but', 'can', 'did',
-  'for', 'from', 'have', 'ita', 'its', 'just', 'kung', 'mga', 'more', 'not', 'only',
-  'really', 'this', 'that', 'the', 'then', 'they', 'their', 'there', 'very', 'was',
-  'were', 'with', 'yung', 'para', 'pero', 'may', 'mga', 'ng', 'na', 'naman', 'po',
-  'ito', 'sa', 'ako', 'ko', 'mo', 'siya', 'sya', 'din', 'rin', 'lang', 'to', 'at',
+  'about', 'after', 'again', 'also', 'ang', 'are', 'as', 'at', 'ba', 'be', 'been', 'but',
+  'and', 'by', 'can', 'could', 'did', 'do', 'does', 'for', 'from', 'have', 'he', 'her', 'here',
+  'how', 'i', 'if', 'in', 'into', 'is', 'it', 'ita', 'its', 'just', 'ko', 'kung', 'lang',
+  'may', 'me', 'mga', 'mo', 'more', 'na', 'naman', 'ng', 'ni', 'not', 'of', 'on', 'only',
+  'or', 'our', 'pa', 'para', 'pero', 'po', 'quite', 'really', 'rin', 'sa', 'she', 'siya',
+  'so', 'sya', 'that', 'the', 'their', 'them', 'then', 'there', 'they', 'this', 'to', 'too',
+  'very', 'was', 'we', 'were', 'with', 'would', 'yung', 'you', 'your', 'din', 'easily',
+  'super', 'talaga', 'one', 'has', 'have', 'had', 'be', 'been', 'being', 'no',
 ]);
+const GENERIC_REVIEW_WORDS = new Set([
+  'app', 'apps', 'item', 'items', 'package', 'person', 'product', 'products', 'review',
+  'reviews', 'stuff', 'thing', 'things',
+]);
+const ORDINARY_REVIEW_VERBS = new Set([
+  'assemble', 'assembled', 'assembles', 'assembling', 'arrive', 'arrived', 'arrives', 'arriving',
+  'bought', 'buy', 'buying', 'buys', 'came', 'come', 'comes', 'coming', 'deliver', 'delivered',
+  'delivers', 'delivering', 'download', 'downloaded', 'downloading', 'downloads', 'feel', 'feels', 'felt', 'get', 'gets',
+  'getting', 'got', 'has', 'have', 'had', 'is', 'are', 'was', 'were', 'include', 'included', 'includes', 'including',
+  'install', 'installed', 'installing', 'installs', 'look', 'looked', 'looking',
+  'looks', 'make', 'made', 'makes', 'making', 'order', 'ordered', 'ordering', 'orders', 'play',
+  'played', 'playing', 'plays', 'receive', 'received', 'receives', 'receiving', 'send', 'sending',
+  'see', 'seeing', 'sees', 'saw', 'sends', 'sent', 'ship', 'shipped', 'shipping', 'ships', 'use', 'used', 'uses', 'using', 'work',
+  'worked', 'working', 'works', 'binili', 'bumili', 'dumating', 'ginamit', 'gumamit', 'gumana',
+  'gumagana', 'nagdownload', 'naglaro', 'naglalaro', 'nabili', 'natanggap', 'nilaro', 'tinanggap',
+]);
+const REVIEW_URL_PATTERN = /https?:\/\/\S+|www\.\S+/gi;
+const REVIEW_TOKEN_PATTERN = /[\p{L}]+(?:-[\p{L}]+)*/gu;
+const PHRASE_CONNECTORS = new Set(['and', 'to']);
 
 export function getReviewText(review) {
   if (typeof review === 'string') return review;
   if (review && typeof review === 'object') {
-    return review.text || review.reviewText || review.comment || review.review || '';
+    const textFields = [
+      review.text,
+      review.reviewText,
+      review.comment,
+      review.review,
+      review.content,
+      review.body,
+      review.reviewBody,
+    ];
+    return textFields.find((value) => typeof value === 'string' && value.trim()) || '';
   }
   return '';
 }
@@ -24,17 +55,132 @@ function unwrapReview(entry) {
   return Number.isInteger(entry?.topicResultIndex) ? entry.review : entry;
 }
 
-export function getMeaningfulKeywords(reviews) {
+function topicLabelWords(label) {
+  return new Set((label.match(REVIEW_TOKEN_PATTERN) || []).flatMap((word) => (
+    word.toLocaleLowerCase().split('-')
+  )));
+}
+
+function clauseAtPosition(clauses, position) {
+  return clauses.find((clause) => (
+    clause.index <= position && position < clause.index + clause[0].length
+  ));
+}
+
+function isSubjectBeforePossessiveVerb(source, endPosition) {
+  return /^\s+(?:[\p{L}-]+\s+){0,2}(?:has|have|had)\b/iu.test(source.slice(endPosition));
+}
+
+function isReadablePhrase(tokens) {
+  const parts = tokens.flatMap((token) => token.toLocaleLowerCase().split('-'));
+  if (!parts.length || parts.some((part) => part.length < 2)) return false;
+
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    const isInnerConnector = PHRASE_CONNECTORS.has(part) && index > 0 && index < parts.length - 1;
+    const isLeadingNegation = part === 'no' && index === 0 && parts.length > 1;
+    const isInfinitiveVerb = part === 'assemble' && parts[index - 1] === 'to' && index === parts.length - 1;
+    if (isInnerConnector || isLeadingNegation || isInfinitiveVerb) continue;
+    if (COMMON_REVIEW_WORDS.has(part) || ORDINARY_REVIEW_VERBS.has(part)) return false;
+  }
+
+  const contentParts = parts.filter((part, index) => (
+    !PHRASE_CONNECTORS.has(part) && !(part === 'no' && index === 0)
+  ));
+  if (!contentParts.length || contentParts.length > 3) return false;
+  return !(contentParts.length === 1 && GENERIC_REVIEW_WORDS.has(contentParts[0]));
+}
+
+export function getMeaningfulKeywords(reviews, selectedTopicLabel = null, topicAnalysis = null) {
   const frequencies = new Map();
-  reviews.forEach((entry) => {
-    const words = getReviewText(unwrapReview(entry)).toLowerCase().match(/[a-z][a-z0-9'-]*/g) || [];
-    const uniqueWords = new Set(words.filter((word) => word.length > 2 && !COMMON_REVIEW_WORDS.has(word)));
-    uniqueWords.forEach((word) => frequencies.set(word, (frequencies.get(word) || 0) + 1));
+  const topicResults = Array.isArray(topicAnalysis?.results) ? topicAnalysis.results : [];
+  const targetTopicWords = selectedTopicLabel ? topicLabelWords(selectedTopicLabel) : new Set();
+
+  reviews.forEach((entry, entryIndex) => {
+    const reviewText = getReviewText(unwrapReview(entry));
+    const source = reviewText.replace(REVIEW_URL_PATTERN, ' ').replace(/<[^>]*>/g, ' ');
+    const tokens = [...source.matchAll(REVIEW_TOKEN_PATTERN)];
+    const reviewTerms = new Map();
+    const resultIndex = Number.isInteger(entry?.topicResultIndex) ? entry.topicResultIndex : entryIndex;
+    const assignedLabels = topicResults[resultIndex]?.topics?.map((topic) => topic.label) || [];
+    const competingTopicWords = new Set(assignedLabels
+      .filter((label) => label !== selectedTopicLabel)
+      .flatMap((label) => [...topicLabelWords(label)]));
+    const clauses = [...source.matchAll(/[^.!?;\n]+/g)];
+    const targetCueClauses = clauses.filter((clause) => (
+      [...topicLabelWords(clause[0])].some((word) => targetTopicWords.has(word))
+    ));
+
+    for (let start = 0; start < tokens.length; start += 1) {
+      const phraseTokens = [];
+      for (let end = start; end < Math.min(tokens.length, start + 4); end += 1) {
+        if (end > start) {
+          const previous = tokens[end - 1];
+          const gap = source.slice(previous.index + previous[0].length, tokens[end].index);
+          if (!/^\s+$/.test(gap)) break;
+        }
+
+        const token = tokens[end][0];
+        phraseTokens.push(token);
+        if (!isReadablePhrase(phraseTokens)) continue;
+
+        const term = source.slice(tokens[start].index, tokens[end].index + token.length);
+        if (!reviewText.toLocaleLowerCase().includes(term.toLocaleLowerCase())) continue;
+        if (isSubjectBeforePossessiveVerb(source, tokens[end].index + token.length)) continue;
+        const clause = clauseAtPosition(clauses, tokens[start].index);
+        const clauseWords = clause ? topicLabelWords(clause[0]) : new Set();
+        const hasTargetCue = [...clauseWords].some((word) => targetTopicWords.has(word));
+        const hasCompetingCue = [...clauseWords].some((word) => competingTopicWords.has(word));
+        if (targetCueClauses.length && !hasTargetCue) continue;
+        if (hasCompetingCue && !hasTargetCue) continue;
+        if (!hasTargetCue && phraseTokens.some((word) => competingTopicWords.has(word.toLocaleLowerCase()))) continue;
+
+        const key = phraseTokens.map((word) => word.toLocaleLowerCase()).join(' ');
+        const candidate = reviewTerms.get(key);
+        if (candidate) candidate.occurrences += 1;
+        else reviewTerms.set(key, { term, tokens: [...phraseTokens], occurrences: 1 });
+      }
+    }
+
+    reviewTerms.forEach((candidate, key) => {
+      const frequency = frequencies.get(key);
+      if (frequency) {
+        frequency.reviewCount += 1;
+        frequency.occurrences += candidate.occurrences;
+      } else {
+        frequencies.set(key, {
+          ...candidate,
+          reviewCount: 1,
+        });
+      }
+    });
   });
-  return [...frequencies.entries()]
-    .sort(([, first], [, second]) => second - first)
-    .slice(0, 6)
-    .map(([word]) => word);
+
+  const ranked = [...frequencies.entries()]
+    .map(([key, candidate]) => ({
+      key,
+      ...candidate,
+      score: candidate.reviewCount * 2 + Math.log1p(candidate.occurrences) * 0.25 +
+        (candidate.tokens.length - 1) * 1 +
+        (candidate.tokens.some((token) => PHRASE_CONNECTORS.has(token.toLocaleLowerCase())) ? 1 : 0),
+    }))
+    .sort((first, second) => second.score - first.score || first.key.localeCompare(second.key));
+  const selected = [];
+  for (const candidate of ranked) {
+    if (selected.length === 8) break;
+    const candidateTokens = candidate.tokens
+      .map((token) => token.toLocaleLowerCase())
+      .filter((token) => !PHRASE_CONNECTORS.has(token) && !COMMON_REVIEW_WORDS.has(token));
+    if (selected.some((chosen) => {
+      const chosenTokens = chosen.tokens
+        .map((token) => token.toLocaleLowerCase())
+        .filter((token) => !PHRASE_CONNECTORS.has(token) && !COMMON_REVIEW_WORDS.has(token));
+      return candidateTokens.some((token) => chosenTokens.includes(token));
+    })) continue;
+    selected.push(candidate);
+  }
+
+  return selected.map(({ term }) => term);
 }
 
 export function aggregateTopicsForReviews(reviews, topicAnalysis, selectedCategory = null) {
@@ -64,7 +210,7 @@ export function aggregateTopicsForReviews(reviews, topicAnalysis, selectedCatego
       label,
       count,
       percentage: totalReviews ? Number(((count / totalReviews) * 100).toFixed(1)) : 0,
-      keywords: getMeaningfulKeywords(topicReviews),
+      keywords: getMeaningfulKeywords(topicReviews, label, topicAnalysis),
       reviews: topicReviews.slice(0, 3).map((entry) => getReviewText(unwrapReview(entry))).filter(Boolean),
     };
   });

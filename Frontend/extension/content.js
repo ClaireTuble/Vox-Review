@@ -4,6 +4,20 @@ if (globalThis.__voxreviewContentScriptInitialized) {
   globalThis.__voxreviewContentScriptInitialized = true;
   console.log("VoxReview content loaded");
 
+function hasUnpairedSurrogate(text) {
+  for (let index = 0; index < text.length; index += 1) {
+    const codeUnit = text.charCodeAt(index);
+    if (codeUnit >= 0xD800 && codeUnit <= 0xDBFF) {
+      const nextCodeUnit = text.charCodeAt(index + 1);
+      if (nextCodeUnit < 0xDC00 || nextCodeUnit > 0xDFFF) return true;
+      index += 1;
+    } else if (codeUnit >= 0xDC00 && codeUnit <= 0xDFFF) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // ── Extension context guard ──────────────────────────────────────────────────
 function isExtensionContextValid() {
   return typeof chrome !== "undefined" && chrome.runtime && !!chrome.runtime.id;
@@ -121,7 +135,6 @@ if (platform === "unknown") {
       const productUrl = Array.isArray(raw) ? window.location.href
         : (raw.productUrl || window.location.href);
       console.log("[SCRAPE] reviews returned:", reviews.length);
-
       // Decoupled Activity Dispatch: notify background as soon as product/place page is detected
       if (isProductPage && platform) {
         safeSendMessage({
@@ -142,6 +155,37 @@ if (platform === "unknown") {
       }
 
       lastSentSignature = signature;
+      if (["shopee", "lazada", "google", "googleplay", "steam"].includes(platform)) {
+        console.info("[TOPIC TRACE] scrape output", {
+          platform,
+          reviewsScraped: reviews.length,
+          reviewMetadata: reviews.map((review, reviewIndex) => {
+            const textFields = ["text", "reviewText", "comment", "review", "content", "body", "reviewBody"];
+            const fieldMetadata = textFields
+              .filter((field) => review && typeof review === "object" && field in review)
+              .map((field) => ({
+                field,
+                type: Array.isArray(review[field]) ? "array" : typeof review[field],
+                length: typeof review[field] === "string" || Array.isArray(review[field])
+                  ? review[field].length
+                  : null,
+              }));
+            const normalizedText = fieldMetadata
+              .map(({ field }) => review[field])
+              .find((value) => typeof value === "string" && value.trim()) || "";
+            return {
+              reviewIndex,
+              objectKeys: review && typeof review === "object" ? Object.keys(review) : [],
+              textFields: fieldMetadata,
+              normalizedTextType: typeof normalizedText,
+              normalizedTextLength: normalizedText.length,
+              containsHtml: /<\/?[a-z][^>]*>/i.test(normalizedText),
+              hasReplacementCharacter: normalizedText.includes("\uFFFD"),
+              hasUnpairedSurrogate: hasUnpairedSurrogate(normalizedText),
+            };
+          }),
+        });
+      }
 
       if (platform === "lazada") {
         console.log("[Lazada] Product page:", isProductPage, "Reviews found:", reviews.length);

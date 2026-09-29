@@ -115,6 +115,9 @@ async function fetchSteamReviews(appId) {
           reviewer: review?.author?.steamid ? `Steam user ${review.author.steamid}` : "Steam user",
           date: review?.timestamp_created ? new Date(review.timestamp_created * 1000).toISOString() : "",
           rating: review?.voted_up === true ? "positive" : (review?.voted_up === false ? "negative" : null),
+          helpfulCount: Number.isFinite(review?.votes_up) && review.votes_up >= 0
+            ? review.votes_up
+            : null,
           text: text,
           review: text,
           platform: "steam",
