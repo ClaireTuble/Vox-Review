@@ -26,9 +26,10 @@ import { isMatchingRescanScrape } from '../utils/analysisScrapeState.js';
 import { requestSvmBatch } from '../utils/svmRequest.js';
 import { fetchPlatformAvailability } from '../utils/platformAvailability.js';
 import { createUnsavedChangesGuard } from '../utils/unsavedChangesGuard.js';
+import { API_BASE_URL } from '../../services/apiConfig.js';
 import '../css/PopupPage.css';
 
-const TOPIC_API_URL = 'http://localhost:5000/api/nlp/topics/predict';
+const TOPIC_API_URL = `${API_BASE_URL}/api/nlp/topics/predict`;
 const ENABLE_TOPIC_ANALYSIS = import.meta.env.VITE_ENABLE_TOPIC_ANALYSIS !== 'false';
 const TOPIC_REQUEST_TIMEOUT_BASE_MS = 75000;
 const TOPIC_REQUEST_TIMEOUT_PER_REVIEW_MS = 12000;

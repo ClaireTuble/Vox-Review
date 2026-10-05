@@ -2,8 +2,9 @@ import { HEALTH_TEST_URLS } from "./healthTestConfig.js";
 import { createAnalysisJobCoordinator } from "../src/services/activeAnalysisState.js";
 import { createActivityReporter } from "../src/services/activityReporter.js";
 import { requestSvmBatch } from "../src/Users/utils/svmRequest.js";
+import { API_BASE_URL } from "../src/services/apiConfig.js";
 
-const TOPIC_API_URL = "http://localhost:5000/api/nlp/topics/predict";
+const TOPIC_API_URL = `${API_BASE_URL}/api/nlp/topics/predict`;
 const TOPIC_REQUEST_TIMEOUT_BASE_MS = 75_000;
 const TOPIC_REQUEST_TIMEOUT_PER_REVIEW_MS = 12_000;
 const VALID_TOPIC_LABELS = new Set([
@@ -47,7 +48,7 @@ const analysisJobs = createAnalysisJobCoordinator({
 void analysisJobs.resume();
 
 // ── Config ───────────────────────────────────────────────────────────────────
-const BACKEND_URLS = ["http://localhost:5000", "http://127.0.0.1:5000"];
+const BACKEND_URLS = [API_BASE_URL];
 const HEALTH_CHECK_TIMEOUT_MS = 45_000;
 const activeHealthChecks = new Set();
 

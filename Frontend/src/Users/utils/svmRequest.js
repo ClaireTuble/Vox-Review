@@ -1,6 +1,8 @@
+import { API_BASE_URL } from '../../services/apiConfig.js';
+
 export const SVM_REQUEST_TIMEOUT_MS = 65_000;
 
-const SVM_API_URL = 'http://localhost:5000/api/nlp/svm/predict';
+const SVM_API_URL = `${API_BASE_URL}/api/nlp/svm/predict`;
 
 export async function requestSvmBatch(reviews, {
   platform,

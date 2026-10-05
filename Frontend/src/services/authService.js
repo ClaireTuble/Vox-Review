@@ -1,4 +1,5 @@
 import { adminSupabase, supabase } from '../lib/supabase.js';
+import { API_BASE_URL } from './apiConfig.js';
 import {
   buildProfileUser,
   normalizeSupabaseUser,
@@ -302,7 +303,7 @@ export const authService = {
       if (error) {
         // Log failed login attempt
         try {
-          await fetch('http://localhost:5000/api/admin/log-login-failed', {
+          await fetch(`${API_BASE_URL}/api/admin/log-login-failed`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: normalizedEmail }),
@@ -325,7 +326,7 @@ export const authService = {
 
       // Log successful login attempt after session is established
       try {
-        await fetch('http://localhost:5000/api/admin/log-login-success', {
+        await fetch(`${API_BASE_URL}/api/admin/log-login-success`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -401,7 +402,7 @@ export const authService = {
    */
   requestSignupVerification: async (signupData) => {
     try {
-      const response = await fetch('http://localhost:5000/api/user/verification/request-signup', {
+      const response = await fetch(`${API_BASE_URL}/api/user/verification/request-signup`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -426,7 +427,7 @@ export const authService = {
    */
   verifySignupCode: async ({ email, code }) => {
     try {
-      const response = await fetch('http://localhost:5000/api/user/verification/verify-signup', {
+      const response = await fetch(`${API_BASE_URL}/api/user/verification/verify-signup`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -451,7 +452,7 @@ export const authService = {
   },
 
   requestForgotPassword: async (email) => {
-    const response = await fetch('http://localhost:5000/api/user/verification/request-forgot-password', {
+    const response = await fetch(`${API_BASE_URL}/api/user/verification/request-forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
@@ -462,7 +463,7 @@ export const authService = {
   },
 
   verifyForgotPassword: async ({ email, code }) => {
-    const response = await fetch('http://localhost:5000/api/user/verification/verify-forgot-password', {
+    const response = await fetch(`${API_BASE_URL}/api/user/verification/verify-forgot-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, code }),
@@ -473,7 +474,7 @@ export const authService = {
   },
 
   resetPassword: async ({ resetAuthorization, newPassword, confirmPassword }) => {
-    const response = await fetch('http://localhost:5000/api/user/password/reset', {
+    const response = await fetch(`${API_BASE_URL}/api/user/password/reset`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ resetAuthorization, newPassword, confirmPassword }),
@@ -497,7 +498,7 @@ export const authService = {
       // Log the logout event (if token is available)
       if (token) {
         try {
-          await fetch('http://localhost:5000/api/admin/log-logout', {
+          await fetch(`${API_BASE_URL}/api/admin/log-logout`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -582,7 +583,7 @@ export const authService = {
         return null;
       }
 
-      const response = await fetch('http://localhost:5000/api/user/profile', {
+      const response = await fetch(`${API_BASE_URL}/api/user/profile`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -653,7 +654,7 @@ export const authService = {
         profileBody.avatarUrl = updates.avatarUrl;
       }
 
-      const response = await fetch('http://localhost:5000/api/user/profile', {
+      const response = await fetch(`${API_BASE_URL}/api/user/profile`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -747,7 +748,7 @@ export const authService = {
         reader.readAsDataURL(file);
       });
 
-      const response = await fetch('http://localhost:5000/api/user/profile/avatar', {
+      const response = await fetch(`${API_BASE_URL}/api/user/profile/avatar`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -803,7 +804,7 @@ export const authService = {
         throw new Error('No active user session found. Please log in again.');
       }
 
-      const response = await fetch('http://localhost:5000/api/user/profile/avatar', {
+      const response = await fetch(`${API_BASE_URL}/api/user/profile/avatar`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -851,7 +852,7 @@ export const authService = {
         throw new Error('No active user session found. Please log in again.');
       }
 
-      const response = await fetch('http://localhost:5000/api/user/verification/request', {
+      const response = await fetch(`${API_BASE_URL}/api/user/verification/request`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -894,7 +895,7 @@ export const authService = {
         throw new Error('No active user session found. Please log in again.');
       }
 
-      const response = await fetch('http://localhost:5000/api/user/verification/verify', {
+      const response = await fetch(`${API_BASE_URL}/api/user/verification/verify`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -924,7 +925,7 @@ export const authService = {
       const accessToken = extensionSession?.token;
 
       if (accessToken) {
-        const response = await fetch('http://localhost:5000/api/user/password', {
+        const response = await fetch(`${API_BASE_URL}/api/user/password`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import authService from '../../services/authService.js';
+import { API_BASE_URL } from '../../services/apiConfig.js';
 
 // Design/reference only; production notifications must come from the backend.
 export const initialMockNotifications = [];
@@ -17,7 +18,7 @@ async function getSuperAdminHeaders() {
 export async function fetchSuperAdminNotifications() {
   try {
     const headers = await getSuperAdminHeaders();
-    const response = await fetch('http://localhost:5000/api/admin/notifications', {
+    const response = await fetch(`${API_BASE_URL}/api/admin/notifications`, {
       headers,
     });
 
@@ -65,7 +66,7 @@ export function saveStoredNotifications(notifications) {
 export async function toggleNotificationRead(id) {
   try {
     const headers = await getSuperAdminHeaders();
-    const response = await fetch(`http://localhost:5000/api/admin/notifications/${id}/read`, {
+    const response = await fetch(`${API_BASE_URL}/api/admin/notifications/${id}/read`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify({ read: true }),
@@ -93,7 +94,7 @@ export async function toggleNotificationRead(id) {
 export async function markAllNotificationsAsRead() {
   try {
     const headers = await getSuperAdminHeaders();
-    const response = await fetch('http://localhost:5000/api/admin/notifications/read-all', {
+    const response = await fetch(`${API_BASE_URL}/api/admin/notifications/read-all`, {
       method: 'PATCH',
       headers,
     });
@@ -119,7 +120,7 @@ export async function markAllNotificationsAsRead() {
 export async function clearReadNotifications() {
   try {
     const headers = await getSuperAdminHeaders();
-    const response = await fetch('http://localhost:5000/api/admin/notifications/read', {
+    const response = await fetch(`${API_BASE_URL}/api/admin/notifications/read`, {
       method: 'DELETE',
       headers,
     });
@@ -145,7 +146,7 @@ export async function clearReadNotifications() {
 export async function clearAllNotifications() {
   try {
     const headers = await getSuperAdminHeaders();
-    const response = await fetch('http://localhost:5000/api/admin/notifications', {
+    const response = await fetch(`${API_BASE_URL}/api/admin/notifications`, {
       method: 'DELETE',
       headers,
     });

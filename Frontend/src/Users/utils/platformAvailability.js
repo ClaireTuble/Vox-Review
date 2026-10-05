@@ -1,4 +1,6 @@
-const PLATFORM_AVAILABILITY_URL = 'http://localhost:5000/api/health/platforms';
+import { API_BASE_URL } from '../../services/apiConfig.js';
+
+const PLATFORM_AVAILABILITY_URL = `${API_BASE_URL}/api/health/platforms`;
 
 export async function fetchPlatformAvailability(
   platform,

@@ -1,4 +1,5 @@
 import authService from '../../services/authService.js';
+import { API_BASE_URL } from '../../services/apiConfig.js';
 
 let cachedPlatforms = null;
 
@@ -40,34 +41,25 @@ export function requestPlatformHealth(platform) {
   });
 }
 
-const BACKEND_URLS = ['http://localhost:5000', 'http://127.0.0.1:5000'];
-
 /**
  * Fetches real platform health data from the backend API.
- * Tries localhost then 127.0.0.1 to avoid IPv4/IPv6 DNS resolution mismatches.
+ * Uses the configured backend API base URL.
  * Updates the in-memory cache on success.
  *
  * @returns {Promise<Array>} Array of platform health objects
- * @throws {Error} If the backend is unreachable on all URLs
+ * @throws {Error} If the backend is unreachable
  */
 export async function fetchPlatformHealth() {
-  let lastError = null;
-
-  for (const baseUrl of BACKEND_URLS) {
-    try {
-      const res = await fetch(`${baseUrl}/api/health/status`);
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (data.success) {
-        cachedPlatforms = data.platforms;
-        return data.platforms;
-      }
-    } catch (err) {
-      lastError = err;
+  const res = await fetch(`${API_BASE_URL}/api/health/status`);
+  if (res.ok) {
+    const data = await res.json();
+    if (data.success) {
+      cachedPlatforms = data.platforms;
+      return data.platforms;
     }
   }
 
-  throw lastError || new Error('Health API unreachable on localhost:5000 and 127.0.0.1:5000');
+  throw new Error(`Health API unreachable at ${API_BASE_URL}`);
 }
 
 /**
@@ -188,37 +180,25 @@ export async function togglePlatformActive(
     token = await authService.getSuperAdminAccessToken();
   }
 
-  let lastError = null;
-
-  for (const baseUrl of BACKEND_URLS) {
-    let responseReceived = false;
-    try {
-      const body = {
-        ...(desiredStatus !== null ? { is_active: desiredStatus } : {}),
-        ...(confirmationPassword !== null ? { confirmationPassword } : {}),
-      };
-      const res = await fetch(`${baseUrl}/api/admin/platforms/${encodeURIComponent(platformKey)}/toggle`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(body),
-      });
-      responseReceived = true;
-      const data = await res.json();
-      if (res.ok && data.success) {
-        return {
-          ...data.platform,
-          ...(typeof data.auditRecorded === 'boolean' ? { auditRecorded: data.auditRecorded } : {}),
-        };
-      }
-      throw new Error(data.message || data.error || 'Failed to toggle platform status.');
-    } catch (err) {
-      if (responseReceived) throw err;
-      lastError = err;
-    }
+  const body = {
+    ...(desiredStatus !== null ? { is_active: desiredStatus } : {}),
+    ...(confirmationPassword !== null ? { confirmationPassword } : {}),
+  };
+  const res = await fetch(`${API_BASE_URL}/api/admin/platforms/${encodeURIComponent(platformKey)}/toggle`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (res.ok && data.success) {
+    return {
+      ...data.platform,
+      ...(typeof data.auditRecorded === 'boolean' ? { auditRecorded: data.auditRecorded } : {}),
+    };
   }
 
-  throw lastError || new Error('Toggle API unreachable.');
+  throw new Error(data.message || data.error || 'Failed to toggle platform status.');
 }

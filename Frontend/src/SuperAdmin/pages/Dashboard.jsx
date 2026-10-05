@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { WifiOff } from 'lucide-react';
 import authService from '../../services/authService.js';
+import { API_BASE_URL } from '../../services/apiConfig.js';
 import Header from '../components/Header.jsx';
 import Sidebar from '../components/Sidebar.jsx';
 import DashboardCards from '../components/DashboardCards.jsx';
@@ -36,7 +37,7 @@ export default function Dashboard({ activeTab, setActiveTab, onSignOut }) {
       try {
         const token = await authService.getSuperAdminAccessToken();
         if (token) {
-          const res = await fetch('http://localhost:5000/api/admin/overview', {
+          const res = await fetch(`${API_BASE_URL}/api/admin/overview`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (res.ok) {

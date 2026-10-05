@@ -1,4 +1,5 @@
 import authService from '../../services/authService.js';
+import { API_BASE_URL } from '../../services/apiConfig.js';
 
 // Design/reference only; production logs must come from the backend.
 export const mockSuperAdminActivityLogs = [];
@@ -7,7 +8,7 @@ export const mockSecurityNotifications = [];
 export async function fetchSuperAdminActivityLogs() {
   try {
     const token = await authService.getSuperAdminAccessToken();
-    const response = await fetch('http://localhost:5000/api/admin/audit-logs', {
+    const response = await fetch(`${API_BASE_URL}/api/admin/audit-logs`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
 

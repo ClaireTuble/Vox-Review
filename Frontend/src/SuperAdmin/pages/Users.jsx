@@ -7,6 +7,7 @@ import UserRow from '../components/UserRow.jsx';
 import UserHistoryModal from '../components/UserHistoryModal.jsx';
 import { mockCurrentUser } from '../data/users.js';
 import authService from '../../services/authService.js';
+import { API_BASE_URL } from '../../services/apiConfig.js';
 import '../css/dashboard.css';
 import '../css/sidebar.css';
 import '../css/header.css';
@@ -29,7 +30,7 @@ export default function Users({ activeTab, setActiveTab, onSignOut }) {
         const token = await authService.getSuperAdminAccessToken();
         if (!token) throw new Error('Super Admin session is no longer valid.');
 
-        const response = await fetch('http://localhost:5000/api/admin/users', {
+        const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         const result = await response.json();
