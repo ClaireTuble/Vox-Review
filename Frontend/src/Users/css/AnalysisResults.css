@@ -692,6 +692,38 @@
   font-style: italic;
 }
 
+.quote-text--collapsed,
+.quote-text--measure-collapsed {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+
+.review-expansion-control {
+  align-self: flex-start;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.review-expansion-control:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.review-expansion-control:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .quote-meta-row {
   display: flex;
   align-items: center;

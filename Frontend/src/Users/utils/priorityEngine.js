@@ -159,7 +159,9 @@ export function calculateReviewPriorities(reviews, topicAnalysis = null) {
     const repetitionCount = rule ? issueCounts.get(rule.id) || 0 : 0;
     const repetition = hasIssue && repetitionCount >= 2 ? 1 : 0;
     const engagementCount = getEngagementCount(review);
-    const engagement = hasIssue && engagementCount !== null && engagementCount >= 3 ? 1 : 0;
+    const engagement = hasIssue && engagementCount !== null && engagementCount >= 10
+      ? 2
+      : hasIssue && engagementCount !== null && engagementCount >= 3 ? 1 : 0;
     const rating = hasIssue ? getRatingSupport(review) : 0;
     const supports = [];
     const signals = [];

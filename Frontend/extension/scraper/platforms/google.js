@@ -75,6 +75,24 @@ function extractReviewDate(card) {
   return "";
 }
 
+function extractGoogleHelpfulCount(card) {
+  const button = card.querySelector("button.gllhef");
+  if (!button) return null;
+  const labels = [
+    button.getAttribute("aria-label"),
+    button.getAttribute("title"),
+    button.innerText,
+    button.textContent,
+  ];
+  for (const label of labels) {
+    const match = String(label || "").trim().match(/^([\d,]+)\s+likes?$/i);
+    if (!match) continue;
+    const count = Number(match[1].replace(/,/g, ""));
+    if (Number.isSafeInteger(count) && count >= 0) return count;
+  }
+  return null;
+}
+
 function scrapeGoogleReviews() {
   const isPlace = isGoogleMapsPlacePage();
   if (!isPlace) {
@@ -113,6 +131,7 @@ function scrapeGoogleReviews() {
         id: reviewer && date ? `${reviewer}-${date}-${index}` : `google-review-${index}`,
         reviewer,
         rating: null,
+        helpfulCount: extractGoogleHelpfulCount(card),
         date,
         text,
         platform: "google",

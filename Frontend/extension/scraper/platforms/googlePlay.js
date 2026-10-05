@@ -4,6 +4,14 @@ let lastAppUrl = "";
 const seenReviewKeys = new Set();
 let allScrapedReviews = [];
 
+function extractGooglePlayHelpfulCount(card) {
+  const countEl = card.querySelector("[data-original-thumbs-up-count]");
+  const rawCount = countEl?.getAttribute("data-original-thumbs-up-count");
+  if (rawCount == null || !/^\d+$/.test(rawCount.trim())) return null;
+  const count = Number(rawCount);
+  return Number.isSafeInteger(count) ? count : null;
+}
+
 function isGooglePlayProductPage() {
   const href = window.location.href;
   const path = window.location.pathname;
@@ -149,6 +157,7 @@ function scrapeGooglePlayReviews() {
         reviewer,
         date,
         rating: null,
+        helpfulCount: extractGooglePlayHelpfulCount(card),
         text: cleanText,
         review: cleanText,
         platform: "googleplay",

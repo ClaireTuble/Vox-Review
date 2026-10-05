@@ -92,6 +92,63 @@
     opacity 0.4s ease;
 }
 
+.ap-back-home {
+  position: absolute;
+  top: 20px;
+  left: 24px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 48px);
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #2563EB;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.12s ease;
+}
+
+.ap-back-home:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1D4ED8;
+}
+
+.ap-back-home:active {
+  background: #dbeafe;
+  transform: translateY(1px);
+}
+
+.ap-back-home:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 2px;
+}
+
+html.dark .ap-back-home {
+  background: rgba(30, 64, 175, 0.16);
+  border-color: #334155;
+  color: #93c5fd;
+}
+
+html.dark .ap-back-home:hover {
+  background: rgba(37, 99, 235, 0.24);
+  border-color: #60a5fa;
+  color: #bfdbfe;
+}
+
+html.dark .ap-back-home:active {
+  background: rgba(37, 99, 235, 0.32);
+}
+
+html.dark .ap-back-home:focus-visible {
+  outline-color: rgba(96, 165, 250, 0.55);
+}
+
 .ap-brand-panel {
   flex: 1.05;
   order: 2;
@@ -114,6 +171,10 @@
 
 .ap-mode-register .ap-brand-panel {
   order: 1;
+}
+
+.ap-mode-register .ap-form-header {
+  margin-top: 36px;
 }
 
 /* ── Forms Track ───────────────────────────────────────── */
@@ -805,8 +866,15 @@
 
 /* ── Success Toast Notification ──────────────────────────── */
 @keyframes apToastIn {
-  from { opacity: 0; transform: translateY(-6px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .ap-success-toast {

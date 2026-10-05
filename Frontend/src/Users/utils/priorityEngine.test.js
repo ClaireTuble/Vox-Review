@@ -108,7 +108,7 @@ test('helpful votes support a serious issue but do not change its severity', () 
 
   assert.equal(withVotes.severity, 'CRITICAL');
   assert.equal(withVotes.level, 'CRITICAL');
-  assert.equal(withVotes.factors.engagement, 1);
+  assert.equal(withVotes.factors.engagement, 2);
   assert.equal(withVotes.signals.find((signal) => signal.type === 'engagement')?.count, 57);
   assert.equal(withoutVotes.level, 'HIGH');
 });
@@ -129,6 +129,77 @@ test('priority calculation works when social engagement is unavailable', () => {
   assert.equal(priority.severity, 'MINOR');
   assert.equal(priority.level, 'LOW');
   assert.equal(priority.factors.engagement, 0);
+});
+
+test('helpfulCount is used consistently for every supported platform', () => {
+  for (const platform of ['shopee', 'lazada', 'google', 'googleplay', 'steam']) {
+    const [priority] = calculateReviewPriorities([{
+      text: 'The interface is confusing.',
+      platform,
+      helpfulCount: 3,
+    }]);
+
+    assert.equal(priority.severity, 'MINOR', `${platform} severity`);
+    assert.equal(priority.level, 'MEDIUM', `${platform} priority`);
+    assert.equal(priority.factors.engagement, 1, `${platform} engagement support`);
+  }
+});
+
+test('three helpful votes support an issue and ten are described as stronger support', () => {
+  const text = 'The interface is confusing.';
+  const [threeVotes] = calculateReviewPriorities([{ text, helpfulCount: 3 }]);
+  const [tenVotes] = calculateReviewPriorities([{ text, helpfulCount: 10 }]);
+
+  assert.equal(threeVotes.severity, 'MINOR');
+  assert.equal(threeVotes.level, 'MEDIUM');
+  assert.equal(threeVotes.factors.engagement, 1);
+  assert.match(threeVotes.explanation, /Helpful-vote support \(3\)/);
+  assert.equal(tenVotes.severity, 'MINOR');
+  assert.equal(tenVotes.level, 'MEDIUM');
+  assert.equal(tenVotes.factors.engagement, 2);
+  assert.ok(tenVotes.score > threeVotes.score);
+  assert.match(tenVotes.explanation, /High helpful-vote count \(10\)/);
+});
+
+test('missing and null helpfulCount values do not add engagement support', () => {
+  for (const platform of ['shopee', 'lazada', 'google', 'googleplay', 'steam']) {
+    for (const helpfulCount of [undefined, null]) {
+      const review = { text: 'The interface is confusing.', platform };
+      if (helpfulCount !== undefined) review.helpfulCount = helpfulCount;
+      const [priority] = calculateReviewPriorities([review]);
+
+      assert.equal(priority.severity, 'MINOR', `${platform} severity`);
+      assert.equal(priority.level, 'LOW', `${platform} priority`);
+      assert.equal(priority.factors.engagement, 0, `${platform} engagement support`);
+    }
+  }
+});
+
+test('helpful votes cannot raise a positive review with no actionable issue', () => {
+  const [priority] = calculateReviewPriorities([{
+    text: 'Perfect game, great graphics.',
+    helpfulCount: 100,
+  }]);
+
+  assert.equal(priority.severity, 'NONE');
+  assert.equal(priority.level, 'LOW');
+  assert.equal(priority.factors.engagement, 0);
+});
+
+test('engagement leaves severity unchanged and all support raises priority by at most one level', () => {
+  const text = 'The app keeps crashing and cannot be used.';
+  const [withoutSupport] = calculateReviewPriorities([{ text }]);
+  const [withSupport] = calculateReviewPriorities([{
+    text,
+    helpfulCount: 10,
+    category: 3,
+    rating: 1,
+  }]);
+
+  assert.equal(withSupport.severity, withoutSupport.severity);
+  assert.equal(withoutSupport.level, 'HIGH');
+  assert.equal(withSupport.level, 'CRITICAL');
+  assert.equal(withSupport.factors.engagement, 2);
 });
 
 test('Taglish account access failure is CRITICAL', () => {

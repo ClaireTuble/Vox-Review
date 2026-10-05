@@ -1,3 +1,5 @@
+import authService from '../../services/authService.js';
+
 let cachedPlatforms = null;
 
 /**
@@ -71,7 +73,6 @@ export async function fetchPlatformHealth() {
 /**
  * Fallback data used ONLY when the backend is unreachable.
  * All scraping statuses are "Unavailable" — never fake "Working".
- * NLP is always "Not Implemented".
  */
 export const FALLBACK_PLATFORMS = [
   {
@@ -81,7 +82,6 @@ export const FALLBACK_PLATFORMS = [
     supportStatus: 'Supported',
     platformStatus: 'Active',
     scrapingStatus: 'Unavailable',
-    nlpStatus: 'Not Implemented',
     lastChecked: 'Never',
     lastSuccessfulCheck: 'Never',
     errorCount: 0,
@@ -100,7 +100,6 @@ export const FALLBACK_PLATFORMS = [
     supportStatus: 'Supported',
     platformStatus: 'Active',
     scrapingStatus: 'Unavailable',
-    nlpStatus: 'Not Implemented',
     lastChecked: 'Never',
     lastSuccessfulCheck: 'Never',
     errorCount: 0,
@@ -119,7 +118,6 @@ export const FALLBACK_PLATFORMS = [
     supportStatus: 'Supported',
     platformStatus: 'Active',
     scrapingStatus: 'Unavailable',
-    nlpStatus: 'Not Implemented',
     lastChecked: 'Never',
     lastSuccessfulCheck: 'Never',
     errorCount: 0,
@@ -138,7 +136,6 @@ export const FALLBACK_PLATFORMS = [
     supportStatus: 'Supported',
     platformStatus: 'Active',
     scrapingStatus: 'Unavailable',
-    nlpStatus: 'Not Implemented',
     lastChecked: 'Never',
     lastSuccessfulCheck: 'Never',
     errorCount: 0,
@@ -157,7 +154,6 @@ export const FALLBACK_PLATFORMS = [
     supportStatus: 'Supported',
     platformStatus: 'Active',
     scrapingStatus: 'Unavailable',
-    nlpStatus: 'Not Implemented',
     lastChecked: 'Never',
     lastSuccessfulCheck: 'Never',
     errorCount: 0,
@@ -170,3 +166,59 @@ export const FALLBACK_PLATFORMS = [
     statusColor: '#9CA3AF',
   },
 ];
+
+/**
+ * Toggles a platform's is_active state via the Super Admin API.
+ * Requires a valid Super Admin access token.
+ *
+ * @param {string} platformKey - e.g. 'shopee', 'lazada', 'google', 'googleplay', 'steam'
+ * @param {string} [accessToken] - Super Admin JWT (auto-fetched if not provided)
+ * @param {boolean|null} [desiredStatus=null] - true → Active, false → Disabled, null → toggle
+ * @param {string|null} [confirmationPassword=null] - Super Admin password for disabling
+ * @returns {Promise<Object>} Updated platform object from the backend
+ */
+export async function togglePlatformActive(
+  platformKey,
+  accessToken = null,
+  desiredStatus = null,
+  confirmationPassword = null,
+) {
+  let token = accessToken;
+  if (!token) {
+    token = await authService.getSuperAdminAccessToken();
+  }
+
+  let lastError = null;
+
+  for (const baseUrl of BACKEND_URLS) {
+    let responseReceived = false;
+    try {
+      const body = {
+        ...(desiredStatus !== null ? { is_active: desiredStatus } : {}),
+        ...(confirmationPassword !== null ? { confirmationPassword } : {}),
+      };
+      const res = await fetch(`${baseUrl}/api/admin/platforms/${encodeURIComponent(platformKey)}/toggle`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      responseReceived = true;
+      const data = await res.json();
+      if (res.ok && data.success) {
+        return {
+          ...data.platform,
+          ...(typeof data.auditRecorded === 'boolean' ? { auditRecorded: data.auditRecorded } : {}),
+        };
+      }
+      throw new Error(data.message || data.error || 'Failed to toggle platform status.');
+    } catch (err) {
+      if (responseReceived) throw err;
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('Toggle API unreachable.');
+}

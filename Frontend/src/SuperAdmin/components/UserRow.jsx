@@ -1,4 +1,6 @@
-import { CircleDot, History } from 'lucide-react';
+import { History } from 'lucide-react';
+
+import { formatRelativeTime } from '../utils/relativeTime.js';
 import '../css/tables.css';
 import '../css/modal.css';
 
@@ -14,16 +16,14 @@ export default function UserRow({ user, onOpenHistory }) {
   const accountStatus = user.account_status || user.status || 'Active';
   const currentStatus = user.current_status || 'Offline';
   const lastSeenText = user.last_seen_at
-    ? user.last_seen || new Date(user.last_seen_at).toLocaleString()
+    ? formatRelativeTime(user.last_seen_at)
     : 'Never';
 
-  const accountStyle = accountStatus === 'Inactive'
-    ? { color: '#fbbf24' }
-    : { color: '#86efac' };
+  const isAccountActive = String(accountStatus).toLowerCase() === 'active';
+  const isCurrentOnline = String(currentStatus).toLowerCase() === 'online';
 
-  const currentStyle = currentStatus === 'Online'
-    ? { color: '#34d399' }
-    : { color: '#94a3b8' };
+  const accountVariant = isAccountActive ? 'active' : 'inactive';
+  const currentVariant = isCurrentOnline ? 'online' : 'offline';
 
   const activities = user.activities || [];
   const uniquePlatforms = Array.from(new Set(activities.map((a) => a.platform))).filter(Boolean);
@@ -41,18 +41,19 @@ export default function UserRow({ user, onOpenHistory }) {
 
       <td>{user.role}</td>
       <td>
-        <span className="status-dot-active" style={accountStyle}>
-          <CircleDot size={10} />
-          {accountStatus}
+        <span className={`user-status-pill status-${accountVariant}`}>
+          <span className="user-status-dot" />
+          <span>{accountStatus}</span>
         </span>
       </td>
       <td>
-        <span className="status-dot-active" style={currentStyle}>
-          <CircleDot size={10} />
-          {currentStatus}
+        <span className={`user-status-pill status-${currentVariant}`}>
+          <span className="user-status-dot" />
+          <span>{currentStatus}</span>
         </span>
       </td>
       <td style={{ color: '#cbd5e1', fontSize: '0.8rem' }}>{lastSeenText}</td>
+
 
       <td>
         {uniquePlatforms.length > 0 ? (

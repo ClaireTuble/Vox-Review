@@ -1,7 +1,25 @@
 import { createClient } from "@supabase/supabase-js";
 
+import { isPlatformActive } from "./healthController.js";
+
 // In-memory deduplication cache: user_id + platform + product/url identity (10 min TTL)
 const recentActivityMap = new Map();
+
+export function getActivityDeduplicationKey({
+  userId,
+  platform,
+  activityType,
+  productUrl,
+  productTitle,
+  analysisRunId,
+}) {
+  if (activityType === "Analyzed" && analysisRunId) {
+    return `${userId}:${platform}:Analyzed:run:${analysisRunId}`;
+  }
+  if (productUrl) return `${userId}:${platform}:${activityType}:url:${productUrl}`;
+  if (productTitle) return `${userId}:${platform}:${activityType}:title:${productTitle}`;
+  return `${userId}:${platform}:${activityType}:platform_only`;
+}
 
 function cleanStaleActivityCache() {
   const TEN_MINUTES_MS = 10 * 60 * 1000;
@@ -20,7 +38,15 @@ export async function reportUserActivity(req, res) {
       return res.status(401).json({ success: false, error: "Authenticated user identity missing." });
     }
 
-    const { platform, activity_type, product_title, product_url, productTitle, productUrl } = req.body;
+    const {
+      platform,
+      activity_type,
+      product_title,
+      product_url,
+      productTitle,
+      productUrl,
+      analysis_run_id,
+    } = req.body;
     if (!platform) {
       return res.status(400).json({ success: false, error: "Missing required field: platform." });
     }
@@ -40,7 +66,15 @@ export async function reportUserActivity(req, res) {
       String(platform).charAt(0).toUpperCase() + String(platform).slice(1)
     );
 
+    if (!isPlatformActive(platformKey)) {
+      return res.status(403).json({
+        success: false,
+        error: `The ${normalizedPlatform} platform is currently disabled by administrator.`,
+      });
+    }
+
     const activityType = (activity_type === "Analyzed") ? "Analyzed" : "Used";
+    const analysisRunId = activityType === "Analyzed" ? String(analysis_run_id || "").trim() : "";
 
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
     const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
@@ -80,11 +114,14 @@ export async function reportUserActivity(req, res) {
     // Deduplication Check: Prevent duplicate reports for exact same user + platform + product/place URL within 10 min
     cleanStaleActivityCache();
 
-    const dedupKey = targetProductUrl
-      ? `${userId}:${normalizedPlatform}:${activityType}:url:${targetProductUrl}`
-      : targetProductTitle
-      ? `${userId}:${normalizedPlatform}:${activityType}:title:${targetProductTitle}`
-      : `${userId}:${normalizedPlatform}:${activityType}:platform_only`;
+    const dedupKey = getActivityDeduplicationKey({
+      userId,
+      platform: normalizedPlatform,
+      activityType,
+      productUrl: targetProductUrl,
+      productTitle: targetProductTitle,
+      analysisRunId,
+    });
 
     const lastTimestamp = recentActivityMap.get(dedupKey);
     const TEN_MINUTES_MS = 10 * 60 * 1000;
@@ -97,7 +134,7 @@ export async function reportUserActivity(req, res) {
     }
 
     // Also check DB query if columns exist
-    if (targetProductUrl) {
+    if (targetProductUrl && !(activityType === "Analyzed" && analysisRunId)) {
       const tenMinutesAgoIso = new Date(Date.now() - TEN_MINUTES_MS).toISOString();
       const { data: exactProductMatch, error: dedupErr } = await adminSupabase
         .from("user_activities")

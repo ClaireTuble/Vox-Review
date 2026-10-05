@@ -92,6 +92,47 @@ test('topic keywords preserve meaningful source phrases and hyphenation', () => 
   );
 });
 
+test('topic keywords replace adjacent HTML and BBCode tags with word boundaries', () => {
+  const review = '[h1]Hunting and gathering[hr]story everything like all Sky Breaker and Secrets of the Spires[list][\\*]able to explore Pandora[/list]another way to deal[/h1]';
+  const keywords = getMeaningfulKeywords([review]);
+  const normalizedKeywords = keywords.map((keyword) => keyword.toLocaleLowerCase());
+
+  assert.ok(normalizedKeywords.includes('hunting and gathering'));
+  assert.ok(normalizedKeywords.includes('story'));
+  assert.ok(normalizedKeywords.some((keyword) => keyword.includes('sky breaker')));
+  assert.ok(normalizedKeywords.some((keyword) => keyword.includes('pandora')));
+  assert.ok(!normalizedKeywords.some((keyword) => /^(?:h1|hr|list|\*)$/.test(keyword)));
+  assert.ok(!normalizedKeywords.some((keyword) => /gatheringstory|storyeverything|secretsable/.test(keyword)));
+});
+
+test('topic keywords decode HTML entities before extracting phrases', () => {
+  const keywords = getMeaningfulKeywords([
+    'Hunting&nbsp;and&#32;gathering; quality &amp; workmanship.',
+  ]);
+  const normalizedKeywords = keywords.map((keyword) => keyword.toLocaleLowerCase());
+
+  assert.ok(normalizedKeywords.includes('hunting and gathering'));
+  assert.ok(!normalizedKeywords.some((keyword) => keyword.includes('amp')));
+});
+
+test('topic keywords preserve bracketed text that is not recognized markup', () => {
+  const keywords = getMeaningfulKeywords(['[DLC] adds a new area to explore.']);
+
+  assert.ok(keywords.some((keyword) => keyword.toLocaleLowerCase().includes('dlc')));
+});
+
+test('topic keywords for plain reviews preserve their current ranking and wording', () => {
+  const review = 'The dark wood grain tabletop looks high-quality, and the metal legs are very sturdy.';
+
+  assert.deepEqual(getMeaningfulKeywords([review]), [
+    'dark wood grain',
+    'metal legs',
+    'high-quality',
+    'sturdy',
+    'tabletop',
+  ]);
+});
+
 test('topic keywords omit URLs and numbers', () => {
   const review = 'High-quality metal legs; details at https://example.com/review?item=123, quantity 123.';
   const keywords = getMeaningfulKeywords([review]);

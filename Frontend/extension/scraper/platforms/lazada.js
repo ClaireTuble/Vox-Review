@@ -138,6 +138,15 @@ function shouldIgnoreLazadaText(line) {
   return false;
 }
 
+function extractLazadaHelpfulCount(card) {
+  const countEl = card.querySelector(".item-content-like-content-text");
+  const text = (countEl?.innerText || countEl?.textContent || "").trim();
+  const match = text.match(/^Helpful\s*\(\s*([\d,]+)\s*\)$/i);
+  if (!match) return null;
+  const count = Number(match[1].replace(/,/g, ""));
+  return Number.isSafeInteger(count) && count >= 0 ? count : null;
+}
+
 /**
  * Scrape genuine customer review text from Lazada product page.
  */
@@ -238,6 +247,7 @@ function scrapeLazadaReviews() {
         id: reviewer && date ? `${reviewer}-${date}-${index}` : `lazada-review-${index}`,
         reviewer,
         rating: null,
+        helpfulCount: extractLazadaHelpfulCount(card),
         date,
         text: fullText,
         review: fullText,

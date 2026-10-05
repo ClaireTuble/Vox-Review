@@ -18,7 +18,6 @@ const PIPELINE_STAGES = [
   'Review Section Detection',
   'Review Extraction',
   'Data Normalization',
-  'NLP Analysis',
 ];
 
 const HEALTH_POLL_INTERVAL = 30_000; // 30 seconds
@@ -251,12 +250,6 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
                             </span>
                           </div>
                           <div className="metric-item">
-                            <span className="metric-label">NLP Status</span>
-                            <span className="metric-value text-muted">
-                              {platform.nlpStatus || 'Not Implemented'}
-                            </span>
-                          </div>
-                          <div className="metric-item">
                             <span className="metric-label">Last Checked</span>
                             <span className="metric-value text-muted">
                               <Clock size={12} style={{ display: 'inline', marginRight: '4px' }} />
@@ -324,10 +317,7 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
                             {PIPELINE_STAGES.map((stage, idx) => {
                               let stageState = 'passed';
 
-                              // NLP Analysis is always "not-implemented" until real NLP exists
-                              if (stage === 'NLP Analysis') {
-                                stageState = 'not-implemented';
-                              } else if (isUnavailable) {
+                              if (isUnavailable) {
                                 stageState = 'unavailable';
                               } else if (isError || isWarning) {
                                 if (idx === errorStageIndex) stageState = 'failed';
@@ -340,13 +330,9 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
                                     {stageState === 'passed' && <CheckCircle2 size={12} />}
                                     {stageState === 'failed' && <AlertCircle size={12} />}
                                     {stageState === 'blocked' && <span className="dot-blocked" />}
-                                    {stageState === 'not-implemented' && <Minus size={12} />}
                                     {stageState === 'unavailable' && <Minus size={12} />}
                                   </div>
                                   <span className="stage-node-label">{stage}</span>
-                                  {stageState === 'not-implemented' && (
-                                    <span className="stage-sublabel">Not Implemented</span>
-                                  )}
                                 </div>
                               );
                             })}

@@ -33,6 +33,81 @@ const ORDINARY_REVIEW_VERBS = new Set([
 const REVIEW_URL_PATTERN = /https?:\/\/\S+|www\.\S+/gi;
 const REVIEW_TOKEN_PATTERN = /[\p{L}]+(?:-[\p{L}]+)*/gu;
 const PHRASE_CONNECTORS = new Set(['and', 'to']);
+const HTML_ENTITY_VALUES = {
+  amp: '&',
+  apos: "'",
+  copy: '©',
+  emsp: ' ',
+  ensp: ' ',
+  gt: '>',
+  hellip: '…',
+  ldquo: '“',
+  lsquo: '‘',
+  mdash: '—',
+  nbsp: ' ',
+  ndash: '–',
+  quot: '"',
+  reg: '®',
+  rdquo: '”',
+  rsquo: '’',
+  trade: '™',
+};
+const HTML_ENTITY_PATTERN = /&(#(?:x[\da-f]+|\d+)|[a-z][\da-z]+);/gi;
+const HTML_MARKUP_PATTERN = /<!--[\s\S]*?-->|<\/?[a-z][^>]*>/gi;
+const BBCODE_TAG_NAMES = 'b|i|u|s|strike|sub|sup|color|size|font|url|email|img|image|quote|code|php|html|pre|spoiler|center|left|right|justify|list|li|hr|br|h[1-6]|p|table|tr|td|th|youtube|video|user|mention';
+const BBCODE_MARKUP_PATTERN = new RegExp(
+  `\\[\\s*\\/?\\s*(?:${BBCODE_TAG_NAMES})(?:\\s*=\\s*[^\\]]*)?\\s*\\]|\\[\\s*\\\\?\\*\\s*\\]`,
+  'gi',
+);
+const MARKUP_BOUNDARY = '\uE000';
+const HTML_ENTITY_DECODER = typeof document === 'undefined'
+  ? null
+  : document.createElement('textarea');
+
+function decodeHtmlEntity(entity, value) {
+  if (HTML_ENTITY_DECODER) {
+    HTML_ENTITY_DECODER.innerHTML = entity;
+    return HTML_ENTITY_DECODER.value;
+  }
+  if (value[0] !== '#') return HTML_ENTITY_VALUES[value.toLocaleLowerCase()] || entity;
+
+  const hexadecimal = value[1]?.toLocaleLowerCase() === 'x';
+  const codePoint = Number.parseInt(value.slice(hexadecimal ? 2 : 1), hexadecimal ? 16 : 10);
+  if (!Number.isInteger(codePoint) || codePoint <= 0 || codePoint > 0x10ffff ||
+      (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+    return '\uFFFD';
+  }
+  return String.fromCodePoint(codePoint);
+}
+
+function prepareKeywordSource(reviewText) {
+  const sourceWithBoundaries = reviewText
+    .replace(REVIEW_URL_PATTERN, ' ')
+    .replace(HTML_ENTITY_PATTERN, decodeHtmlEntity)
+    .replace(HTML_MARKUP_PATTERN, MARKUP_BOUNDARY)
+    .replace(BBCODE_MARKUP_PATTERN, MARKUP_BOUNDARY);
+  const sourceParts = sourceWithBoundaries.split(MARKUP_BOUNDARY);
+  const markupBoundaries = new Set();
+  let source = '';
+  let pendingMarkupBoundary = false;
+
+  sourceParts.forEach((part, partIndex) => {
+    if (partIndex > 0) pendingMarkupBoundary = true;
+    const normalizedPart = part.replace(/\s+/gu, ' ').trim();
+    if (!normalizedPart) {
+      pendingMarkupBoundary = true;
+      return;
+    }
+    if (source) {
+      source += ' ';
+      if (pendingMarkupBoundary) markupBoundaries.add(source.length - 1);
+    }
+    source += normalizedPart;
+    pendingMarkupBoundary = false;
+  });
+
+  return { source, markupBoundaries };
+}
 
 export function getReviewText(review) {
   if (typeof review === 'string') return review;
@@ -98,7 +173,7 @@ export function getMeaningfulKeywords(reviews, selectedTopicLabel = null, topicA
 
   reviews.forEach((entry, entryIndex) => {
     const reviewText = getReviewText(unwrapReview(entry));
-    const source = reviewText.replace(REVIEW_URL_PATTERN, ' ').replace(/<[^>]*>/g, ' ');
+    const { source, markupBoundaries } = prepareKeywordSource(reviewText);
     const tokens = [...source.matchAll(REVIEW_TOKEN_PATTERN)];
     const reviewTerms = new Map();
     const resultIndex = Number.isInteger(entry?.topicResultIndex) ? entry.topicResultIndex : entryIndex;
@@ -116,8 +191,9 @@ export function getMeaningfulKeywords(reviews, selectedTopicLabel = null, topicA
       for (let end = start; end < Math.min(tokens.length, start + 4); end += 1) {
         if (end > start) {
           const previous = tokens[end - 1];
-          const gap = source.slice(previous.index + previous[0].length, tokens[end].index);
-          if (!/^\s+$/.test(gap)) break;
+          const previousEnd = previous.index + previous[0].length;
+          const gap = source.slice(previousEnd, tokens[end].index);
+          if (!/^\s+$/.test(gap) || markupBoundaries.has(previousEnd)) break;
         }
 
         const token = tokens[end][0];
@@ -125,7 +201,7 @@ export function getMeaningfulKeywords(reviews, selectedTopicLabel = null, topicA
         if (!isReadablePhrase(phraseTokens)) continue;
 
         const term = source.slice(tokens[start].index, tokens[end].index + token.length);
-        if (!reviewText.toLocaleLowerCase().includes(term.toLocaleLowerCase())) continue;
+        if (!source.toLocaleLowerCase().includes(term.toLocaleLowerCase())) continue;
         if (isSubjectBeforePossessiveVerb(source, tokens[end].index + token.length)) continue;
         const clause = clauseAtPosition(clauses, tokens[start].index);
         const clauseWords = clause ? topicLabelWords(clause[0]) : new Set();

@@ -14,6 +14,7 @@ export default defineConfig({
   input: {
     popup: "./src/extension.jsx",
     content: "./extension/content.js",
+    background: "./extension/background.js",
   },
 
       output: {

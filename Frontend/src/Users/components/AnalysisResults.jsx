@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
   Sparkles, Trash2, Lock, BookmarkPlus,
   MessageSquare, Tag
@@ -6,6 +6,7 @@ import {
 import { aggregateTopicsForReviews } from '../utils/reviewTopics.js';
 import { calculateReviewPriorities, sortPriorityReviews } from '../utils/priorityEngine.js';
 import '../css/AnalysisResults.css';
+import '../css/ExtensionConfirmationModal.css';
 
 const EMOTION_CATEGORY_BY_ID = {
   happy: 1,
@@ -22,12 +23,98 @@ const PRIORITY_BADGES = {
   LOW: { icon: '⚪', className: 'low' },
 };
 
-export default function AnalysisResults({ status = 'idle', isLoggedIn = false, onSaveRedirect, onSaveAnalysis, isSaving = false, hasSavedAnalysis = false, saveError = '', emotionData, topicAnalysis, scrapedReviews = [], onClearAnalysis, platform = '' }) {
+function ExpandableReviewText({
+  reviewKey,
+  text,
+  isExpanded,
+  showControl,
+  onExpandedChange,
+  onOverflowChange,
+}) {
+  const textRef = useRef(null);
+  const checkOverflow = useCallback(() => {
+    const element = textRef.current;
+    if (!element) return;
+
+    element.classList.add('quote-text--measure-collapsed');
+    const hasOverflow = element.scrollHeight > element.clientHeight + 1;
+    element.classList.remove('quote-text--measure-collapsed');
+    onOverflowChange(reviewKey, hasOverflow);
+  }, [onOverflowChange, reviewKey]);
+
+  useLayoutEffect(() => {
+    checkOverflow();
+    const element = textRef.current;
+    if (!element) return undefined;
+
+    const observer = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(checkOverflow);
+    observer?.observe(element);
+    window.addEventListener('resize', checkOverflow);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', checkOverflow);
+    };
+  }, [checkOverflow, isExpanded, text]);
+
+  return (
+    <>
+      <p
+        ref={textRef}
+        className={`quote-text${isExpanded ? '' : ' quote-text--collapsed'}`}
+      >
+        "{text}"
+      </p>
+      {showControl && (
+        <button
+          type="button"
+          className="review-expansion-control"
+          aria-expanded={isExpanded}
+          onClick={() => onExpandedChange(reviewKey)}
+        >
+          Show {isExpanded ? 'less' : 'more'}
+        </button>
+      )}
+    </>
+  );
+}
+
+export default function AnalysisResults({
+  status = 'idle',
+  analysisError = '',
+  isLoggedIn = false,
+  onSaveRedirect,
+  onOpenLogin,
+  onSaveAnalysis,
+  isSaving = false,
+  hasSavedAnalysis = false,
+  saveError = '',
+  emotionData,
+  topicAnalysis,
+  scrapedReviews = [],
+  onClearAnalysis,
+  platform = '',
+}) {
   const [selectedEmotion, setSelectedEmotion] = useState(null);
   const [selectedTopic, setSelectedTopic] = useState(null);
   const [selectedQuoteFilter, setSelectedQuoteFilter] = useState('all');
   const [quoteSortMode, setQuoteSortMode] = useState('priority');
   const [userToast, setUserToast] = useState('');
+  const [expandedReviews, setExpandedReviews] = useState({});
+  const [expandableReviews, setExpandableReviews] = useState({});
+  const [showGuestSaveModal, setShowGuestSaveModal] = useState(false);
+
+  const handleReviewOverflowChange = useCallback((reviewKey, hasOverflow) => {
+    setExpandableReviews((current) => (
+      current[reviewKey] === hasOverflow
+        ? current
+        : { ...current, [reviewKey]: hasOverflow }
+    ));
+  }, []);
+  const toggleReviewExpanded = useCallback((reviewKey) => {
+    setExpandedReviews((current) => ({ ...current, [reviewKey]: !current[reviewKey] }));
+  }, []);
 
   const getPlatformName = (review, fallbackPlatform = '') => {
     const candidatePlatform = typeof review === 'object' && review !== null
@@ -172,10 +259,17 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
     setSelectedQuoteFilter(isAlreadySelected ? 'all' : emotion.label.toLowerCase());
   };
 
+  const handleGuestLogIn = () => {
+    setShowGuestSaveModal(false);
+    if (onOpenLogin) onOpenLogin();
+    else if (onSaveRedirect) onSaveRedirect();
+  };
+
   const handleActionClick = async (actionName) => {
     if (!isLoggedIn) {
-      // Guest trying to save → redirect to login
-      if (onSaveRedirect) onSaveRedirect();
+      if (actionName === 'Save Analysis') {
+        setShowGuestSaveModal(true);
+      }
       return;
     }
     if (actionName === 'Save Analysis') {
@@ -191,6 +285,11 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
   if (status === 'idle') {
     return (
       <div className="analysis-section">
+        {analysisError && (
+          <p role="alert" className="analysis-error-message">
+            {analysisError}
+          </p>
+        )}
         <div className="analysis-glass-card" style={{ alignItems: 'center', textAlign: 'center', padding: '24px 16px' }}>
           <div className="hero-emoji-ring" style={{ width: '60px', height: '60px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Sparkles size={32} color="var(--accent-color)" style={{ filter: 'drop-shadow(0 0 8px rgba(37,99,235,0.4))' }} />
@@ -256,11 +355,13 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
         <button
           className={`action-tool-btn primary-save ${!isLoggedIn ? 'locked' : ''}`}
           onClick={() => handleActionClick('Save Analysis')}
-          disabled={isSaving || hasSavedAnalysis}
-          title={hasSavedAnalysis ? 'This analysis is saved. Rescan before saving an updated version.' : 'Save the current analysis for this page'}
+          disabled={isLoggedIn && (isSaving || hasSavedAnalysis)}
+          title={isLoggedIn && hasSavedAnalysis
+            ? 'This analysis is saved. Rescan before saving an updated version.'
+            : 'Save the current analysis for this page'}
         >
           {!isLoggedIn ? <Lock size={13} /> : <BookmarkPlus size={13} />}
-          <span>{isSaving ? 'Saving…' : hasSavedAnalysis ? 'Saved' : 'Save Analysis'}</span>
+          <span>{isLoggedIn && isSaving ? 'Saving…' : isLoggedIn && hasSavedAnalysis ? 'Saved' : 'Save Analysis'}</span>
         </button>
       </div>
 
@@ -515,8 +616,15 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
                 <span className="intel-label">Representative Reviews</span>
                 <div className="topic-evidence-list">
                   {activeTopic.reviews.map((review, index) => (
-                    <div key={`${review}-${index}`} className="topic-evidence-item">
-                      <p className="quote-text">"{review}"</p>
+                    <div key={`${activeTopic.id}-${index}`} className="topic-evidence-item">
+                      <ExpandableReviewText
+                        reviewKey={`topic:${activeTopic.id}:${index}`}
+                        text={review}
+                        isExpanded={Boolean(expandedReviews[`topic:${activeTopic.id}:${index}`])}
+                        showControl={Boolean(expandableReviews[`topic:${activeTopic.id}:${index}`])}
+                        onExpandedChange={toggleReviewExpanded}
+                        onOverflowChange={handleReviewOverflowChange}
+                      />
                     </div>
                   ))}
                 </div>
@@ -568,10 +676,12 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
         </label>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {sortedQuoteEntries.map(({ quote: q, priority }) => {
+          {sortedQuoteEntries.map(({ quote: q, priority }, index) => {
             const priorityBadge = PRIORITY_BADGES[priority.level];
+            const reviewKey = `main:${priority.reviewIndex ?? q.id ?? index}`;
+            const isExpanded = Boolean(expandedReviews[reviewKey]);
             return (
-            <div key={q.id ?? priority.reviewIndex} className="quote-bubble">
+            <div key={reviewKey} className="quote-bubble">
               <div className="review-priority-row">
                 <span
                   className={`review-priority-badge review-priority-badge--${priorityBadge.className}`}
@@ -585,7 +695,14 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
                   <span className="review-priority-debug">Score {priority.score}</span>
                 )}
               </div>
-              <p className="quote-text">"{q.text}"</p>
+              <ExpandableReviewText
+                reviewKey={reviewKey}
+                text={q.text}
+                isExpanded={isExpanded}
+                showControl={Boolean(expandableReviews[reviewKey])}
+                onExpandedChange={toggleReviewExpanded}
+                onOverflowChange={handleReviewOverflowChange}
+              />
               <div className="quote-meta-row">
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                   {q.emoji === '💬' ? <MessageSquare size={11} /> : <span>{q.emoji}</span>}
@@ -608,6 +725,46 @@ export default function AnalysisResults({ status = 'idle', isLoggedIn = false, o
           })}
         </div>
       </div>
+
+      {/* ── Guest Mode "Save Analysis" Restriction Modal ── */}
+      {showGuestSaveModal && (
+        <div
+          className="extension-modal-backdrop"
+          role="presentation"
+          onClick={() => setShowGuestSaveModal(false)}
+        >
+          <div
+            className="extension-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="guest-save-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="guest-save-modal-title">Saved Analysis Unavailable in Guest Mode</h2>
+            <p style={{ margin: '0 0 16px', lineHeight: 1.5 }}>
+              Saved Analysis is not available in Guest Mode.
+              <br />
+              Please sign up or log in to save and access your analyses.
+            </p>
+            <div className="extension-modal-actions" style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="extension-modal-button extension-modal-button-secondary"
+                onClick={() => setShowGuestSaveModal(false)}
+              >
+                Not Now
+              </button>
+              <button
+                type="button"
+                className="extension-modal-button extension-modal-button-primary"
+                onClick={handleGuestLogIn}
+              >
+                Sign Up / Log In
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import {
-  Mail, Lock, User, Zap, AlertTriangle, Eye, EyeOff,
+  ArrowLeft, Mail, Lock, User, Zap, AlertTriangle, Eye, EyeOff,
   Shield, Globe, BookmarkCheck, Sparkles, ShieldCheck, Brain, BarChart3
 } from 'lucide-react';
 import { logoDark } from '../../utils/useVoxLogo.js';
@@ -527,6 +527,10 @@ export default function AuthPage({ initialMode = 'login' }) {
 
         {/* ── FORM PANEL ── */}
         <div className="ap-form-panel">
+          <Link to="/" className="ap-back-home">
+            <ArrowLeft size={14} aria-hidden="true" />
+            <span>Back to Home</span>
+          </Link>
           <div className="ap-forms-track">
             {/* Login form */}
             <div className={`ap-form-slide ${isLogin ? 'ap-slide-active' : 'ap-slide-hidden-right'}`}

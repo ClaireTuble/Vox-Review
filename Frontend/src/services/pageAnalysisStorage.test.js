@@ -143,6 +143,25 @@ test('refreshing a saved page merges into the existing record identity', async (
   assert.equal(Object.keys(await getPageAnalyses()).length, 1);
 });
 
+test('updating the last-checked timestamp preserves the saved analysis results', async () => {
+  const url = 'https://shopee.ph/product/123/456';
+  const previous = analysis(url, 'Desk', {
+    reviews: [{ id: 'stable-1', text: 'Existing review' }],
+    reviewAnalysis: [{ review: { id: 'stable-1', text: 'Existing review' }, category: 1 }],
+    topicAnalysis: { results: [{ reviewIndex: 0, topics: [{ label: 'Quality', score: 0.9 }] }] },
+  });
+  await saveAnalysisForPage(previous);
+  const checkedAt = Date.now();
+
+  const updated = await saveAnalysisForPage({ ...previous, last_refreshed_at: checkedAt });
+
+  assert.equal(updated.last_refreshed_at, checkedAt);
+  assert.deepEqual(updated.reviews, previous.reviews);
+  assert.deepEqual(updated.reviewAnalysis, previous.reviewAnalysis);
+  assert.deepEqual(updated.topicAnalysis, previous.topicAnalysis);
+  assert.equal(Object.keys(await getPageAnalyses()).length, 1);
+});
+
 test('delete removes only the requested saved analysis', async () => {
   const first = analysis('https://shopee.ph/product/123/456', 'First');
   const other = analysis('https://shopee.ph/product/123/789', 'Other');

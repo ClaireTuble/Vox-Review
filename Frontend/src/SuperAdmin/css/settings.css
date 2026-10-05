@@ -1,5 +1,93 @@
 /* Super Admin Restructured Settings Layout & Submenu Styling */
 
+.platform-disable-modal-backdrop {
+  z-index: 10000;
+}
+
+.platform-disable-modal {
+  max-width: 480px;
+  max-height: none;
+  overflow: visible;
+}
+
+.platform-disable-modal .modal-header {
+  justify-content: flex-start;
+}
+
+.platform-disable-modal-body {
+  overflow: visible;
+}
+
+.platform-confirmation-label {
+  display: block;
+  margin-bottom: 8px;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.platform-confirmation-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.8);
+  color: #f8fafc;
+  font: inherit;
+}
+
+.platform-confirmation-input:focus {
+  border-color: #60a5fa;
+  outline: 2px solid rgba(96, 165, 250, 0.2);
+}
+
+.platform-confirmation-error {
+  margin: 9px 0 0;
+  color: #fca5a5;
+  font-size: 12px;
+}
+
+.platform-disable-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 24px 20px;
+}
+
+.platform-confirmation-cancel,
+.platform-confirmation-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 13px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.platform-confirmation-cancel {
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: transparent;
+  color: #cbd5e1;
+}
+
+.platform-confirmation-submit {
+  border: 1px solid #b91c1c;
+  background: #b91c1c;
+  color: #fff;
+}
+
+.platform-confirmation-cancel:disabled,
+.platform-confirmation-submit:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .settings-layout-wrapper {
   display: flex;
   gap: 24px;

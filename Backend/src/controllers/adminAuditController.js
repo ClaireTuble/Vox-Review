@@ -53,7 +53,8 @@ export async function getAdminActivityLogs(req, res) {
     const { data, error } = await adminSupabase
       .from("audit_logs")
       .select("*")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(50);
 
     if (error) {
       throw error;

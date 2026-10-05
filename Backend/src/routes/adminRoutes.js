@@ -10,6 +10,7 @@ import {
 } from "../controllers/adminNotificationsController.js";
 import { getAdminActivityLogs } from "../controllers/adminAuditController.js";
 import { logSuperAdminLoginSuccess, logSuperAdminLogout, logSuperAdminLoginFailure } from "../controllers/authAuditController.js";
+import { toggleAdminPlatformStatus } from "../controllers/adminPlatformController.js";
 import { requireSuperAdmin } from "../middleware/superAdminAuth.js";
 
 const router = Router();
@@ -28,5 +29,8 @@ router.patch("/notifications/read-all", requireSuperAdmin, markAllAdminNotificat
 router.delete("/notifications", requireSuperAdmin, clearAllAdminNotifications);
 router.delete("/notifications/read", requireSuperAdmin, clearReadAdminNotifications);
 router.get("/audit-logs", requireSuperAdmin, getAdminActivityLogs);
+
+// Platform management
+router.patch("/platforms/:platformKey/toggle", requireSuperAdmin, toggleAdminPlatformStatus);
 
 export default router;

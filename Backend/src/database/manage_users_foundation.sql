@@ -1,13 +1,14 @@
 -- Migration: Manage Users Foundation & User Activities
--- 1. Add status column to public.users (default to 'Active')
+-- 1. Add status and avatar_url columns to public.users
 alter table public.users
-  add column if not exists status text default 'Active';
+  add column if not exists status text default 'Active',
+  add column if not exists avatar_url text;
 
 update public.users
   set status = 'Active'
   where status is null;
 
--- 2. Update handle_new_auth_user() to populate full_name & status
+-- 2. Update handle_new_auth_user() to populate full_name, status & avatar_url
 create or replace function public.handle_new_auth_user()
 returns trigger
 language plpgsql
@@ -18,10 +19,16 @@ declare
   v_first_name text;
   v_last_name text;
   v_full_name text;
+  v_avatar_url text;
 begin
   v_first_name := new.raw_user_meta_data->>'firstName';
   v_last_name  := new.raw_user_meta_data->>'lastName';
   v_full_name  := trim(concat_ws(' ', v_first_name, v_last_name));
+  v_avatar_url := coalesce(
+    new.raw_user_meta_data->>'custom_avatar_url',
+    new.raw_user_meta_data->>'avatar_url',
+    new.raw_user_meta_data->>'picture'
+  );
   
   if v_full_name = '' then
     v_full_name := coalesce(new.raw_user_meta_data->>'username', split_part(new.email, '@', 1));
@@ -32,7 +39,8 @@ begin
   ) then
     update public.users
     set auth_user_id = new.id,
-        full_name = coalesce(full_name, v_full_name),
+        full_name = v_full_name,
+        avatar_url = coalesce(v_avatar_url, avatar_url),
         status = coalesce(status, 'Active')
     where email = new.email and auth_user_id is null;
     return new;
@@ -44,8 +52,8 @@ begin
     return new;
   end if;
 
-  insert into public.users (auth_user_id, email, full_name, status)
-  values (new.id, new.email, v_full_name, 'Active')
+  insert into public.users (auth_user_id, email, full_name, avatar_url, status)
+  values (new.id, new.email, v_full_name, v_avatar_url, 'Active')
   on conflict (auth_user_id) do nothing;
 
   return new;

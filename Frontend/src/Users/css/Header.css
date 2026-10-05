@@ -97,11 +97,27 @@
 .vox-user-avatar {
   width: 20px;
   height: 20px;
+  flex: 0 0 20px;
+  overflow: hidden;
   border-radius: 50%;
   background: var(--accent-light);
+  color: var(--accent-color);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.vox-user-avatar-image {
+  width: 20px;
+  height: 20px;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 50%;
 }
 
 .vox-user-name {

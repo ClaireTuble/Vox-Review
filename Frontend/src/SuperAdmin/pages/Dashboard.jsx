@@ -26,6 +26,8 @@ export default function Dashboard({ activeTab, setActiveTab, onSignOut }) {
   const [dashboardStats, setDashboardStats] = useState(null);
   const [recentUsers, setRecentUsers] = useState([]);
   const [recentActivities, setRecentActivities] = useState([]);
+  const [platformUsagePeriod, setPlatformUsagePeriod] = useState('week');
+  const [analysisPeriod, setAnalysisPeriod] = useState('week');
 
   useEffect(() => {
     let mounted = true;
@@ -43,14 +45,6 @@ export default function Dashboard({ activeTab, setActiveTab, onSignOut }) {
               setDashboardStats(data.stats);
               setRecentUsers(data.recentUsers || []);
               setRecentActivities(data.recentActivities || []);
-              const platformUsage = data.stats?.platformUsage || {};
-              setPlatforms((currentPlatforms) => currentPlatforms.map((platform) => {
-                const usageKey = platform.name || platform.platform;
-                const hasUsage = Object.prototype.hasOwnProperty.call(platformUsage, usageKey);
-                return hasUsage
-                  ? { ...platform, usageCount: platformUsage[usageKey] }
-                  : platform;
-              }));
             }
           }
         }
@@ -93,6 +87,17 @@ export default function Dashboard({ activeTab, setActiveTab, onSignOut }) {
 
     return () => { mounted = false; clearInterval(interval); };
   }, []);
+
+  const platformUsageData = typeof dashboardStats?.platformUsage === 'object' && dashboardStats?.platformUsage !== null
+    ? (dashboardStats?.platformUsage?.[platformUsagePeriod] || dashboardStats?.platformUsage || {})
+    : {};
+
+  const activePlatformsForUsage = platforms.map((platform) => {
+    const usageKey = platform.name || platform.platform;
+    const hasCount = Object.prototype.hasOwnProperty.call(platformUsageData, usageKey);
+    const count = hasCount ? platformUsageData[usageKey] : (platform.usageCount ?? 0);
+    return { ...platform, usageCount: count };
+  });
 
   return (
     <div className="superadmin-page-container">
@@ -152,20 +157,47 @@ export default function Dashboard({ activeTab, setActiveTab, onSignOut }) {
               <div className="panel-header">
                 <div>
                   <h3>Platform Usage</h3>
-                  <p className="panel-subtitle">Analyses run per platform · live data</p>
+                  <p className="panel-subtitle">Platform usage activity · live data</p>
                 </div>
+                <select
+                  className="stat-period-select"
+                  value={platformUsagePeriod}
+                  onChange={(e) => setPlatformUsagePeriod(e.target.value)}
+                  aria-label="Platform Usage period filter"
+                >
+                  <option value="week">This Week</option>
+                  <option value="month">This Month</option>
+                </select>
               </div>
-              <PlatformUsageChart platforms={platforms} />
+              <PlatformUsageChart platforms={activePlatformsForUsage} />
             </article>
 
             <article className="admin-panel">
               <div className="panel-header">
                 <div>
                   <h3>Analysis Activity</h3>
-                  <p className="panel-subtitle">Reviews analysed · last 7 days · live data</p>
+                  <p className="panel-subtitle">
+                    {analysisPeriod === 'week' ? 'Reviews analysed · last 7 days · live data' : 'Reviews analysed · current month · live data'}
+                  </p>
                 </div>
+                <select
+                  className="stat-period-select"
+                  value={analysisPeriod}
+                  onChange={(e) => setAnalysisPeriod(e.target.value)}
+                  aria-label="Analysis Activity period filter"
+                >
+                  <option value="week">This Week</option>
+                  <option value="month">This Month</option>
+                </select>
               </div>
-              <AnalysisActivityChart activity={dashboardStats?.analysisActivity || []} />
+              <AnalysisActivityChart
+                activity={
+                  analysisPeriod === 'month'
+                    ? (dashboardStats?.analysisActivity?.month || [])
+                    : (dashboardStats?.analysisActivity?.week || dashboardStats?.analysisActivity || [])
+                }
+                period={analysisPeriod}
+              />
             </article>
           </div>
 

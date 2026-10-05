@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 import supabaseClient from "../config/supabase.js";
 import { createAuditLog } from "../utils/auditLogger.js";
+import { buildFullName } from "../utils/profileName.js";
 
 function getAdminSupabase() {
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
@@ -351,7 +352,7 @@ export const verificationService = {
     }
 
     const { email: pendingEmail, password, username, firstName, lastName } = pendingData;
-    const fullName = `${firstName} ${lastName}`.trim() || username;
+    const fullName = buildFullName(firstName, lastName, username);
 
     // 6. Mark verification record as used AND clear pending payload immediately
     await adminSupabase
@@ -391,26 +392,37 @@ export const verificationService = {
         .maybeSingle();
 
       if (existingPublic) {
-        await adminSupabase
+        const { data: updatedPublic, error: updatePublicError } = await adminSupabase
           .from("users")
           .update({
             auth_user_id: authUserId,
             full_name: fullName,
             status: "Active",
           })
-          .eq("user_id", existingPublic.user_id);
+          .eq("user_id", existingPublic.user_id)
+          .select("user_id")
+          .maybeSingle();
+        if (updatePublicError || !updatedPublic) {
+          throw updatePublicError || new Error("Updated profile row was not returned.");
+        }
       } else {
-        await adminSupabase
+        const { data: insertedPublic, error: insertPublicError } = await adminSupabase
           .from("users")
           .insert({
             auth_user_id: authUserId,
             email: pendingEmail,
             full_name: fullName,
             status: "Active",
-          });
+          })
+          .select("user_id")
+          .maybeSingle();
+        if (insertPublicError || !insertedPublic) {
+          throw insertPublicError || new Error("Inserted profile row was not returned.");
+        }
       }
     } catch (linkErr) {
       console.warn("[VerificationService] Warning syncing public.users row:", linkErr.message);
+      throw new Error("Account was created but its profile name could not be synchronized.");
     }
 
     // 8a. Create audit log for successful user registration

@@ -11,12 +11,12 @@ const PLATFORM_META = {
   steam:      { name: "Steam",             category: "Gaming",        domain: "store.steampowered.com" },
 };
 
-const VALID_PLATFORMS = Object.keys(PLATFORM_META);
-const VALID_STATUSES  = ["Working", "Warning", "Error", "Unavailable", "Not Implemented"];
+export const VALID_PLATFORMS = Object.keys(PLATFORM_META);
+export const VALID_STATUSES  = ["Working", "Warning", "Error", "Unavailable", "Not Implemented"];
 
 // ── In-Memory Health State Store ──────────────────────────────────────────────
 // Serves live data immediately and survives database connectivity issues.
-const memoryHealthStore = new Map();
+export const memoryHealthStore = new Map();
 
 function initMemoryStore() {
   VALID_PLATFORMS.forEach((key) => {
@@ -29,7 +29,6 @@ function initMemoryStore() {
       supportStatus: "Supported",
       platformStatus: "Active",
       scrapingStatus: "Unavailable",
-      nlpStatus: "Not Implemented",
       lastChecked: "Never",
       lastSuccessfulCheck: "Never",
       errorCount: 0,
@@ -147,13 +146,14 @@ export async function reportHealth(req, res) {
       statusColor: style.statusColor,
       lastCheckedRaw: nowIso,
       lastSuccessRaw: newLastSuccessRaw,
+      last_checked_at: nowIso,
+      last_success_at: newLastSuccessRaw,
       lastChecked: formatRelativeTime(nowIso),
       lastSuccessfulCheck: formatRelativeTime(newLastSuccessRaw),
       errorCount: newErrorCount,
       errorStage: isWorking ? null : (errorStage || null),
       errorMessage: isWorking ? null : (errorMessage || null),
       errorStatus: status === "Error" ? "Error Detected" : status === "Warning" ? "Warning" : null,
-      nlpStatus: "Not Implemented", // Hardcoded per requirement
     };
 
     memoryHealthStore.set(platform, updatedItem);
@@ -233,6 +233,67 @@ export async function reportHealth(req, res) {
   }
 }
 
+export function isPlatformActive(platformKey) {
+  const code = getPlatformCode({ platform: platformKey });
+  const item = memoryHealthStore.get(code);
+  if (!item) return true;
+  return item.platformStatus !== "Disabled" && item.is_active !== false;
+}
+
+export async function togglePlatformStatus(platformKey, desiredStatus = null, databaseClient = null) {
+  const code = getPlatformCode({ platform: platformKey });
+  if (!VALID_PLATFORMS.includes(code)) {
+    throw new Error(`Invalid platform: ${platformKey}. Must be one of: ${VALID_PLATFORMS.join(", ")}`);
+  }
+
+  const current = memoryHealthStore.get(code) || {};
+  const currentIsActive = current.platformStatus !== "Disabled" && current.is_active !== false;
+
+  let nextIsActive;
+  if (typeof desiredStatus === "boolean") {
+    nextIsActive = desiredStatus;
+  } else if (typeof desiredStatus === "string") {
+    nextIsActive = desiredStatus.trim().toLowerCase() === "active";
+  } else {
+    nextIsActive = !currentIsActive;
+  }
+
+  const nextStatusStr = nextIsActive ? "Active" : "Disabled";
+  const platformName = PLATFORM_META[code].name;
+
+  const healthSupabase = databaseClient || (process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+    : supabase);
+
+  try {
+    const { data, error } = await healthSupabase
+      .from("platforms")
+      .update({ is_active: nextIsActive })
+      .eq("platform_name", platformName)
+      .select("*");
+    if (error) throw error;
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new Error(`No database platform configuration found for ${code}.`);
+    }
+  } catch (err) {
+    err.statusCode = 503;
+    throw err;
+  }
+
+  const updatedItem = {
+    ...current,
+    platform: code,
+    name: platformName,
+    platformStatus: nextStatusStr,
+    is_active: nextIsActive,
+  };
+  memoryHealthStore.set(code, updatedItem);
+
+  return updatedItem;
+}
+
 // ── GET /api/health/status ───────────────────────────────────────────────────
 export async function getHealthStatus(_req, res) {
   try {
@@ -242,62 +303,75 @@ export async function getHealthStatus(_req, res) {
         })
       : supabase;
 
-    const { data: platformRows, error: platformsError } = await healthSupabase
-      .from("platforms")
-      .select("*")
-      .eq("is_active", true)
-      .order("platform_id", { ascending: true });
-
-    if (platformsError) {
-      throw platformsError;
+    let platformRows = [];
+    try {
+      const { data, error: platformsError } = await healthSupabase
+        .from("platforms")
+        .select("*")
+        .order("platform_id", { ascending: true });
+      if (!platformsError && Array.isArray(data)) {
+        platformRows = data;
+      }
+    } catch {
+      // Fall back to memory store if database table is unavailable
     }
 
-    const { data: healthRows, error: healthError } = await healthSupabase
-      .from("platform_health")
-      .select("*")
-      .order("display_name", { ascending: true });
-
-    if (healthError) {
-      throw healthError;
+    let healthRows = [];
+    try {
+      const { data, error: healthError } = await healthSupabase
+        .from("platform_health")
+        .select("*")
+        .order("display_name", { ascending: true });
+      if (!healthError && Array.isArray(data)) {
+        healthRows = data;
+      }
+    } catch {
+      // Fall back to memory store
     }
 
+    const dbPlatformByCode = new Map((platformRows || []).map((row) => [getPlatformCode(row), row]));
     const healthByCode = new Map((healthRows || []).map((row) => [getPlatformCode(row), row]));
-    const healthById = new Map((healthRows || []).map((row) => [String(row.platform_id), row]));
-    const platforms = (platformRows || []).map((baseRow) => {
-      const platformCode = getPlatformCode(baseRow);
-      const metadata = PLATFORM_META[platformCode] || {};
-      const health = healthByCode.get(platformCode) || healthById.get(String(baseRow.platform_id));
-      const status = health?.scraping_status || "Unavailable";
-      const platform = {
-        platform: platformCode,
-        name: baseRow.display_name || baseRow.name || baseRow.platform_name || metadata.name || platformCode,
-        category: baseRow.category || baseRow.industry_type || metadata.category || "General",
-        domain: baseRow.domain || baseRow.base_url || metadata.domain || "",
-        supportStatus: "Supported",
-        platformStatus: "Active",
-        scrapingStatus: status,
-        nlpStatus: health?.nlp_status || "Not Implemented",
-        lastCheckedRaw: health?.last_checked_at || null,
-        lastSuccessRaw: health?.last_success_at || null,
-        errorCount: health?.error_count || 0,
-        lastError: health?.error_message || null,
-        errorStatus: status === "Error" ? "Error Detected" : null,
-        errorStage: health?.error_stage || null,
-        errorMessage: health?.error_message || null,
-        status,
-        ...getStatusStyle(status),
-      };
+
+    const platforms = VALID_PLATFORMS.map((platformCode) => {
+      const metadata = PLATFORM_META[platformCode];
+      const mem = memoryHealthStore.get(platformCode) || {};
+      const dbPlatform = dbPlatformByCode.get(platformCode);
+      const health = healthByCode.get(platformCode);
+
+      const dbIsActive = dbPlatform ? dbPlatform.is_active !== false : true;
+      const memIsActive = mem.is_active !== undefined ? mem.is_active : mem.platformStatus !== "Disabled";
+      const isActive = dbPlatform ? dbIsActive : memIsActive;
+
+      const platformStatus = isActive ? "Active" : "Disabled";
+      const scrapingStatus = mem.scrapingStatus || health?.scraping_status || "Unavailable";
+
+      const lastCheckedRaw = mem.lastCheckedRaw || health?.last_checked_at || null;
+      const lastSuccessRaw = mem.lastSuccessRaw || health?.last_success_at || null;
+
+      const style = getStatusStyle(scrapingStatus);
 
       return {
-        ...platform,
-        lastChecked: formatRelativeTime(platform.lastCheckedRaw),
-        lastSuccessfulCheck: formatRelativeTime(platform.lastSuccessRaw),
+        platform: platformCode,
+        name: metadata.name,
+        category: metadata.category,
+        domain: metadata.domain,
+        supportStatus: "Supported",
+        platformStatus: platformStatus,
+        is_active: isActive,
+        scrapingStatus: scrapingStatus,
+        lastCheckedRaw: lastCheckedRaw,
+        lastSuccessRaw: lastSuccessRaw,
+        lastChecked: formatRelativeTime(lastCheckedRaw),
+        lastSuccessfulCheck: formatRelativeTime(lastSuccessRaw),
+        errorCount: mem.errorCount || health?.error_count || 0,
+        lastError: mem.errorMessage || health?.error_message || null,
+        errorStatus: scrapingStatus === "Error" ? "Error Detected" : scrapingStatus === "Warning" ? "Warning" : null,
+        errorStage: mem.errorStage || health?.error_stage || null,
+        errorMessage: mem.errorMessage || health?.error_message || null,
+        status: scrapingStatus,
+        ...style,
       };
-    }).map((p) => ({
-      ...p,
-      lastChecked: formatRelativeTime(p.lastCheckedRaw),
-      lastSuccessfulCheck: formatRelativeTime(p.lastSuccessRaw),
-    }));
+    });
 
     return res.status(200).json({ success: true, platforms });
   } catch (err) {
@@ -305,4 +379,3 @@ export async function getHealthStatus(_req, res) {
     return res.status(500).json({ success: false, error: "Unable to load persistent platform health." });
   }
 }
-

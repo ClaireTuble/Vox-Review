@@ -13,7 +13,7 @@ import '../css/ExtensionConfirmationModal.css';
 const ALL_PLATFORMS = SAVED_PLATFORM_OPTIONS;
 const ALL_EMOTIONS = SAVED_EMOTION_OPTIONS;
 
-export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, onSelectSaved, onRefreshSaved, onSavedCountChange }) {
+export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, onSelectSaved, onRefreshSaved, onOpenSavedPage, onAnalyzeNewReviews, onSavedCountChange }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlatforms, setSelectedPlatforms] = useState([...ALL_PLATFORMS]);
   const [selectedEmotions, setSelectedEmotions] = useState([...ALL_EMOTIONS]);
@@ -23,6 +23,11 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
   const [refreshingId, setRefreshingId] = useState(null);
   const [refreshErrorMap, setRefreshErrorMap] = useState({});
   const [refreshMessageMap, setRefreshMessageMap] = useState({});
+  const [pendingReviewMap, setPendingReviewMap] = useState({});
+  const [openPromptId, setOpenPromptId] = useState(null);
+  const [openingId, setOpeningId] = useState(null);
+  const [analyzingNewId, setAnalyzingNewId] = useState(null);
+  const [lastCheckedMap, setLastCheckedMap] = useState({});
   const [deleteError, setDeleteError] = useState('');
   const [clearAllError, setClearAllError] = useState('');
   const [showClearAllConfirmation, setShowClearAllConfirmation] = useState(false);
@@ -122,23 +127,85 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
     setRefreshingId(itemKey);
     setRefreshErrorMap((prev) => ({ ...prev, [itemKey]: null }));
     setRefreshMessageMap((prev) => ({ ...prev, [itemKey]: null }));
+    setOpenPromptId(null);
 
     try {
       const refreshed = await onRefreshSaved?.(item);
-      if (!refreshed?.success) {
-        throw new Error(refreshed?.error || 'Saved page is not open in an accessible tab.');
+      if (refreshed?.needsOpen) {
+        setOpenPromptId(itemKey);
+        return;
       }
+      if (!refreshed?.success) {
+        throw new Error(refreshed?.error || 'Unable to refresh this analysis. Please check that the original page is available.');
+      }
+      setPendingReviewMap((prev) => ({ ...prev, [itemKey]: refreshed.newReviews || [] }));
+      setLastCheckedMap((prev) => ({ ...prev, [itemKey]: refreshed.lastRefreshedAt || refreshed.record?.last_refreshed_at }));
       await reloadSavedItems();
       setRefreshMessageMap((prev) => ({ ...prev, [itemKey]: refreshed.message }));
     } catch (err) {
       if (import.meta.env.DEV) console.error('VoxReview: Could not rescan saved page:', err);
       setRefreshErrorMap((prev) => ({
         ...prev,
-        [itemKey]: err.message || 'Unable to refresh this analysis. Please open the original supported page and try again.'
+        [itemKey]: 'Unable to refresh this analysis. Please check that the original page is available.'
       }));
     } finally {
       setRefreshingId(null);
     }
+  };
+
+  const handleOpenProductPage = async (item) => {
+    const itemKey = getPageKey(item.platform, item.page_url) || item.pageKey;
+    setOpeningId(itemKey);
+    setOpenPromptId(null);
+    setRefreshErrorMap((prev) => ({ ...prev, [itemKey]: null }));
+    try {
+      const refreshed = await onOpenSavedPage?.(item);
+      if (!refreshed?.success) throw new Error(refreshed?.error || 'Unable to refresh this analysis. Please check that the original page is available.');
+      setPendingReviewMap((prev) => ({ ...prev, [itemKey]: refreshed.newReviews || [] }));
+      setLastCheckedMap((prev) => ({ ...prev, [itemKey]: refreshed.lastRefreshedAt || refreshed.record?.last_refreshed_at }));
+      await reloadSavedItems();
+      setRefreshMessageMap((prev) => ({ ...prev, [itemKey]: refreshed.message }));
+    } catch (error) {
+      setRefreshErrorMap((prev) => ({
+        ...prev,
+        [itemKey]: error.message || 'Unable to refresh this analysis. Please check that the original page is available.',
+      }));
+    } finally {
+      setOpeningId(null);
+    }
+  };
+
+  const handleAnalyzeNewReviews = async (item) => {
+    const itemKey = getPageKey(item.platform, item.page_url) || item.pageKey;
+    const pendingReviews = pendingReviewMap[itemKey] || [];
+    if (pendingReviews.length === 0 || analyzingNewId) return;
+    setAnalyzingNewId(itemKey);
+    setRefreshErrorMap((prev) => ({ ...prev, [itemKey]: null }));
+    try {
+      const result = await onAnalyzeNewReviews?.(item, pendingReviews);
+      if (!result?.success) throw new Error(result?.error || 'Unable to analyze the new reviews.');
+      setPendingReviewMap((prev) => ({ ...prev, [itemKey]: [] }));
+      await reloadSavedItems();
+      setRefreshMessageMap((prev) => ({ ...prev, [itemKey]: `${pendingReviews.length} new reviews analyzed` }));
+    } catch (error) {
+      setRefreshErrorMap((prev) => ({
+        ...prev,
+        [itemKey]: error.message || 'Unable to analyze the new reviews. Please try again.',
+      }));
+    } finally {
+      setAnalyzingNewId(null);
+    }
+  };
+
+  const formatLastChecked = (timestamp) => {
+    if (!timestamp) return '';
+    const elapsedMinutes = Math.max(0, Math.floor((Date.now() - Number(timestamp)) / 60000));
+    if (elapsedMinutes < 1) return 'just now';
+    if (elapsedMinutes < 60) return `${elapsedMinutes} ${elapsedMinutes === 1 ? 'minute' : 'minutes'} ago`;
+    const elapsedHours = Math.floor(elapsedMinutes / 60);
+    if (elapsedHours < 24) return `${elapsedHours} ${elapsedHours === 1 ? 'hour' : 'hours'} ago`;
+    const elapsedDays = Math.floor(elapsedHours / 24);
+    return `${elapsedDays} ${elapsedDays === 1 ? 'day' : 'days'} ago`;
   };
 
   if (!isLoggedIn) {
@@ -340,6 +407,11 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                   </span>
                   <span>• {item.date === 'Just now' ? 'Last updated Just now' : `Last updated ${item.date}`}</span>
                 </div>
+                {(lastCheckedMap[getPageKey(item.platform, item.page_url) || item.pageKey] || item.last_refreshed_at) && (
+                  <div className="saved-card-last-checked">
+                    Last checked: {formatLastChecked(lastCheckedMap[getPageKey(item.platform, item.page_url) || item.pageKey] || item.last_refreshed_at)}
+                  </div>
+                )}
 
                 <div className="saved-card-actions-bottom">
                   <button
@@ -362,6 +434,41 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                 {refreshMessageMap[getPageKey(item.platform, item.page_url) || item.pageKey] && (
                   <div className="saved-refresh-status-msg" role="status">
                     {refreshMessageMap[getPageKey(item.platform, item.page_url) || item.pageKey]}
+                  </div>
+                )}
+                {pendingReviewMap[getPageKey(item.platform, item.page_url) || item.pageKey]?.length > 0 && (
+                  <button
+                    type="button"
+                    className="saved-analyze-new-btn"
+                    onClick={(event) => { event.stopPropagation(); void handleAnalyzeNewReviews(item); }}
+                    disabled={analyzingNewId === (getPageKey(item.platform, item.page_url) || item.pageKey)}
+                  >
+                    {analyzingNewId === (getPageKey(item.platform, item.page_url) || item.pageKey)
+                      ? 'Analyzing new reviews...'
+                      : `Analyze ${pendingReviewMap[getPageKey(item.platform, item.page_url) || item.pageKey].length} New Reviews`}
+                  </button>
+                )}
+                {openPromptId === (getPageKey(item.platform, item.page_url) || item.pageKey) && (
+                  <div className="saved-open-page-prompt" role="group" aria-label="Open original product page">
+                    <span>The original product page needs to be opened to refresh reviews.</span>
+                    <div className="saved-open-page-actions">
+                      <button
+                        type="button"
+                        className="saved-analyze-new-btn"
+                        onClick={(event) => { event.stopPropagation(); void handleOpenProductPage(item); }}
+                        disabled={openingId === (getPageKey(item.platform, item.page_url) || item.pageKey)}
+                      >
+                        {openingId === (getPageKey(item.platform, item.page_url) || item.pageKey) ? 'Opening...' : 'Open Product Page'}
+                      </button>
+                      <button
+                        type="button"
+                        className="saved-prompt-cancel-btn"
+                        onClick={(event) => { event.stopPropagation(); setOpenPromptId(null); }}
+                        disabled={openingId === (getPageKey(item.platform, item.page_url) || item.pageKey)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

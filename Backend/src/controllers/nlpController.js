@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { PersistentJsonWorker } from "../utils/persistentJsonWorker.js";
 
 const controllerDirectory = path.dirname(fileURLToPath(import.meta.url));
 const nlpDirectory = path.resolve(controllerDirectory, "../../../Frontend/nlp");
-const predictionScript = path.join(nlpDirectory, "predict_svm_batch.py");
-const topicPredictionScript = path.join(nlpDirectory, "predict_topics_batch.py");
+const svmWorkerScript = path.join(nlpDirectory, "svm_worker.py");
 const topicWorkerScript = path.join(nlpDirectory, "topic_worker.py");
 const pythonExecutable = process.env.PYTHON_EXECUTABLE || "python";
+const svmWorkerTimeoutMs = Number(process.env.SVM_WORKER_TIMEOUT_MS || 60000);
 const topicProcessTimeoutBaseMs = Number(process.env.TOPIC_PROCESS_TIMEOUT_BASE_MS || 60000);
 const topicProcessTimeoutPerReviewMs = Number(process.env.TOPIC_PROCESS_TIMEOUT_PER_REVIEW_MS || 12000);
 const validCategories = new Set([1, 2, 3, 4, 5, 6]);
@@ -27,6 +28,13 @@ const pendingTopicRequests = new Map();
 const topicQueue = [];
 const topicRequestDiagnostics = new Map();
 const topicWorkerRequestIds = new WeakMap();
+const svmWorker = new PersistentJsonWorker({
+  command: pythonExecutable,
+  args: [svmWorkerScript],
+  cwd: nlpDirectory,
+  timeoutMs: svmWorkerTimeoutMs,
+});
+process.once("exit", () => svmWorker.dispose());
 function safeTopicDiagnosticText(value, reviews) {
   let text = String(value ?? "");
   reviews.forEach((review) => {
@@ -84,72 +92,42 @@ function logTopicWorkerResult(diagnostics, response = null) {
   });
 }
 
-function runPrediction(reviews) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(pythonExecutable, [predictionScript], {
-      cwd: nlpDirectory,
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
+function validateSvmResponse(response, reviewCount) {
+  const predictions = response?.predictions;
+  const results = response?.results;
+  const categoryDrivers = response?.categoryDrivers;
+  if (
+    !Array.isArray(predictions) ||
+    predictions.length !== reviewCount ||
+    predictions.some((category) => !validCategories.has(category)) ||
+    (results !== undefined && (
+      !Array.isArray(results) ||
+      results.length !== reviewCount ||
+      results.some((result, index) => (
+        result?.category !== predictions[index] ||
+        !Array.isArray(result?.emotionDrivers) ||
+        result.emotionDrivers.some((driver) => typeof driver !== "string")
+      ))
+    )) ||
+    (categoryDrivers !== undefined && (
+      typeof categoryDrivers !== "object" ||
+      Object.values(categoryDrivers).some((drivers) => (
+        !Array.isArray(drivers) || drivers.some((driver) => typeof driver !== "string")
+      ))
+    ))
+  ) {
+    throw new Error("SVM returned an invalid prediction explanation payload");
+  }
 
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(stderr.trim() || `SVM process exited with code ${code}`));
-        return;
-      }
-
-      try {
-        const response = JSON.parse(stdout.trim());
-        const predictions = response?.predictions;
-        const results = response?.results;
-        const categoryDrivers = response?.categoryDrivers;
-        if (
-          !Array.isArray(predictions) ||
-          predictions.length !== reviews.length ||
-          predictions.some((category) => !validCategories.has(category)) ||
-          (results !== undefined && (
-            !Array.isArray(results) ||
-            results.length !== reviews.length ||
-            results.some((result, index) => (
-              result?.category !== predictions[index] ||
-              !Array.isArray(result?.emotionDrivers) ||
-              result.emotionDrivers.some((driver) => typeof driver !== "string")
-            ))
-          )) ||
-          (categoryDrivers !== undefined && (
-            typeof categoryDrivers !== "object" ||
-            Object.values(categoryDrivers).some((drivers) => (
-              !Array.isArray(drivers) || drivers.some((driver) => typeof driver !== "string")
-            ))
-          ))
-        ) {
-          reject(new Error("SVM returned an invalid prediction explanation payload"));
-          return;
-        }
-        resolve({
-          predictions,
-          results: Array.isArray(results)
-            ? results
-            : predictions.map((category) => ({ category, emotionDrivers: [] })),
-          categoryDrivers: categoryDrivers && typeof categoryDrivers === "object"
-            ? categoryDrivers
-            : {},
-        });
-      } catch (error) {
-        reject(new Error(`Unable to parse SVM response: ${error.message}`));
-      }
-    });
-
-    child.stdin.end(JSON.stringify({ reviews }));
-  });
+  return {
+    predictions,
+    results: Array.isArray(results)
+      ? results
+      : predictions.map((category) => ({ category, emotionDrivers: [] })),
+    categoryDrivers: categoryDrivers && typeof categoryDrivers === "object"
+      ? categoryDrivers
+      : {},
+  };
 }
 
 export async function predictSvm(req, res) {
@@ -168,15 +146,40 @@ export async function predictSvm(req, res) {
     });
   }
 
+  const workerAbortController = new AbortController();
+  const abortWorkerRequest = () => workerAbortController.abort();
+  const abortWorkerOnResponseClose = () => {
+    if (!res.writableEnded) abortWorkerRequest();
+  };
+  req.once("aborted", abortWorkerRequest);
+  res.once("close", abortWorkerOnResponseClose);
+
   try {
-    const predictionResponse = await runPrediction(reviews);
+    const workerResponse = await svmWorker.request(
+      { reviews },
+      { signal: workerAbortController.signal },
+    );
+    if (workerResponse.success !== true) {
+      throw new Error("SVM worker returned an unsuccessful response");
+    }
+    const predictionResponse = validateSvmResponse(workerResponse, reviews.length);
     return res.json({ success: true, ...predictionResponse });
   } catch (error) {
+    if (req.aborted || res.destroyed) return;
+    if (error.code === "ETIMEDOUT") {
+      return res.status(504).json({
+        success: false,
+        error: "SVM prediction timed out. Please retry.",
+      });
+    }
     console.error("VoxReview SVM prediction error:", error);
     return res.status(503).json({
       success: false,
       error: "SVM prediction service unavailable",
     });
+  } finally {
+    req.removeListener("aborted", abortWorkerRequest);
+    res.removeListener("close", abortWorkerOnResponseClose);
   }
 }
 
@@ -366,7 +369,7 @@ function processNextTopicRequest() {
     return;
   }
   isProcessingTopic = true;
-  const { requestId, reviews, resolve, reject, topicProcessTimeoutMs, diagnostics } = item;
+  const { requestId, reviews, platform, resolve, reject, topicProcessTimeoutMs, diagnostics } = item;
   diagnostics.queueWaitMs = Date.now() - item.queuedAt;
   diagnostics.workerStartedAt = Date.now();
   diagnostics.stderr = "";
@@ -431,7 +434,7 @@ function processNextTopicRequest() {
     const worker = ensureTopicWorker(requestId);
     topicWorkerRequestId = requestId;
     topicWorkerRequestIds.set(worker, requestId);
-    const requestLine = `${JSON.stringify({ id: requestId, reviews })}\n`;
+    const requestLine = `${JSON.stringify({ id: requestId, reviews, platform })}\n`;
     console.log("[TOPIC WORKER INPUT]", {
       requestId,
       platform: diagnostics.platform,
@@ -458,13 +461,14 @@ function processNextTopicRequest() {
   }
 }
 
-function runTopicPrediction(reviews, diagnostics, registerCancel) {
+function runTopicPrediction(reviews, platform, diagnostics, registerCancel) {
   return new Promise((resolve, reject) => {
     const { requestId } = diagnostics;
     const topicProcessTimeoutMs = topicProcessTimeoutBaseMs + reviews.length * topicProcessTimeoutPerReviewMs;
     const queueItem = {
       requestId,
       reviews,
+      platform,
       diagnostics,
       queuedAt: Date.now(),
       resolve,
@@ -547,7 +551,10 @@ export async function predictTopics(req, res) {
     if (!res.writableEnded) cancelQueuedRequest();
   });
   try {
-    const predictionResponse = await runTopicPrediction(reviews, diagnostics, (fn) => {
+    const platform = diagnostics.platform === "not provided"
+      ? null
+      : diagnostics.platform;
+    const predictionResponse = await runTopicPrediction(reviews, platform, diagnostics, (fn) => {
       cancelCallback = fn;
       if (clientDisconnected) cancelCallback();
     });

@@ -319,6 +319,11 @@
   color: #34A853;
 }
 
+.plat-icon.steam {
+  color: #171A21;
+}
+
+
 /* ── "Why VoxReview?" Section ─────────────────────────────── */
 .landing-why-section {
   position: relative;

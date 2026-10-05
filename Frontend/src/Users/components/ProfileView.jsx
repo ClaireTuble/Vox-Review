@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import {
   User,
   LogIn,
@@ -20,11 +20,14 @@ import {
   Eye,
   EyeOff,
   AlertTriangle,
-  Loader2
+  Loader2,
+  Upload,
 } from 'lucide-react';
 import authService, { normalizeAuthErrorMessage } from '../../services/authService.js';
 import ProfileChangesConfirmationModal from './ProfileChangesConfirmationModal.jsx';
+import RemoveAvatarConfirmationModal from './RemoveAvatarConfirmationModal.jsx';
 import VerificationCodeModal from './VerificationCodeModal.jsx';
+import { getProfileSaveChanges, persistProfileDraft } from '../utils/profileSave.js';
 import '../css/ProfileView.css';
 
 export default function ProfileView({
@@ -35,12 +38,15 @@ export default function ProfileView({
   onLogout,
   theme = 'light',
   onThemeToggle,
-  onClearSavedAnalyses,
-  onProfileUpdated,
+  onSavedProfileUpdated,
+  onDirtyChange,
+  onRequestLeave,
+  registerDiscardDraft,
 }) {
   const [activeView, setActiveView] = useState('main'); // 'main' | 'user-profile' | 'security' | 'help-center'
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [showRemoveAvatarModal, setShowRemoveAvatarModal] = useState(false);
   const [currentPass, setCurrentPass] = useState('');
   const [newPass, setNewPass] = useState('');
   const [confirmPass, setConfirmPass] = useState('');
@@ -53,6 +59,14 @@ export default function ProfileView({
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState('success');
 
+  // Profile Picture state
+  const fileInputRef = useRef(null);
+  const pendingAvatarPreviewRef = useRef(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [isRemovingAvatar, setIsRemovingAvatar] = useState(false);
+  const [pendingAvatar, setPendingAvatar] = useState(null);
+  const [isAvatarRemovalPending, setIsAvatarRemovalPending] = useState(false);
+
   // Account Information Edit Form State
   const [username, setUsername] = useState(() => currentUser?.username || currentUser?.name || '');
   const [email, setEmail] = useState(() => currentUser?.email || '');
@@ -64,32 +78,159 @@ export default function ProfileView({
     firstName: currentUser?.firstName || '',
     lastName: currentUser?.lastName || '',
     fullName: currentUser?.fullName || currentUser?.name || '',
+    avatarUrl: currentUser?.avatarUrl || null,
+    googleAvatarUrl: currentUser?.googleAvatarUrl || null,
+    isCustomAvatar: currentUser?.isCustomAvatar ?? Boolean(currentUser?.custom_avatar_url),
   }));
   const [isSaving, setIsSaving] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [pendingProfileSave, setPendingProfileSave] = useState(null);
+  const profileDraft = { username, firstName, lastName };
+  const pendingAvatarAction = pendingAvatar
+    ? { type: 'upload', file: pendingAvatar.file }
+    : isAvatarRemovalPending
+      ? { type: 'remove' }
+      : null;
+  const profileChanges = getProfileSaveChanges(savedProfile, profileDraft, pendingAvatarAction);
+  const hasUnsavedProfileChanges = profileChanges.length > 0;
+  const isDirty = activeView === 'user-profile' && hasUnsavedProfileChanges;
+  const displayedAvatarUrl = pendingAvatar?.previewUrl
+    || (isAvatarRemovalPending ? savedProfile.googleAvatarUrl : savedProfile.avatarUrl)
+    || null;
+
+  useLayoutEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+
+  useEffect(() => {
+    return () => {
+      onDirtyChange?.(false);
+    };
+  }, [onDirtyChange]);
+
+  const handleDiscardDraft = useCallback(() => {
+    if (pendingAvatarPreviewRef.current) {
+      URL.revokeObjectURL(pendingAvatarPreviewRef.current);
+      pendingAvatarPreviewRef.current = null;
+    }
+    setPendingAvatar(null);
+    setIsAvatarRemovalPending(false);
+    setPendingProfileSave(null);
+    setShowRemoveAvatarModal(false);
+    setUsername(savedProfile.username);
+    setEmail(savedProfile.email);
+    setFirstName(savedProfile.firstName);
+    setLastName(savedProfile.lastName);
+    setToastMessage('');
+    setActiveView('main');
+  }, [savedProfile]);
+
+  useEffect(() => {
+    registerDiscardDraft?.(handleDiscardDraft);
+    return () => {
+      registerDiscardDraft?.(null);
+    };
+  }, [registerDiscardDraft, handleDiscardDraft]);
+
+  useEffect(() => () => {
+    if (pendingAvatarPreviewRef.current) {
+      URL.revokeObjectURL(pendingAvatarPreviewRef.current);
+      pendingAvatarPreviewRef.current = null;
+    }
+  }, []);
 
   // Sync state if currentUser prop updates
   useEffect(() => {
-    if (currentUser) {
+    if (currentUser && !hasUnsavedProfileChanges) {
       setSavedProfile({
         username: currentUser.username || currentUser.name || '',
         email: currentUser.email || '',
         firstName: currentUser.firstName || '',
         lastName: currentUser.lastName || '',
         fullName: currentUser.fullName || currentUser.name || '',
+        avatarUrl: currentUser.avatarUrl || null,
+        googleAvatarUrl: currentUser.googleAvatarUrl || null,
+        isCustomAvatar: currentUser.isCustomAvatar ?? Boolean(currentUser.custom_avatar_url),
       });
       if (currentUser.username) setUsername(currentUser.username);
       if (currentUser.email) setEmail(currentUser.email);
       if (currentUser.firstName !== undefined) setFirstName(currentUser.firstName);
       if (currentUser.lastName !== undefined) setLastName(currentUser.lastName);
     }
-  }, [currentUser]);
+  }, [currentUser, hasUnsavedProfileChanges]);
 
   const triggerToast = (msg, type = 'success') => {
     setToastMessage(msg);
     setToastType(type);
     setTimeout(() => setToastMessage(''), 4000);
+  };
+
+  const handleAvatarFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate type
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
+    if (!validTypes.includes(file.type.toLowerCase())) {
+      triggerToast('Invalid file format. Please choose a JPG, PNG, WebP, or GIF image.', 'error');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    // Validate size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      triggerToast('Image is too large. Maximum allowed file size is 5MB.', 'error');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    try {
+      const previewUrl = URL.createObjectURL(file);
+      if (pendingAvatarPreviewRef.current) {
+        URL.revokeObjectURL(pendingAvatarPreviewRef.current);
+      }
+      pendingAvatarPreviewRef.current = previewUrl;
+      setPendingAvatar({ file, previewUrl });
+      setIsAvatarRemovalPending(false);
+      setToastMessage('');
+    } catch (error) {
+      triggerToast(error?.message || 'Unable to preview this profile picture.', 'error');
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveAvatar = () => {
+    if (pendingAvatarPreviewRef.current) {
+      URL.revokeObjectURL(pendingAvatarPreviewRef.current);
+      pendingAvatarPreviewRef.current = null;
+    }
+    if (pendingAvatar) {
+      setPendingAvatar(null);
+      setIsAvatarRemovalPending(false);
+    } else if (savedProfile.isCustomAvatar || savedProfile.avatarUrl) {
+      setPendingAvatar(null);
+      setIsAvatarRemovalPending(true);
+    } else {
+      setPendingAvatar(null);
+      setIsAvatarRemovalPending(false);
+    }
+    setShowRemoveAvatarModal(false);
+    setToastMessage('');
+  };
+
+  const handleBackToSettings = () => {
+    if (!isDirty) {
+      handleDiscardDraft();
+      return;
+    }
+    if (onRequestLeave) {
+      onRequestLeave(() => {
+        handleDiscardDraft();
+      });
+    } else {
+      handleDiscardDraft();
+    }
   };
 
   const handleSaveProfile = (e) => {
@@ -99,32 +240,22 @@ export default function ProfileView({
       return;
     }
 
-    const currentName = currentUser?.fullName
-      || [currentUser?.firstName, currentUser?.lastName].filter(Boolean).join(' ').trim()
-      || currentUser?.name
-      || '';
-    const nextName = `${firstName.trim()} ${lastName.trim()}`.trim();
-    const currentUsername = currentUser?.username || '';
-    const nextUsername = username.trim();
-    const changes = [];
+    const changes = getProfileSaveChanges(savedProfile, {
+      username: username.trim(),
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+    }, pendingAvatarAction);
 
-    if (currentName !== nextName) {
-      changes.push({ label: 'Name', prefix: '', currentValue: currentName, nextValue: nextName });
-    }
-    if (currentUsername !== nextUsername) {
-      changes.push({ label: 'Username', prefix: '@', currentValue: currentUsername, nextValue: nextUsername });
-    }
-
-    if (changes.length === 0) {
+    if (!changes.length) {
       triggerToast('No profile changes to save.', 'error');
       return;
     }
 
     setPendingProfileSave({
-      changes,
-      username: nextUsername,
+      username: username.trim(),
       firstName: firstName.trim(),
       lastName: lastName.trim(),
+      avatarAction: pendingAvatarAction,
     });
   };
 
@@ -132,12 +263,16 @@ export default function ProfileView({
     if (!pendingProfileSave || isSaving) return;
     setIsSaving(true);
     try {
-      const result = await authService.updateUserProfile({
+      setIsUploadingAvatar(pendingProfileSave.avatarAction?.type === 'upload');
+      setIsRemovingAvatar(pendingProfileSave.avatarAction?.type === 'remove');
+      const updatedUser = await persistProfileDraft({
+        authService,
         username: pendingProfileSave.username,
         firstName: pendingProfileSave.firstName,
         lastName: pendingProfileSave.lastName,
+        avatarAction: pendingProfileSave.avatarAction,
+        onPersisted: onSavedProfileUpdated,
       });
-      const updatedUser = result?.user;
       if (updatedUser) {
         setUsername(updatedUser.username || pendingProfileSave.username);
         setFirstName(updatedUser.firstName || pendingProfileSave.firstName);
@@ -148,15 +283,25 @@ export default function ProfileView({
           firstName: updatedUser.firstName || pendingProfileSave.firstName,
           lastName: updatedUser.lastName || pendingProfileSave.lastName,
           fullName: updatedUser.fullName || `${pendingProfileSave.firstName} ${pendingProfileSave.lastName}`.trim(),
+          avatarUrl: updatedUser.avatarUrl || null,
+          googleAvatarUrl: updatedUser.googleAvatarUrl || null,
+          isCustomAvatar: updatedUser.isCustomAvatar ?? false,
         });
-        onProfileUpdated?.(updatedUser);
       }
-      triggerToast('Account information saved successfully.', 'success');
+      if (pendingAvatarPreviewRef.current) {
+        URL.revokeObjectURL(pendingAvatarPreviewRef.current);
+        pendingAvatarPreviewRef.current = null;
+      }
+      setPendingAvatar(null);
+      setIsAvatarRemovalPending(false);
+      setPendingProfileSave(null);
+      triggerToast('Profile changes saved successfully.', 'success');
     } catch (err) {
-      triggerToast(err?.message || 'Failed to save account information.', 'error');
+      triggerToast(err?.message || 'Failed to save profile changes.', 'error');
     } finally {
       setIsSaving(false);
-      setPendingProfileSave(null);
+      setIsUploadingAvatar(false);
+      setIsRemovingAvatar(false);
     }
   };
 
@@ -218,13 +363,6 @@ export default function ProfileView({
     }
   };
 
-  const handleClearData = () => {
-    if (onClearSavedAnalyses) {
-      onClearSavedAnalyses();
-    }
-    triggerToast('Saved analyses cache cleared.');
-  };
-
   return (
     <div className="profile-view-container">
       {/* ── TOP EXTENSION NOTIFICATION BANNER (Elevated above modals & UI content) ── */}
@@ -276,21 +414,62 @@ export default function ProfileView({
       )}
 
       {/* ── COMPACT ACCOUNT HEADER (ALWAYS VISIBLE AT TOP) ── */}
-      <div className="compact-profile-header">
+      <div
+        className={`compact-profile-header ${!isLoggedIn ? 'guest-clickable' : ''}`}
+        onClick={!isLoggedIn ? () => onLoginClick('/login') : undefined}
+        role={!isLoggedIn ? 'button' : undefined}
+        tabIndex={!isLoggedIn ? 0 : undefined}
+        onKeyDown={!isLoggedIn ? (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onLoginClick('/login');
+          }
+        } : undefined}
+        title={!isLoggedIn ? 'Click to Sign In / Register' : undefined}
+      >
         <div className="profile-avatar-lg">
-          {(savedProfile.firstName || savedProfile.username || savedProfile.email || 'U').charAt(0).toUpperCase()}
+          {isLoggedIn ? (
+            savedProfile.avatarUrl ? (
+              <img
+                src={savedProfile.avatarUrl}
+                alt={savedProfile.firstName || savedProfile.username || 'User'}
+                className="profile-avatar-img"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                }}
+              />
+            ) : (
+              (savedProfile.firstName || savedProfile.username || savedProfile.email || 'U').charAt(0).toUpperCase()
+            )
+          ) : (
+            <User size={18} color="var(--accent-color)" />
+          )}
+          {isLoggedIn && (isUploadingAvatar || isRemovingAvatar) && (
+            <div className="pf-avatar-loading-overlay">
+              <Loader2 size={15} className="spin-icon" />
+            </div>
+          )}
         </div>
         <div className="profile-details">
-          <span className="profile-name">
-            {savedProfile.firstName || savedProfile.lastName
-              ? `${savedProfile.firstName} ${savedProfile.lastName}`.trim()
-              : savedProfile.fullName || `@${savedProfile.username || savedProfile.email?.split('@')[0] || 'user'}`}
-          </span>
-          <span className="profile-email">{savedProfile.email || ''}</span>
-          {savedProfile.username && (
-            <span style={{ fontSize: '11px', color: 'var(--accent-color)', fontWeight: 600, marginTop: '1px' }}>
-              @{savedProfile.username}
-            </span>
+          {isLoggedIn ? (
+            <>
+              <span className="profile-name">
+                {savedProfile.firstName || savedProfile.lastName
+                  ? `${savedProfile.firstName} ${savedProfile.lastName}`.trim()
+                  : savedProfile.fullName || (savedProfile.username ? `@${savedProfile.username}` : (savedProfile.email?.split('@')[0] ? `@${savedProfile.email.split('@')[0]}` : 'User'))}
+              </span>
+              <span className="profile-email">{savedProfile.email || ''}</span>
+              {savedProfile.username && (
+                <span style={{ fontSize: '11px', color: 'var(--accent-color)', fontWeight: 600, marginTop: '1px' }}>
+                  @{savedProfile.username}
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <span className="profile-name">Guest User</span>
+              <span className="profile-email">Sign in to manage your account</span>
+            </>
           )}
         </div>
       </div>
@@ -395,25 +574,6 @@ export default function ProfileView({
               </span>
             </div>
 
-            {/* Saved Data item */}
-            <div className="menu-item-row no-hover">
-              <div className="menu-item-left">
-                <div className="menu-item-icon">
-                  <Trash2 size={15} color="#EF4444" />
-                </div>
-                <div className="menu-item-text">
-                  <span className="menu-item-title">Saved Data</span>
-                  <span className="menu-item-sub">Clear local analysis cache</span>
-                </div>
-              </div>
-              <button
-                className="profile-action-btn secondary small"
-                onClick={handleClearData}
-                style={{ width: 'auto', padding: '4px 10px' }}
-              >
-                Clear
-              </button>
-            </div>
           </div>
 
           {/* Log Out item at bottom */}
@@ -439,22 +599,107 @@ export default function ProfileView({
         </div>
       )}
 
-      {/* ── USER PROFILE DETAIL VIEW (REDESIGNED FOR MODERN SPACIOUS LOOK) ── */}
+      {/* -- USER PROFILE DETAIL VIEW -- */}
       {activeView === 'user-profile' && (
         <div className="subview-container">
-          <button className="back-nav-btn" onClick={() => setActiveView('main')}>
-            <ArrowLeft size={14} /> Back to Settings
-          </button>
 
-          <div className="modern-profile-card">
-            <span className="modern-section-title">PERSONAL INFORMATION</span>
+          {/* Page header */}
+          <div className="pf-page-header">
+            <button className="back-nav-btn" onClick={handleBackToSettings}>
+              <ArrowLeft size={14} /> Back to Settings
+            </button>
+            <h2 className="pf-page-title">Profile Details</h2>
+            <p className="pf-page-desc">Manage your personal information and profile picture.</p>
+          </div>
 
-            <form onSubmit={handleSaveProfile} className="modern-profile-form">
-              <div className="modern-form-field">
-                <label htmlFor="edit-username">USERNAME</label>
-                <div className="modern-input-wrap">
+          {/* Profile Picture Card */}
+          <div className="pf-section-card">
+            <div className="pf-section-head">
+              <span className="pf-section-label">Profile Picture</span>
+              <span className="pf-section-hint">Choose a photo that will be shown on your VoxReview profile.</span>
+            </div>
+
+            <div className="pf-avatar-row">
+              <div className="pf-avatar-ring">
+                {displayedAvatarUrl ? (
+                  <img
+                    src={displayedAvatarUrl}
+                    alt="Profile"
+                    className="pf-avatar-img"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                ) : (
+                  <span className="pf-avatar-initial">
+                    {(savedProfile.firstName || savedProfile.username || savedProfile.email || 'U').charAt(0).toUpperCase()}
+                  </span>
+                )}
+                {(isUploadingAvatar || isRemovingAvatar) && (
+                  <div className="pf-avatar-loading-overlay">
+                    <Loader2 size={16} className="spin-icon" />
+                  </div>
+                )}
+              </div>
+
+              <div className="pf-avatar-controls">
+                <div className="pf-avatar-btn-row">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleAvatarFileChange}
+                    accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                    style={{ display: 'none' }}
+                  />
+                  <button
+                    id="upload-picture-btn"
+                    type="button"
+                    className="pf-btn-upload"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploadingAvatar || isRemovingAvatar}
+                  >
+                    {isUploadingAvatar
+                      ? <Loader2 size={12} className="spin-icon" />
+                      : <Upload size={12} />}
+                    {isUploadingAvatar ? 'Uploading...' : 'Upload Picture'}
+                  </button>
+
+                  {displayedAvatarUrl && (
+                    <button
+                      id="remove-picture-btn"
+                      type="button"
+                      className="pf-btn-remove"
+                      onClick={() => setShowRemoveAvatarModal(true)}
+                      disabled={isUploadingAvatar || isRemovingAvatar}
+                    >
+                      {isRemovingAvatar
+                        ? <Loader2 size={12} className="spin-icon" />
+                        : <Trash2 size={12} />}
+                      {isRemovingAvatar ? 'Removing...' : 'Remove'}
+                    </button>
+                  )}
+                </div>
+                <span className="pf-avatar-hint">JPG, PNG, WEBP, or GIF &middot; Max 5 MB</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Personal Information Card */}
+          <div className="pf-section-card">
+            <div className="pf-section-head">
+              <span className="pf-section-label">Personal Information</span>
+              <span className="pf-section-hint">Update your account information below.</span>
+            </div>
+
+            <form onSubmit={handleSaveProfile} className="pf-form">
+
+              {/* Row 1: Username | Email Address */}
+              <div className="pf-field-row">
+                <div className="pf-field">
+                  <label className="pf-label" htmlFor="edit-username">Username</label>
                   <input
                     id="edit-username"
+                    className="pf-input"
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
@@ -462,54 +707,54 @@ export default function ProfileView({
                     required
                   />
                 </div>
-              </div>
-
-              <div className="modern-form-field">
-                <label htmlFor="edit-email">EMAIL ADDRESS</label>
-                <div className="modern-input-wrap">
+                <div className="pf-field">
+                  <label className="pf-label" htmlFor="edit-email">Email Address</label>
                   <input
                     id="edit-email"
+                    className="pf-input pf-input--readonly"
                     type="email"
                     value={email}
                     readOnly
-                    style={{ opacity: 0.8, cursor: 'not-allowed' }}
                     placeholder="user@example.com"
                   />
                 </div>
               </div>
 
-              <div className="modern-form-field">
-                <label>NAME</label>
-                <div className="modern-name-row">
-                  <div className="modern-input-wrap flex-1">
-                    <input
-                      id="edit-firstname"
-                      type="text"
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      placeholder="First Name"
-                      required
-                    />
-                  </div>
-                  <div className="modern-input-wrap flex-1">
-                    <input
-                      id="edit-lastname"
-                      type="text"
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      placeholder="Last Name"
-                      required
-                    />
-                  </div>
+              {/* Row 2: First Name | Last Name */}
+              <div className="pf-field-row">
+                <div className="pf-field">
+                  <label className="pf-label" htmlFor="edit-firstname">First Name</label>
+                  <input
+                    id="edit-firstname"
+                    className="pf-input"
+                    type="text"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    placeholder="First Name"
+                    required
+                  />
+                </div>
+                <div className="pf-field">
+                  <label className="pf-label" htmlFor="edit-lastname">Last Name</label>
+                  <input
+                    id="edit-lastname"
+                    className="pf-input"
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    placeholder="Last Name"
+                    required
+                  />
                 </div>
               </div>
 
               <button
+                id="save-profile-btn"
                 type="submit"
-                className="modern-submit-btn"
+                className="pf-save-btn"
                 disabled={isSaving}
               >
-                <Save size={14} />
+                <Save size={13} />
                 {isSaving ? 'Saving Changes...' : 'Save Changes'}
               </button>
             </form>
@@ -666,9 +911,16 @@ export default function ProfileView({
 
       {pendingProfileSave && (
         <ProfileChangesConfirmationModal
-          changes={pendingProfileSave.changes}
           onCancel={() => setPendingProfileSave(null)}
           onConfirm={confirmSaveProfile}
+        />
+      )}
+
+      {showRemoveAvatarModal && (
+        <RemoveAvatarConfirmationModal
+          onCancel={() => !isRemovingAvatar && setShowRemoveAvatarModal(false)}
+          onConfirm={handleRemoveAvatar}
+          isRemoving={isRemovingAvatar}
         />
       )}
 

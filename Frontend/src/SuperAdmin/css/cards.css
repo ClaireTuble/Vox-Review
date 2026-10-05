@@ -75,3 +75,28 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+.stat-period-select {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.18s ease;
+}
+
+.stat-period-select:hover,
+.stat-period-select:focus {
+  border-color: rgba(59, 130, 246, 0.5);
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.stat-period-select option {
+  background: #0f172a;
+  color: #f8fafc;
+}

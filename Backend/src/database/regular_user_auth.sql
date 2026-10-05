@@ -24,7 +24,21 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_full_name text;
 begin
+  v_full_name := trim(concat_ws(
+    ' ',
+    nullif(trim(new.raw_user_meta_data->>'firstName'), ''),
+    nullif(trim(new.raw_user_meta_data->>'lastName'), '')
+  ));
+  if v_full_name = '' then
+    v_full_name := coalesce(
+      nullif(trim(new.raw_user_meta_data->>'username'), ''),
+      split_part(new.email, '@', 1)
+    );
+  end if;
+
   -- If a matching app user already exists by email, link it if it is currently unassigned.
   if exists (
     select 1
@@ -33,7 +47,8 @@ begin
       and u.auth_user_id is null
   ) then
     update public.users
-    set auth_user_id = new.id
+    set auth_user_id = new.id,
+      full_name = v_full_name
     where email = new.email
       and auth_user_id is null;
 
@@ -50,8 +65,8 @@ begin
   end if;
 
   -- If no app-user row exists for this email, create one.
-  insert into public.users (auth_user_id, email)
-  values (new.id, new.email)
+  insert into public.users (auth_user_id, email, full_name)
+  values (new.id, new.email, v_full_name)
   on conflict (auth_user_id) do nothing;
 
   return new;

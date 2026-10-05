@@ -1,5 +1,6 @@
 // RecentActivityFeed — UI only, static mock data
 import { ActivitySquare } from 'lucide-react';
+import { formatRelativeTime } from '../utils/relativeTime.js';
 import '../css/dashboard.css';
 import '../css/tables.css';
 
@@ -10,18 +11,6 @@ const PLATFORM_COLORS = {
   'Google Play Store': { bg: 'rgba(110,231,183,0.14)',   color: '#6ee7b7' },
   'Steam':             { bg: 'rgba(129,140,248,0.14)',   color: '#818cf8' },
 };
-
-function formatTimeAgo(timestamp) {
-  if (!timestamp) return 'Just now';
-  const diffMs = Date.now() - new Date(timestamp).getTime();
-  if (diffMs < 0 || diffMs < 60000) return 'Just now';
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 60) return `${mins} min${mins > 1 ? 's' : ''} ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} hr${hours > 1 ? 's' : ''} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days > 1 ? 's' : ''} ago`;
-}
 
 export default function RecentActivityFeed({ activities }) {
   const items = (activities && activities.length > 0) ? activities : [];
@@ -40,7 +29,7 @@ export default function RecentActivityFeed({ activities }) {
         const platformName = item.platform || 'Shopee';
         const c = PLATFORM_COLORS[platformName] ?? { bg: 'rgba(148,163,184,0.12)', color: '#94a3b8' };
         const actionLabel = item.activity_type ? `${item.activity_type} platform` : (item.action || 'Used platform');
-        const timeAgo = item.created_at ? formatTimeAgo(item.created_at) : (item.time || 'Just now');
+        const timeAgo = item.created_at ? formatRelativeTime(item.created_at) : (item.time || 'Just now');
 
         return (
           <li key={item.id} className="activity-feed-item">

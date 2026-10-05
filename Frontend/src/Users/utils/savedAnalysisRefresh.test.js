@@ -48,3 +48,15 @@ test('returns only distinct new reviews and suppresses duplicates in the fetched
   assert.deepEqual(getNewReviews(existing, fetched), [firstNew, { reviewId: 'gp-3', reviewText: 'Another new review.' }]);
   assert.equal(getSavedReviewIdentity('  New review.  '), getSavedReviewIdentity('new review.'));
 });
+
+test('does not rediscover reviews after they are merged into the saved batch', () => {
+  const saved = [{ reviewId: 'gp-1', reviewText: 'Existing review.' }];
+  const newlyDetected = [
+    { reviewId: 'gp-2', reviewText: 'New review one.' },
+    { reviewId: 'gp-3', reviewText: 'New review two.' },
+  ];
+  const merged = [...saved, ...newlyDetected];
+
+  assert.deepEqual(getNewReviews(saved, newlyDetected), newlyDetected);
+  assert.deepEqual(getNewReviews(merged, [...newlyDetected, ...saved]), []);
+});

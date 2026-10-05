@@ -126,10 +126,14 @@ export async function createNotification({
  * Extract IP address from a request object (Express).
  */
 export function extractClientIp(req) {
+  if (!req) return null;
   return (
-    req.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.get("x-client-ip") ||
+    req.get?.("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() ||
+    req.get?.("x-client-ip") ||
+    req.headers?.["x-client-ip"] ||
     req.ip ||
+    req.socket?.remoteAddress ||
     req.connection?.remoteAddress ||
     null
   );
@@ -139,7 +143,8 @@ export function extractClientIp(req) {
  * Extract device/user-agent from a request object.
  */
 export function extractDeviceInfo(req) {
-  const userAgent = req.get("user-agent") || "";
+  if (!req) return null;
+  const userAgent = req.get?.("user-agent") || req.headers?.["user-agent"] || "";
   if (!userAgent) return null;
   
   // Simple device detection

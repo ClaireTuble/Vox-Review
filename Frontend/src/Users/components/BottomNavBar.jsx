@@ -1,6 +1,6 @@
 import '../css/BottomNavBar.css';
 
-export default function BottomNavBar({ activeTab, onTabChange, savedCount = 0 }) {
+export default function BottomNavBar({ activeTab, onTabChange, savedCount = 0, isLoggedIn = false }) {
   return (
     <nav className="bottom-nav-bar">
       <button
@@ -24,7 +24,7 @@ export default function BottomNavBar({ activeTab, onTabChange, savedCount = 0 })
             <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
           </svg>
         </span>
-        <span className="nav-tab-label">Saved ({savedCount})</span>
+        <span className="nav-tab-label">{isLoggedIn ? `Saved (${savedCount})` : 'Saved'}</span>
       </button>
 
       <button

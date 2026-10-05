@@ -14,9 +14,10 @@ for line in sys.stdin:
     request = json.loads(line)
     request_id = request.get("id")
     reviews = request.get("reviews")
+    platform = request.get("platform")
     set_topic_request_id(request_id)
     try:
-        response = classify_reviews(reviews)
+        response = classify_reviews(reviews, platform)
         response.update({"id": request_id, "success": True})
     except Exception as error:
         error_message = str(error)

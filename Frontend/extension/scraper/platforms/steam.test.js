@@ -55,6 +55,7 @@ test("extracts only Steam's dedicated review body and reports excluded PC specs"
   assert.equal(result.sampleAccepted, result.reviews[0].text);
   assert.equal(result.sampleRejected, metadata);
   assert.equal(result.reviews.some((review) => /Ryzen|GeForce|VRAM|RAM:/i.test(review.text)), false);
+  assert.equal(result.reviews[0].helpfulCount, null);
 });
 
 test("preserves Steam API helpful-vote counts when present", async () => {

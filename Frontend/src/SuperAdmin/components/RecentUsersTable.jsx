@@ -1,4 +1,3 @@
-import { CircleDot } from 'lucide-react';
 import '../css/tables.css';
 
 export default function RecentUsersTable({ users }) {
@@ -21,26 +20,30 @@ export default function RecentUsersTable({ users }) {
               </td>
             </tr>
           ) : (
-            users.map((user) => (
-              <tr key={user.id}>
-                <td>
-                  <div className="table-user-cell">
-                    <strong>{user.fullName || user.name || 'User'}</strong>
-                    <span>{user.email}</span>
-                  </div>
-                </td>
-                <td>
-                  <span className={`role-badge ${user.role.toLowerCase()}`}>{user.role}</span>
-                </td>
-                <td>
-                  <span className="status-dot-active">
-                    <CircleDot size={10} />
-                    {user.status}
-                  </span>
-                </td>
-                <td>{user.joined}</td>
-              </tr>
-            ))
+            users.map((user) => {
+              const statusStr = user.status || 'Active';
+              const isInactive = String(statusStr).toLowerCase() === 'inactive';
+              return (
+                <tr key={user.id}>
+                  <td>
+                    <div className="table-user-cell">
+                      <strong>{user.fullName || user.name || 'User'}</strong>
+                      <span>{user.email}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <span className={`role-badge ${String(user.role || '').toLowerCase()}`}>{user.role}</span>
+                  </td>
+                  <td>
+                    <span className={`user-status-pill status-${isInactive ? 'inactive' : 'active'}`}>
+                      <span className="user-status-dot" />
+                      <span>{statusStr}</span>
+                    </span>
+                  </td>
+                  <td>{user.joined}</td>
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>

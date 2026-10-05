@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Sparkles, Download, ArrowRight, Brain, Globe, BookmarkCheck, BarChart3, Store, MapPin, Lock, CheckCircle2, Smartphone } from 'lucide-react';
+import { Sparkles, Download, ArrowRight, Brain, Globe, BookmarkCheck, BarChart3, Store, MapPin, Lock, CheckCircle2, Smartphone, Gamepad2 } from 'lucide-react';
 import Navigation from '../components/Navigation.jsx';
 import { useVoxLogo, logoDark } from '../../utils/useVoxLogo.js';
 import '../css/LandingPage.css';
@@ -18,11 +18,12 @@ export default function LandingPage() {
       <Navigation activePage="home" />
 
       {/* Hero Section */}
-      <main className="landing-hero-section">
+      <main id="home" className="landing-hero-section">
+
         <div className="hero-content">
           <div className="hero-pill-badge">
             <Sparkles size={13} className="badge-icon" />
-            <span>AI-Powered Review Analysis</span>
+            <span>Review Analysis Platform</span>
           </div>
           
           <h1 className="hero-heading">
@@ -31,7 +32,7 @@ export default function LandingPage() {
           </h1>
           
           <p className="hero-subtext">
-            VoxReview uses AI sentiment and emotion analysis to help you understand customer feedback and reviews across supported shopping, place, and app platforms.
+            VoxReview is a customer feedback analysis platform that helps users understand large amounts of online reviews more efficiently. It analyzes customer feedback, identifies emotions and discussion topics, and helps users prioritize reviews that may require attention.
           </p>
 
           <div className="hero-cta-group">
@@ -65,6 +66,9 @@ export default function LandingPage() {
               <span className="platform-tag">
                 <Smartphone size={13} className="plat-icon play" /> Google Play Store
               </span>
+              <span className="platform-tag">
+                <Gamepad2 size={13} className="plat-icon steam" /> Steam
+              </span>
             </div>
           </div>
         </div>
@@ -77,7 +81,7 @@ export default function LandingPage() {
             Why <span className="gradient-text">VoxReview</span>?
           </h2>
           <p className="why-subtitle">
-            Extract key sentiment patterns and emotional insights from customer reviews efficiently.
+            Extract key sentiment patterns, emotions, discussion topics, and priority insights from customer reviews efficiently.
           </p>
         </div>
 
@@ -87,9 +91,9 @@ export default function LandingPage() {
             <div className="why-card-icon-wrapper purple">
               <Brain size={22} />
             </div>
-            <h3 className="why-card-title">AI Emotion Analysis</h3>
+            <h3 className="why-card-title">Review &amp; Emotion Analysis</h3>
             <p className="why-card-desc">
-              Analyze emotions and sentiment patterns in customer comments using AI-driven feedback classification.
+              Analyze customer reviews and understand the emotions expressed in customer feedback.
             </p>
           </div>
 
@@ -100,7 +104,7 @@ export default function LandingPage() {
             </div>
             <h3 className="why-card-title">Supported Platforms</h3>
             <p className="why-card-desc">
-              Seamlessly analyze reviews on Shopee, Lazada, Google Maps, and Google Play Store directly on the page.
+              Seamlessly analyze reviews across Shopee, Lazada, Google Maps, Google Play Store, and Steam directly on the page.
             </p>
           </div>
 
@@ -109,9 +113,9 @@ export default function LandingPage() {
             <div className="why-card-icon-wrapper indigo">
               <BookmarkCheck size={22} />
             </div>
-            <h3 className="why-card-title">Save & Track</h3>
+            <h3 className="why-card-title">Saved Analyses &amp; Refresh</h3>
             <p className="why-card-desc">
-              Save review analyses to revisit historical sentiment summaries and feedback highlights anytime.
+              Save previous review analyses and easily check for newly added customer reviews.
             </p>
           </div>
 
@@ -120,13 +124,14 @@ export default function LandingPage() {
             <div className="why-card-icon-wrapper sky">
               <BarChart3 size={22} />
             </div>
-            <h3 className="why-card-title">Smart Insights</h3>
+            <h3 className="why-card-title">Topic &amp; Priority Insights</h3>
             <p className="why-card-desc">
-              View structured summary reports, emotional breakdowns, key topics, and sentiment distributions.
+              See what customers are talking about across review topics and identify feedback that may need more immediate attention.
             </p>
           </div>
         </div>
       </section>
+
 
       {/* Product Preview Browser Mockup */}
       <section id="how-it-works" className="landing-preview-section">
@@ -231,8 +236,9 @@ export default function LandingPage() {
             <span className="footer-title">VoxReview</span>
           </div>
           <p className="footer-copy">
-            © {new Date().getFullYear()} VoxReview. AI-Powered Review Analysis for Shopping, Place, and App Platforms. All rights reserved.
+            © {new Date().getFullYear()} VoxReview. Customer Feedback Analysis Platform. All rights reserved.
           </p>
+
         </div>
       </footer>
     </div>

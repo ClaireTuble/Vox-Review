@@ -1,9 +1,26 @@
 import { useState, useEffect } from 'react';
-import { Globe, Sliders, CheckCircle2, Clock, Activity, AlertTriangle, Check, AlertCircle, Minus, WifiOff, Loader2 } from 'lucide-react';
+import {
+  Globe,
+  CheckCircle2,
+  Activity,
+  WifiOff,
+  Loader2,
+  Store,
+  MapPin,
+  Smartphone,
+  Gamepad2,
+  ArrowRight,
+} from 'lucide-react';
 import Header from '../components/Header.jsx';
 import Sidebar from '../components/Sidebar.jsx';
 import TopActions from '../components/TopActions.jsx';
-import { fetchPlatformHealth, getCachedPlatformHealth, FALLBACK_PLATFORMS } from '../data/platforms.js';
+import {
+  fetchPlatformHealth,
+  togglePlatformActive,
+  getCachedPlatformHealth,
+  FALLBACK_PLATFORMS,
+} from '../data/platforms.js';
+import PlatformDisableConfirmationModal from '../components/PlatformDisableConfirmationModal.jsx';
 import { mockCurrentUser } from '../data/users.js';
 import '../css/dashboard.css';
 import '../css/sidebar.css';
@@ -12,14 +29,38 @@ import '../css/cards.css';
 import '../css/tables.css';
 import '../css/responsive.css';
 
-const PIPELINE_STAGES = [
-  'Platform Detection',
-  'Page/Product Detection',
-  'Review Section Detection',
-  'Review Extraction',
-  'Data Normalization',
-  'NLP Analysis',
-];
+const PLATFORM_META = {
+  shopee: {
+    icon: Store,
+    domain: 'shopee.ph',
+    category: 'E-Commerce',
+    description: 'E-commerce product reviews and seller ratings on Shopee marketplace.',
+  },
+  lazada: {
+    icon: Store,
+    domain: 'lazada.com.ph',
+    category: 'E-Commerce',
+    description: 'Product reviews and ratings from Lazada online shopping pages.',
+  },
+  google: {
+    icon: MapPin,
+    domain: 'google.com/maps',
+    category: 'Places & Maps',
+    description: 'Business, place, and location reviews on Google Maps.',
+  },
+  googleplay: {
+    icon: Smartphone,
+    domain: 'play.google.com',
+    category: 'Mobile Apps',
+    description: 'Mobile application reviews and ratings on Google Play Store.',
+  },
+  steam: {
+    icon: Gamepad2,
+    domain: 'store.steampowered.com',
+    category: 'Gaming',
+    description: 'Game reviews, user recommendations, and player feedback on Steam.',
+  },
+};
 
 const HEALTH_POLL_INTERVAL = 30_000;
 
@@ -27,29 +68,94 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
   const cachedData = getCachedPlatformHealth();
   const [platforms, setPlatforms] = useState(cachedData || FALLBACK_PLATFORMS);
   const [loading, setLoading] = useState(!cachedData);
-  const [platformLoading, setPlatformLoading] = useState({});
+  const [toggleLoading, setToggleLoading] = useState({});
   const [backendAvailable, setBackendAvailable] = useState(true);
   const [actionNotice, setActionNotice] = useState(null);
+  const [platformPendingDisable, setPlatformPendingDisable] = useState(null);
 
-  const triggerNotice = (msg) => {
-    setActionNotice(msg);
-    setTimeout(() => setActionNotice(null), 3000);
+  const getPlatformCode = (platform) => platform.platform || ({
+    Shopee: 'shopee',
+    Lazada: 'lazada',
+    'Google Maps': 'google',
+    'Google Play Store': 'googleplay',
+    Steam: 'steam',
+  }[platform.name]);
+
+  const triggerNotice = (msg, type = 'success') => {
+    setActionNotice({ msg, type });
+    setTimeout(() => setActionNotice(null), 3500);
+  };
+
+  const updatePlatformAvailability = async (platform, nextIsActive, confirmationPassword = null) => {
+    const platformCode = getPlatformCode(platform);
+    if (!platformCode || toggleLoading[platform.name]) return;
+    setToggleLoading((curr) => ({ ...curr, [platform.name]: true }));
+    try {
+      const updated = await togglePlatformActive(
+        platformCode,
+        null,
+        nextIsActive,
+        confirmationPassword,
+      );
+      setPlatforms((prev) => prev.map((p) => {
+        if (getPlatformCode(p) === platformCode || p.name === platform.name) {
+          return {
+            ...p,
+            platformStatus: updated.platformStatus || (nextIsActive ? 'Active' : 'Disabled'),
+            is_active: updated.is_active !== undefined ? updated.is_active : nextIsActive,
+          };
+        }
+        return p;
+      }));
+      const statusMessage = `${platform.name} is now ${nextIsActive ? 'Active (available for scraping & analysis)' : 'Disabled (analysis blocked)'}`;
+      triggerNotice(
+        updated.auditRecorded === false
+          ? `${statusMessage}, but its audit event could not be saved.`
+          : statusMessage,
+        updated.auditRecorded === false ? 'error' : (nextIsActive ? 'success' : 'warning')
+      );
+      if (!nextIsActive) setPlatformPendingDisable(null);
+    } catch (err) {
+      throw new Error(`Failed to update ${platform.name}: ${err.message}`, { cause: err });
+    } finally {
+      setToggleLoading((curr) => {
+        const next = { ...curr };
+        delete next[platform.name];
+        return next;
+      });
+    }
+  };
+
+  const handleTogglePlatform = async (platform) => {
+    const currentIsActive = platform.platformStatus !== 'Disabled' && platform.is_active !== false;
+    if (currentIsActive) {
+      setPlatformPendingDisable(platform);
+      return;
+    }
+
+    try {
+      await updatePlatformAvailability(platform, true);
+    } catch (err) {
+      console.warn('VoxReview: Toggle platform status failed:', err.message);
+      triggerNotice(err.message, 'error');
+    }
+  };
+
+  const confirmDisablePlatform = async (confirmationPassword) => {
+    if (!platformPendingDisable) return;
+    await updatePlatformAvailability(platformPendingDisable, false, confirmationPassword);
   };
 
   useEffect(() => {
     let mounted = true;
 
     const loadHealth = async () => {
-      if (mounted) {
-        const loadingMap = {};
-        platforms.forEach((p) => { loadingMap[p.name] = true; });
-        setPlatformLoading(loadingMap);
-      }
-
       try {
         const data = await fetchPlatformHealth();
         if (mounted) {
-          setPlatforms(data);
+          if (Array.isArray(data) && data.length > 0) {
+            setPlatforms(data);
+          }
           setBackendAvailable(true);
         }
       } catch (err) {
@@ -58,7 +164,6 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
       } finally {
         if (mounted) {
           setLoading(false);
-          setPlatformLoading({});
         }
       }
     };
@@ -68,6 +173,12 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
     return () => { mounted = false; clearInterval(interval); };
   }, []);
 
+  const totalPlatforms = platforms.length;
+  const activePlatformsCount = platforms.filter(
+    (p) => p.platformStatus !== 'Disabled' && p.is_active !== false
+  ).length;
+  const disabledPlatformsCount = totalPlatforms - activePlatformsCount;
+
   return (
     <div className="superadmin-page-container">
       <Sidebar activeTab={activeTab} onTabChange={setActiveTab} onSignOut={onSignOut} />
@@ -75,7 +186,7 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
       <main className="superadmin-viewport">
         <Header
           title="Platform Settings"
-          subtitle="Monitor code-managed platform integration settings, scraper limits, and NLP analysis parameters."
+          subtitle="Manage which supported platforms are available for review analysis."
           user={mockCurrentUser}
           onNavigate={setActiveTab}
         />
@@ -83,15 +194,15 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
         <section className="admin-content-grid">
           <article className="admin-panel">
             <TopActions
-              title="Platform Configurations & Options"
-              subtitle="Code-managed settings for Shopee, Lazada, Google Maps, Google Play Store, and Steam."
+              title="Platform Availability & Management"
+              subtitle="Enable or disable supported platforms to control scraper and analysis availability across the system."
             />
 
             {/* Notification Toast */}
             {actionNotice && (
-              <div className="settings-notice-toast">
+              <div className={`settings-notice-toast ${actionNotice.type === 'error' ? 'notice-error' : actionNotice.type === 'warning' ? 'notice-warning' : 'notice-success'}`}>
                 <CheckCircle2 size={15} />
-                <span>{actionNotice}</span>
+                <span>{actionNotice.msg}</span>
               </div>
             )}
 
@@ -99,209 +210,145 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
             {!backendAvailable && (
               <div className="health-warning-banner">
                 <WifiOff size={15} />
-                <span>Unable to reach health monitoring service. Showing last known state.</span>
+                <span>Unable to reach platform management service. Showing last known configuration.</span>
               </div>
             )}
+
+            {/* Management Overview Summary Bar */}
+            <div className="platform-mgmt-summary-bar">
+              <div className="mgmt-metric-badge">
+                <span className="metric-num">{totalPlatforms}</span>
+                <span className="metric-label">Total Platforms</span>
+              </div>
+              <div className="mgmt-metric-badge active-badge">
+                <span className="metric-num">{activePlatformsCount}</span>
+                <span className="metric-label">Active</span>
+              </div>
+              <div className="mgmt-metric-badge disabled-badge">
+                <span className="metric-num">{disabledPlatformsCount}</span>
+                <span className="metric-label">Disabled</span>
+              </div>
+
+              <div className="mgmt-health-cta">
+                <div className="mgmt-cta-text">
+                  <Activity size={15} className="cta-icon" />
+                  <span>Looking for real-time pipeline telemetry &amp; diagnostics?</span>
+                </div>
+                <button
+                  type="button"
+                  className="mgmt-goto-health-btn"
+                  onClick={() => setActiveTab('platforms')}
+                >
+                  <span>View Platform Health</span>
+                  <ArrowRight size={13} />
+                </button>
+              </div>
+            </div>
 
             {/* Loading state */}
             {loading && (
               <div className="health-loading-state">
                 <Activity size={18} className="spin-icon" />
-                <span>Loading platform health data…</span>
+                <span>Loading platform configuration…</span>
               </div>
             )}
 
-            {/* Platforms Configuration Grid */}
-            <div className="section-title-group">
-              <h3>
-                <Sliders size={17} className="title-icon" />
-                Integration Parameters
-              </h3>
-              <p className="section-desc">
-                Review scraping status, NLP analysis state, and diagnostic parameters per platform.
-              </p>
-            </div>
-
-            <div className="platform-settings-grid">
+            {/* Platforms Management Grid */}
+            <div className="platform-mgmt-grid">
               {platforms.map((platform) => {
-                const isPlatformChecking = !!platformLoading[platform.name];
-                const isNlpNotImplemented = platform.nlpStatus === 'Not Implemented';
-
-                return (
-                  <div key={platform.name} className="platform-setting-card">
-                    <div className="setting-card-top">
-                      <div className="platform-title-row">
-                        <Globe size={18} className="platform-card-icon" />
-                        <div>
-                          <h4 className="setting-platform-name">{platform.name}</h4>
-                          <span className="setting-platform-domain">{platform.domain}</span>
-                        </div>
-                      </div>
-
-                      <span className="platform-cat-tag">{platform.category}</span>
-                    </div>
-
-                    <div className="setting-controls-row">
-                      {/* Platform Status (read-only from real data) */}
-                      <div className="setting-field">
-                        <label>Platform Status</label>
-                        <span className={`status-pill status-${(platform.platformStatus || 'Active').toLowerCase()}`}>
-                          {platform.platformStatus || 'Active'}
-                        </span>
-                      </div>
-
-                      {/* Review Scraping Status (real data with loading spinner) */}
-                      <div className="setting-field">
-                        <label>Scraping Status</label>
-                        {isPlatformChecking ? (
-                          <span
-                            className="status-pill"
-                            style={{
-                              background: 'rgba(59,130,246,0.12)',
-                              color: '#60a5fa',
-                              border: '1px solid rgba(59,130,246,0.3)',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '5px',
-                            }}
-                          >
-                            <Loader2 size={12} className="spin-icon" />
-                            Checking...
-                          </span>
-                        ) : (
-                          <span
-                            className={`status-pill status-${(platform.scrapingStatus || 'Unavailable').toLowerCase()}`}
-                          >
-                            {platform.scrapingStatus || 'Unavailable'}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* NLP Analysis — Not Implemented badge */}
-                      <div className="setting-field">
-                        <label>NLP Analysis</label>
-                        {isNlpNotImplemented ? (
-                          <span className="status-pill status-not-implemented">
-                            <Minus size={12} style={{ marginRight: '4px' }} />
-                            Not Implemented
-                          </span>
-                        ) : (
-                          <span className={`status-pill status-${(platform.nlpStatus || 'Not Implemented').toLowerCase().replace(/\s+/g, '-')}`}>
-                            {platform.nlpStatus}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Diagnostic Summary Line */}
-                    <div className="setting-diag-summary">
-                      <span>
-                        <strong>Last Check:</strong> {platform.lastChecked || 'Never'}
-                      </span>
-                      <span>
-                        <strong>Last Success:</strong> {platform.lastSuccessfulCheck || 'Never'}
-                      </span>
-                      <span>
-                        <strong>Errors:</strong>{' '}
-                        <span className={platform.errorCount > 0 ? 'text-error' : 'text-success'}>
-                          {platform.errorCount}
-                        </span>
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Diagnostics Sub-Section */}
-            <div className="section-title-group" style={{ marginTop: '28px' }}>
-              <h3>
-                <Activity size={17} className="title-icon" />
-                Pipeline Diagnostics Summary
-              </h3>
-              <p className="section-desc">
-                Real-time telemetry showing pipeline stages and human-readable diagnostic messages.
-              </p>
-            </div>
-
-            <div className="platform-diagnostics-list">
-              {platforms.map((platform) => {
-                const hasError = !!platform.errorStage;
-                const isUnavailable = platform.scrapingStatus === 'Unavailable';
-                const errorStageIndex = PIPELINE_STAGES.indexOf(platform.errorStage);
+                const code = getPlatformCode(platform);
+                const meta = PLATFORM_META[code] || {
+                  icon: Globe,
+                  domain: platform.domain || 'voxreview.internal',
+                  category: platform.category || 'General',
+                  description: 'Supported platform integration for review extraction.',
+                };
+                const PlatformIcon = meta.icon;
+                const isToggling = !!toggleLoading[platform.name];
+                const isActive = platform.platformStatus !== 'Disabled' && platform.is_active !== false;
+                const rawHealth = platform.scrapingStatus || platform.status || 'Unavailable';
 
                 return (
                   <div
-                    key={`diag-${platform.name}`}
-                    className={`platform-diag-card ${hasError ? 'diag-warning' : isUnavailable ? 'diag-unavailable' : 'diag-healthy'}`}
+                    key={platform.name}
+                    className={`platform-mgmt-card ${isActive ? 'is-active' : 'is-disabled'}`}
                   >
-                    <div className="diag-card-header">
-                      <div className="diag-platform-identity">
-                        <Globe size={16} />
-                        <strong>{platform.name}</strong>
-                        <span className="diag-cat">({platform.category})</span>
-                      </div>
-
-                      <div className="diag-header-status">
-                        <span className="diag-check-time">
-                          <Clock size={12} /> Last checked: {platform.lastChecked || 'Never'}
-                        </span>
-                        <span
-                          className={`diag-status-pill ${hasError ? 'pill-warning' : isUnavailable ? 'pill-unavailable' : 'pill-healthy'}`}
-                        >
-                          Status: {platform.status}
-                        </span>
+                    {/* Card Top: Icon, Name, Domain, Category */}
+                    <div className="mgmt-card-header">
+                      <div className="mgmt-identity-group">
+                        <div className={`mgmt-icon-box ${isActive ? 'icon-active' : 'icon-disabled'}`}>
+                          <PlatformIcon size={20} />
+                        </div>
+                        <div className="mgmt-name-stack">
+                          <div className="mgmt-title-row">
+                            <h4 className="mgmt-platform-name">{platform.name}</h4>
+                            <span className="mgmt-cat-pill">{platform.category || meta.category}</span>
+                          </div>
+                          <span className="mgmt-domain-text">{platform.domain || meta.domain}</span>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Diagnostics Details Grid */}
-                    <div className="diag-details-grid">
-                      <div>
-                        <span className="diag-label">Current Status</span>
-                        <span className="diag-val">{platform.status}</span>
-                      </div>
-                      <div>
-                        <span className="diag-label">NLP Status</span>
-                        <span className="diag-val" style={{ color: '#6B7280' }}>{platform.nlpStatus || 'Not Implemented'}</span>
-                      </div>
-                      <div>
-                        <span className="diag-label">Last Successful Operation</span>
-                        <span className="diag-val">{platform.lastSuccessfulCheck || 'Never'}</span>
-                      </div>
-                      <div>
-                        <span className="diag-label">Error Count</span>
-                        <span className="diag-val">{platform.errorCount}</span>
-                      </div>
-                      <div>
-                        <span className="diag-label">Error Stage</span>
-                        <span className="diag-val highlight-stage">
-                          {platform.errorStage || 'N/A (Operational)'}
-                        </span>
-                      </div>
-                    </div>
+                    {/* Platform description */}
+                    <p className="mgmt-card-desc">{meta.description}</p>
 
-                    {/* Diagnostic Error Box */}
-                    {hasError ? (
-                      <div className="diag-error-box">
-                        <div className="diag-error-title">
-                          <AlertTriangle size={14} />
-                          <span>
-                            Diagnostic Alert &mdash; Stage: <strong>{platform.errorStage}</strong>
+                    {/* Platform Availability Toggle Box */}
+                    <div className="mgmt-availability-box">
+                      <div className="mgmt-availability-info">
+                        <span className="mgmt-control-label">Platform Availability</span>
+                        <div className="mgmt-status-line">
+                          <span className={`mgmt-status-indicator ${isActive ? 'status-dot-active' : 'status-dot-disabled'}`} />
+                          <span className={`mgmt-status-text ${isActive ? 'text-active' : 'text-disabled'}`}>
+                            {isActive ? 'Active' : 'Disabled'}
+                          </span>
+                          <span className="mgmt-status-subtext">
+                            {isActive
+                              ? '• Available for user scraping & analysis'
+                              : '• Blocked from scraping & analysis'}
                           </span>
                         </div>
-                        <p className="diag-error-msg">&ldquo;{platform.errorMessage}&rdquo;</p>
                       </div>
-                    ) : isUnavailable ? (
-                      <div className="diag-healthy-box" style={{ borderColor: 'rgba(107,114,128,0.2)', color: '#9CA3AF' }}>
-                        <Minus size={14} />
-                        <span>No health reports received yet. Awaiting first scraping event.</span>
+
+                      {/* Functional Toggle Switch Button */}
+                      <button
+                        type="button"
+                        className={`mgmt-toggle-switch ${isActive ? 'on' : 'off'}`}
+                        onClick={() => handleTogglePlatform(platform)}
+                        disabled={isToggling}
+                        title={`Click to ${isActive ? 'Disable' : 'Enable'} ${platform.name}`}
+                        aria-label={`Toggle ${platform.name} availability`}
+                      >
+                        {isToggling ? (
+                          <Loader2 size={13} className="spin-icon" />
+                        ) : (
+                          <span className="mgmt-toggle-thumb" />
+                        )}
+                        <span className="mgmt-toggle-text">
+                          {isToggling ? 'Updating…' : (isActive ? 'Active' : 'Disabled')}
+                        </span>
+                      </button>
+                    </div>
+
+                    {/* Compact Card Footer: Health badge + View Health Details action */}
+                    <div className="mgmt-card-footer">
+                      <div className="mgmt-health-compact">
+                        <span className="mgmt-health-label">Health Status:</span>
+                        <span className={`mgmt-health-pill health-${rawHealth.toLowerCase()}`}>
+                          <span className="health-dot" />
+                          {rawHealth === 'Working' ? 'Operational' : rawHealth}
+                        </span>
                       </div>
-                    ) : (
-                      <div className="diag-healthy-box">
-                        <Check size={14} />
-                        <span>No diagnostic information errors reported. All pipeline stages operational.</span>
-                      </div>
-                    )}
+
+                      <button
+                        type="button"
+                        className="mgmt-view-health-btn"
+                        onClick={() => setActiveTab('platforms')}
+                        title={`View detailed health diagnostics for ${platform.name}`}
+                      >
+                        <span>View Health Details</span>
+                        <ArrowRight size={12} />
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -309,6 +356,14 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
           </article>
         </section>
       </main>
+
+      {platformPendingDisable && (
+        <PlatformDisableConfirmationModal
+          platformName={platformPendingDisable.name}
+          onCancel={() => setPlatformPendingDisable(null)}
+          onConfirm={confirmDisablePlatform}
+        />
+      )}
     </div>
   );
 }

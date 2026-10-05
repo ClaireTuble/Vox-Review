@@ -315,6 +315,24 @@
   font-weight: 600;
 }
 
+.activity-chart-wrap.month-view {
+  gap: 12px;
+}
+
+.activity-chart-wrap.month-view .activity-bar-col {
+  gap: 4px;
+}
+
+.activity-chart-wrap.month-view .activity-bar-count {
+  font-size: 10px;
+}
+
+.activity-chart-wrap.month-view .activity-bar-day {
+  font-size: 10px;
+}
+
+
+
 /* ─────────────────────────────────────────────
    Recent User Activity Feed
 ───────────────────────────────────────────── */
@@ -748,97 +766,468 @@
   color: #94a3b8;
 }
 
-/* Platform Settings Grid */
-.platform-settings-grid {
+/* ============================================================
+   Platform Settings & Management (SaaS Management Layout)
+   ============================================================ */
+
+.platform-mgmt-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 14px;
+  padding: 12px 16px;
+}
+
+.mgmt-metric-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 10px;
+  padding: 6px 14px;
+}
+
+.mgmt-metric-badge .metric-num {
+  font-size: 15px;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.mgmt-metric-badge .metric-label {
+  font-size: 11.5px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.mgmt-metric-badge.active-badge {
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.mgmt-metric-badge.active-badge .metric-num {
+  color: #4ade80;
+}
+
+.mgmt-metric-badge.disabled-badge {
+  border-color: rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.mgmt-metric-badge.disabled-badge .metric-num {
+  color: #f87171;
+}
+
+.mgmt-health-cta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.mgmt-cta-text {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.mgmt-cta-text .cta-icon {
+  color: #60a5fa;
+  flex-shrink: 0;
+}
+
+.mgmt-goto-health-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #60a5fa;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mgmt-goto-health-btn:hover {
+  background: rgba(59, 130, 246, 0.22);
+  border-color: #3b82f6;
+  transform: translateY(-1px);
+}
+
+/* Management Grid */
+.platform-mgmt-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
   gap: 16px;
   margin-bottom: 24px;
 }
 
-.platform-setting-card {
+.platform-mgmt-card {
   background: rgba(15, 23, 42, 0.65);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 14px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  transition: all 0.2s ease;
+  position: relative;
 }
 
-.setting-card-top {
+.platform-mgmt-card:hover {
+  border-color: rgba(96, 165, 250, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.platform-mgmt-card.is-disabled {
+  opacity: 0.85;
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.mgmt-card-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
 }
 
-.platform-title-row {
+.mgmt-identity-group {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  min-width: 0;
 }
 
-.platform-card-icon {
+.mgmt-icon-box {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.mgmt-icon-box.icon-active {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(37, 99, 235, 0.3));
+  border: 1px solid rgba(96, 165, 250, 0.3);
   color: #60a5fa;
 }
 
-.setting-platform-name {
-  margin: 0;
-  font-size: 15px;
-  color: #f8fafc;
-  font-weight: 700;
+.mgmt-icon-box.icon-disabled {
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  color: #94a3b8;
 }
 
-.setting-platform-domain {
+.mgmt-name-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mgmt-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mgmt-platform-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.mgmt-cat-pill {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(148, 163, 184, 0.1);
+  color: #cbd5e1;
+  font-weight: 600;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.mgmt-domain-text {
   font-size: 11px;
   color: #64748b;
   font-family: monospace;
 }
 
-.platform-cat-tag {
-  font-size: 10px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: rgba(148, 163, 184, 0.1);
-  color: #cbd5e1;
-  font-weight: 600;
+.mgmt-card-desc {
+  margin: 0;
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.4;
+  min-height: 34px;
 }
 
-.setting-controls-row {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-  background: rgba(30, 41, 59, 0.4);
-  border-radius: 12px;
+/* Availability Box */
+.mgmt-availability-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(30, 41, 59, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
   padding: 10px 12px;
 }
 
-.setting-field {
+.mgmt-availability-info {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+  min-width: 0;
 }
 
-.setting-field label {
+.mgmt-control-label {
   font-size: 10px;
   text-transform: uppercase;
   color: #64748b;
   font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
-.setting-select {
-  background: rgba(15, 23, 42, 0.8);
+.mgmt-status-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mgmt-status-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mgmt-status-indicator.status-dot-active {
+  background: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+}
+
+.mgmt-status-indicator.status-dot-disabled {
+  background: #f87171;
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
+}
+
+
+.mgmt-status-text {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mgmt-status-text.text-active {
+  color: #4ade80;
+}
+
+.mgmt-status-text.text-disabled {
+  color: #f87171;
+}
+
+.mgmt-status-subtext {
+  font-size: 10.5px;
+  color: #64748b;
+}
+
+/* Modern Toggle Button */
+.mgmt-toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 8px;
-  color: #f8fafc;
-  font-size: 11px;
-  padding: 5px 8px;
-  outline: none;
+  background: rgba(148, 163, 184, 0.12);
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  width: fit-content;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
 }
 
-.setting-select.width-auto {
-  width: auto;
-  min-width: 140px;
+.mgmt-toggle-switch.on {
+  background: rgba(22, 163, 74, 0.18);
+  border-color: rgba(34, 197, 94, 0.45);
+}
+
+.mgmt-toggle-switch.on:hover:not(:disabled) {
+  background: rgba(22, 163, 74, 0.28);
+}
+
+.mgmt-toggle-switch.off {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.mgmt-toggle-switch.off:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.22);
+}
+
+.mgmt-toggle-switch:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.mgmt-toggle-thumb {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.mgmt-toggle-switch.on .mgmt-toggle-thumb {
+  background: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.6);
+}
+
+.mgmt-toggle-switch.off .mgmt-toggle-thumb {
+  background: #f87171;
+}
+
+.mgmt-toggle-text {
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.mgmt-toggle-switch.on .mgmt-toggle-text {
+  color: #4ade80;
+}
+
+.mgmt-toggle-switch.off .mgmt-toggle-text {
+  color: #f87171;
+}
+
+/* Card Footer: Compact Health Pill + Direct Action */
+.mgmt-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+  padding-top: 10px;
+  margin-top: auto;
+  gap: 8px;
+}
+
+.mgmt-health-compact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mgmt-health-label {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.mgmt-health-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.mgmt-health-pill .health-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.mgmt-health-pill.health-working,
+.mgmt-health-pill.health-operational,
+.mgmt-health-pill.health-successful {
+  background: rgba(34, 197, 94, 0.1);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.mgmt-health-pill.health-working .health-dot,
+.mgmt-health-pill.health-operational .health-dot,
+.mgmt-health-pill.health-successful .health-dot {
+  background: #4ade80;
+}
+
+.mgmt-health-pill.health-warning {
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.mgmt-health-pill.health-warning .health-dot {
+  background: #fbbf24;
+}
+
+.mgmt-health-pill.health-error,
+.mgmt-health-pill.health-failed {
+  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.mgmt-health-pill.health-error .health-dot,
+.mgmt-health-pill.health-failed .health-dot {
+  background: #f87171;
+}
+
+.mgmt-health-pill.health-unavailable {
+  background: rgba(148, 163, 184, 0.08);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.mgmt-health-pill.health-unavailable .health-dot {
+  background: #94a3b8;
+}
+
+.mgmt-view-health-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  color: #60a5fa;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 4px;
+  transition: all 0.18s ease;
+}
+
+.mgmt-view-health-btn:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+.settings-notice-toast.notice-warning {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+}
+
+.settings-notice-toast.notice-error {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
 }
 
 .status-pill {
@@ -862,48 +1251,74 @@
   color: #fbbf24;
 }
 
-.status-error, .status-failed {
+.status-error, .status-failed, .status-disabled {
   background: rgba(239, 68, 68, 0.14);
   color: #f87171;
+}
+
+.status-unavailable {
+  background: rgba(107, 114, 128, 0.14);
+  color: #9ca3af;
 }
 
 .toggle-switch-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: none;
-  background: rgba(148, 163, 184, 0.14);
-  padding: 3px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(148, 163, 184, 0.12);
+  padding: 3px 9px;
   border-radius: 999px;
   cursor: pointer;
   width: fit-content;
   transition: all 0.2s ease;
 }
 
-.toggle-switch-btn.on {
-  background: rgba(37, 99, 235, 0.25);
-  border: 1px solid rgba(59, 130, 246, 0.4);
+.toggle-switch-btn.on,
+.toggle-switch-btn.active {
+  background: rgba(22, 163, 74, 0.16);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+.toggle-switch-btn.off,
+.toggle-switch-btn.disabled {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 .toggle-switch-btn .toggle-slider {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: #94a3b8;
+  transition: all 0.2s ease;
 }
 
-.toggle-switch-btn.on .toggle-slider {
-  background: #60a5fa;
+.toggle-switch-btn.on .toggle-slider,
+.toggle-switch-btn.active .toggle-slider {
+  background: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
+}
+
+.toggle-switch-btn.off .toggle-slider,
+.toggle-switch-btn.disabled .toggle-slider {
+  background: #f87171;
 }
 
 .toggle-switch-btn .toggle-text {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   color: #cbd5e1;
 }
 
-.toggle-switch-btn.on .toggle-text {
-  color: #93c5fd;
+.toggle-switch-btn.on .toggle-text,
+.toggle-switch-btn.active .toggle-text {
+  color: #4ade80;
+}
+
+.toggle-switch-btn.off .toggle-text,
+.toggle-switch-btn.disabled .toggle-text {
+  color: #f87171;
 }
 
 .limit-badge {
@@ -1530,23 +1945,10 @@
   opacity: 0.85;
 }
 
-.stage-node.state-not-implemented {
-  background: rgba(107, 114, 128, 0.12);
-  color: #9ca3af;
-  border: 1px solid rgba(107, 114, 128, 0.2);
-}
-
 .stage-node.state-unavailable {
   background: rgba(107, 114, 128, 0.08);
   color: #6b7280;
   border: 1px solid rgba(107, 114, 128, 0.12);
-}
-
-.stage-sublabel {
-  font-size: 9px;
-  color: #6b7280;
-  margin-left: 2px;
-  font-weight: 500;
 }
 
 .status-not-implemented {
@@ -1568,7 +1970,6 @@
   background: rgba(107, 114, 128, 0.12);
   color: #9ca3af;
 }
-
 
 
 

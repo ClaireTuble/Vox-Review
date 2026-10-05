@@ -200,6 +200,7 @@ function extractSteamReviewsFromDom() {
       rating: recommendationText.includes("not recommended") ? "negative" : (
         recommendationText.includes("recommended") ? "positive" : null
       ),
+      helpfulCount: null,
       text,
       review: text,
       platform: "steam",

@@ -165,6 +165,7 @@ function scrapeShopeeReviews() {
         id: cmtId || `shopee-review-${index}`,
         reviewer: reviewer || "Shopee Buyer",
         rating: null, // Per-review star ratings excluded per instructions
+        helpfulCount: null,
         date: date || "",
         text: text,
         review: text,

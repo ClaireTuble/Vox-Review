@@ -1,4 +1,8 @@
 import { adminSupabase, supabase } from '../lib/supabase.js';
+import {
+  buildProfileUser,
+  normalizeSupabaseUser,
+} from './userProfileSync.js';
 
 const USER_AUTH_STORAGE_KEY = 'user_auth_session';
 const SUPERADMIN_AUTH_STORAGE_KEY = 'superadmin_auth_session';
@@ -12,26 +16,6 @@ function persistSuperAdminSession(session) {
 
   localStorage.setItem(SUPERADMIN_AUTH_STORAGE_KEY, JSON.stringify(session));
   return session;
-}
-
-function normalizeSupabaseUser(user) {
-  if (!user) return null;
-
-  const metadata = user.user_metadata || user;
-  const firstName = metadata.firstName || '';
-  const lastName = metadata.lastName || '';
-  const fullName = `${firstName} ${lastName}`.trim();
-
-  return {
-    id: user.id,
-    email: user.email,
-    username: metadata.username || metadata.name || user.email?.split('@')[0] || 'user',
-    firstName,
-    middleInitial: metadata.middleInitial || '',
-    lastName,
-    name: fullName || metadata.username || metadata.name || user.email?.split('@')[0] || 'user',
-    role: 'user',
-  };
 }
 
 function syncExtensionAuthSession(session) {
@@ -95,7 +79,7 @@ function isExpiredAccessToken(token) {
   }
 }
 
-async function readRegularUserExtensionSession() {
+async function readRegularUserExtensionSession({ persistSession = true } = {}) {
   try {
     if (globalThis.chrome?.storage?.local) {
       const extensionSession = await new Promise((resolve) => {
@@ -109,11 +93,7 @@ async function readRegularUserExtensionSession() {
         if (extensionSession.token && !isExpiredAccessToken(extensionSession.token)) {
           const { data, error } = await supabase.auth.getUser(extensionSession.token);
           if (!error && data?.user) {
-            return persistRegularUserSession({
-              user: data.user,
-              token: extensionSession.token,
-              refresh_token: extensionSession.refresh_token,
-            });
+            return extensionSession;
           }
         }
 
@@ -137,11 +117,17 @@ async function readRegularUserExtensionSession() {
           if (parsed?.token && !isExpiredAccessToken(parsed.token)) {
             const { data, error } = await supabase.auth.getUser(parsed.token);
             if (!error && data?.user) {
-              return persistRegularUserSession({
+              const validatedSession = {
                 user: data.user,
                 token: parsed.token,
                 refresh_token: parsed.refresh_token,
-              });
+              };
+              return persistSession
+                ? persistRegularUserSession(validatedSession)
+                : {
+                    ...validatedSession,
+                    user: normalizeSupabaseUser(validatedSession.user),
+                  };
             }
           }
           if (parsed?.refresh_token) {
@@ -163,7 +149,12 @@ async function readRegularUserExtensionSession() {
 
     const { data, error } = await supabase.auth.getSession();
     if (!error && data?.session?.user && data.session.access_token) {
-      return persistRegularUserSession(data.session);
+      return persistSession
+        ? persistRegularUserSession(data.session)
+        : {
+            ...data.session,
+            user: normalizeSupabaseUser(data.session.user),
+          };
     }
   } catch (error) {
     console.warn('VoxReview: Session synchronization failed:', error?.message || error);
@@ -281,7 +272,7 @@ export function openWebAppAuth(route = '/login') {
 
   const cleanRoute = route.startsWith('/') ? route : `/${route}`;
   const baseUrl = isExtension ? 'http://localhost:5173' : window.location.origin;
-  const targetUrl = `${baseUrl}/#${cleanRoute}`;
+  const targetUrl = `${baseUrl}${cleanRoute}`;
 
   if (globalThis.chrome?.tabs?.create) {
     globalThis.chrome.tabs.create({ url: targetUrl });
@@ -546,12 +537,36 @@ export const authService = {
     }
   },
 
+  cacheSessionLocally: (session) => {
+    if (!session?.user || !session.token) {
+      localStorage.removeItem(USER_AUTH_STORAGE_KEY);
+      return null;
+    }
+
+    const cachedSession = {
+      user: normalizeSupabaseUser(session.user),
+      token: session.token,
+      refresh_token: session.refresh_token || null,
+    };
+    localStorage.setItem(USER_AUTH_STORAGE_KEY, JSON.stringify(cachedSession));
+    return cachedSession;
+  },
+
+  clearSessionLocally: async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn('VoxReview: Local session sign-out failed:', err?.message || err);
+    }
+    localStorage.removeItem(USER_AUTH_STORAGE_KEY);
+  },
+
   /**
    * Update the current authenticated regular user's profile details in Supabase Auth & public.users table.
    */
   refreshCurrentUserProfile: async () => {
     try {
-      let extensionSession = await readRegularUserExtensionSession();
+      let extensionSession = await readRegularUserExtensionSession({ persistSession: false });
       let accessToken = extensionSession?.token;
 
       if (!accessToken) {
@@ -590,27 +605,17 @@ export const authService = {
         lastName: result.user.lastName ?? extensionSession?.user?.lastName ?? '',
         fullName: result.user.fullName || extensionSession?.user?.fullName || '',
         name: result.user.fullName || result.user.username || extensionSession?.user?.name || '',
+        avatarUrl: result.user.avatarUrl !== undefined
+          ? result.user.avatarUrl
+          : result.user.avatar_url !== undefined
+            ? result.user.avatar_url
+            : extensionSession?.user?.avatarUrl ?? null,
       };
 
-      const normalizedUser = normalizeSupabaseUser({
-        id: nextUser.id,
-        email: nextUser.email,
-        user_metadata: {
-          firstName: nextUser.firstName || '',
-          lastName: nextUser.lastName || '',
-          username: nextUser.username || '',
-          name: nextUser.name || nextUser.username || '',
-        },
-      });
-
-      const refreshedSession = {
-        ...(extensionSession || {}),
-        token: accessToken,
-        user: normalizedUser,
-      };
-
-      persistRegularUserSession(refreshedSession);
-      return normalizedUser;
+      return buildProfileUser(
+        nextUser,
+        extensionSession?.user,
+      );
     } catch (err) {
       console.warn('VoxReview: Live profile refresh failed:', err?.message || err);
       return null;
@@ -619,7 +624,7 @@ export const authService = {
 
   updateUserProfile: async (updates = {}) => {
     try {
-      let extensionSession = await readRegularUserExtensionSession();
+      let extensionSession = await readRegularUserExtensionSession({ persistSession: false });
       let accessToken = extensionSession?.token;
 
       if (!accessToken) {
@@ -639,17 +644,22 @@ export const authService = {
         throw new Error('No active user session found. Please log in again.');
       }
 
+      const profileBody = {
+        firstName: updates.firstName ?? '',
+        lastName: updates.lastName ?? '',
+        username: updates.username ?? '',
+      };
+      if (updates.avatarUrl !== undefined) {
+        profileBody.avatarUrl = updates.avatarUrl;
+      }
+
       const response = await fetch('http://localhost:5000/api/user/profile', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({
-          firstName: updates.firstName ?? '',
-          lastName: updates.lastName ?? '',
-          username: updates.username ?? '',
-        }),
+        body: JSON.stringify(profileBody),
       });
 
       const result = await response.json().catch(() => ({}));
@@ -669,6 +679,7 @@ export const authService = {
             lastName: serverUser.lastName ?? updates.lastName ?? extensionSession?.user?.lastName ?? '',
             fullName: serverUser.fullName || [serverUser.firstName ?? updates.firstName ?? extensionSession?.user?.firstName ?? '', serverUser.lastName ?? updates.lastName ?? extensionSession?.user?.lastName ?? ''].filter(Boolean).join(' ').trim() || serverUser.username || extensionSession?.user?.name || '',
             name: serverUser.fullName || serverUser.username || extensionSession?.user?.name || '',
+            avatarUrl: serverUser.avatarUrl !== undefined ? serverUser.avatarUrl : (extensionSession?.user?.avatarUrl || null),
           }
         : (extensionSession?.user || null);
 
@@ -685,23 +696,135 @@ export const authService = {
               lastName: nextUser.lastName || '',
               username: nextUser.username || '',
               name: nextUser.username || nextUser.name || '',
+              custom_avatar_url: nextUser.isCustomAvatar === false ? null : nextUser.avatarUrl || null,
             },
           },
         }.user);
 
-        const refreshedSession = {
-          ...(extensionSession || {}),
-          token: accessToken,
-          user: normalizedUser,
-        };
-
-        persistRegularUserSession(refreshedSession);
         return { success: true, user: normalizedUser };
       }
 
       return { success: true, user: null };
     } catch (err) {
       console.error('VoxReview: Profile update error:', err);
+      throw err;
+    }
+  },
+
+  /**
+   * Upload a custom user profile picture to Supabase Storage via backend.
+   *
+   * @param {File} file
+   * @returns {Promise<{success: boolean, avatarUrl: string, user: Object}>}
+   */
+  uploadAvatar: async (file) => {
+    try {
+      if (!file) {
+        throw new Error('Please select an image file to upload.');
+      }
+
+      const extensionSession = await readRegularUserExtensionSession({ persistSession: false });
+      let accessToken = extensionSession?.token;
+
+      if (!accessToken) {
+        try {
+          const raw = localStorage.getItem(USER_AUTH_STORAGE_KEY);
+          const parsed = raw ? JSON.parse(raw) : null;
+          accessToken = parsed?.token || null;
+        } catch {
+          accessToken = null;
+        }
+      }
+
+      if (!accessToken) {
+        throw new Error('No active user session found. Please log in again.');
+      }
+
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const response = await fetch('http://localhost:5000/api/user/profile/avatar', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          dataUrl,
+          mimeType: file.type,
+          fileName: file.name,
+        }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result?.error || 'Failed to upload profile picture.');
+      }
+
+      const newAvatarUrl = result.avatarUrl;
+      const currentUser = extensionSession?.user || authService.getCurrentUser() || {};
+      const updatedUser = {
+        ...currentUser,
+        avatarUrl: newAvatarUrl,
+      };
+
+      return { success: true, avatarUrl: newAvatarUrl, user: updatedUser };
+    } catch (err) {
+      console.error('VoxReview: Avatar upload error:', err);
+      throw err;
+    }
+  },
+
+  /**
+   * Remove custom user profile picture, falling back to Google avatar or initial letter.
+   *
+   * @returns {Promise<{success: boolean, avatarUrl: string|null, user: Object}>}
+   */
+  removeAvatar: async () => {
+    try {
+      const extensionSession = await readRegularUserExtensionSession({ persistSession: false });
+      let accessToken = extensionSession?.token;
+
+      if (!accessToken) {
+        try {
+          const raw = localStorage.getItem(USER_AUTH_STORAGE_KEY);
+          const parsed = raw ? JSON.parse(raw) : null;
+          accessToken = parsed?.token || null;
+        } catch {
+          accessToken = null;
+        }
+      }
+
+      if (!accessToken) {
+        throw new Error('No active user session found. Please log in again.');
+      }
+
+      const response = await fetch('http://localhost:5000/api/user/profile/avatar', {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) {
+        throw new Error(result?.error || 'Failed to remove custom profile picture.');
+      }
+
+      const fallbackAvatarUrl = result.avatarUrl || null;
+      const currentUser = extensionSession?.user || authService.getCurrentUser() || {};
+      const updatedUser = {
+        ...currentUser,
+        avatarUrl: fallbackAvatarUrl,
+      };
+
+      return { success: true, avatarUrl: fallbackAvatarUrl, user: updatedUser };
+    } catch (err) {
+      console.error('VoxReview: Remove avatar error:', err);
       throw err;
     }
   },

@@ -10,6 +10,7 @@ import numpy as np
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 
 from config import PREPROCESSING_HEAVY_CONFIG
+from contextual_resolution import resolve_contextual_prediction
 from preprocessing.preprocess import normalize_unicode, preprocess_review, remove_html, remove_urls
 from svm_pipeline import load_svm_model
 
@@ -127,8 +128,8 @@ def _emotion_drivers(
     return [surface for _, _, surface in scored_features[:5]]
 
 
-def predict_category(review_text: str, model: Any = None) -> int:
-    """Return the predicted Category code for one review text."""
+def _predict_with_context(review_text: str, model: Any = None) -> tuple[Any, str, int, dict[str, Any]]:
+    """Return the original SVM prediction and its post-processed resolution."""
     if not isinstance(review_text, str) or not review_text.strip():
         raise ValueError("review_text must be a non-empty string")
 
@@ -137,10 +138,39 @@ def predict_category(review_text: str, model: Any = None) -> int:
         review_text,
         **PREPROCESSING_HEAVY_CONFIG,
     )
-    category = int(fitted_model.predict([processed_review])[0])
-    if category not in VALID_CATEGORIES:
-        raise ValueError(f"Model returned an invalid Category: {category}")
-    return category
+    svm_category = int(fitted_model.predict([processed_review])[0])
+    if svm_category not in VALID_CATEGORIES:
+        raise ValueError(f"Model returned an invalid Category: {svm_category}")
+
+    score_values = np.asarray(fitted_model.decision_function([processed_review])).reshape(-1)
+    model_classes = np.asarray(fitted_model.classes_)
+    if len(score_values) != len(model_classes) or set(map(int, model_classes)) != VALID_CATEGORIES:
+        raise ValueError("Model decision scores do not match the six emotion categories")
+    decision_scores = {
+        int(category): float(score)
+        for category, score in zip(model_classes, score_values)
+    }
+    resolution = resolve_contextual_prediction(
+        review_text,
+        svm_category,
+        decision_scores,
+    )
+    return fitted_model, processed_review, svm_category, resolution
+
+
+def predict_category(review_text: str, model: Any = None) -> int:
+    """Return the final single Category code for one new review."""
+    _, _, _, resolution = _predict_with_context(review_text, model)
+    return int(resolution["category"])
+
+
+def predict_category_with_context(review_text: str, model: Any = None) -> dict[str, Any]:
+    """Return the final Category and a short contextual-resolution explanation."""
+    _, _, _, resolution = _predict_with_context(review_text, model)
+    return {
+        "category": int(resolution["category"]),
+        "contextualResolution": resolution,
+    }
 
 
 def explain_category(
@@ -151,14 +181,10 @@ def explain_category(
     if not isinstance(review_text, str) or not review_text.strip():
         raise ValueError("review_text must be a non-empty string")
 
-    fitted_model = model if model is not None else load_svm_model(MODEL_PATH)
-    processed_review = preprocess_review(
-        review_text,
-        **PREPROCESSING_HEAVY_CONFIG,
-    )
-    category = int(fitted_model.predict([processed_review])[0])
-    if category not in VALID_CATEGORIES:
-        raise ValueError(f"Model returned an invalid Category: {category}")
-
-    drivers = _emotion_drivers(review_text, processed_review, category, fitted_model)
-    return {"category": category, "emotionDrivers": drivers}
+    fitted_model, processed_review, svm_category, resolution = _predict_with_context(review_text, model)
+    drivers = _emotion_drivers(review_text, processed_review, svm_category, fitted_model)
+    return {
+        "category": int(resolution["category"]),
+        "emotionDrivers": drivers,
+        "contextualResolution": resolution,
+    }

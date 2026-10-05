@@ -1,7 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useBlocker, useNavigate } from 'react-router-dom';
 import authService, { openWebAppAuth } from '../../services/authService.js';
+import { shouldRefreshProfileForAuthChange } from '../../services/userProfileSync.js';
 import { getAnalysisForPage, getSavedAnalysisCount, saveAnalysisForPage, getPageKey } from '../../services/pageAnalysisStorage.js';
+import {
+  ACTIVE_ANALYSIS_STORAGE_KEY,
+  deleteActiveAnalysisForPage,
+  getActiveAnalysisForPage,
+} from '../../services/activeAnalysisState.js';
 import Header from '../components/Header.jsx';
 import DetectedPageCard from '../components/DetectedPageCard.jsx';
 import AnalysisResults from '../components/AnalysisResults.jsx';
@@ -10,14 +16,18 @@ import ProfileView from '../components/ProfileView.jsx';
 import BottomNavBar from '../components/BottomNavBar.jsx';
 import UnsupportedSiteView from '../components/UnsupportedSiteView.jsx';
 import NoReviewsView from '../components/NoReviewsView.jsx';
+import PlatformUnavailableView from '../components/PlatformUnavailableView.jsx';
 import LogoutConfirmationModalExtension from '../components/LogoutConfirmationModalExtension.jsx';
+import UnsavedChangesConfirmationModal from '../components/UnsavedChangesConfirmationModal.jsx';
 import { aggregateTopicsForReviews, getReviewText } from '../utils/reviewTopics.js';
 import { getNewReviews } from '../utils/savedAnalysisRefresh.js';
 import { attachReviewPriorities } from '../utils/priorityEngine.js';
 import { isMatchingRescanScrape } from '../utils/analysisScrapeState.js';
+import { requestSvmBatch } from '../utils/svmRequest.js';
+import { fetchPlatformAvailability } from '../utils/platformAvailability.js';
+import { createUnsavedChangesGuard } from '../utils/unsavedChangesGuard.js';
 import '../css/PopupPage.css';
 
-const SVM_API_URL = 'http://localhost:5000/api/nlp/svm/predict';
 const TOPIC_API_URL = 'http://localhost:5000/api/nlp/topics/predict';
 const ENABLE_TOPIC_ANALYSIS = import.meta.env.VITE_ENABLE_TOPIC_ANALYSIS !== 'false';
 const TOPIC_REQUEST_TIMEOUT_BASE_MS = 75000;
@@ -66,7 +76,9 @@ async function requestTopicAnalysis(reviewTexts, signal, platform) {
   });
   const payload = await response.json();
   if (!response.ok || !payload?.success || !hasValidTopicAnalysis(payload, reviewTexts.length)) {
-    throw new Error(payload?.error || 'Review topic response was invalid.');
+    const requestError = new Error(payload?.message || payload?.error || 'Review topic response was invalid.');
+    requestError.code = payload?.error || null;
+    throw requestError;
   }
   return payload;
 }
@@ -88,6 +100,35 @@ function getPlatformLabel(platform) {
     agoda: 'Agoda',
   };
   return labels[String(platform || '').toLowerCase()] || 'Current Source';
+}
+
+function getAvailabilityPlatformKey(platform) {
+  const normalized = String(platform || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ({
+    googlemaps: 'google',
+    googlereviews: 'google',
+    googleplaystore: 'googleplay',
+    googleplay: 'googleplay',
+    shopee: 'shopee',
+    lazada: 'lazada',
+    steam: 'steam',
+  })[normalized] || null;
+}
+
+function getPlatformDisplayName(platform) {
+  const names = {
+    google: 'Google Maps',
+    googleplay: 'Google Play Store',
+    lazada: 'Lazada',
+    shopee: 'Shopee',
+    steam: 'Steam',
+  };
+  return names[getAvailabilityPlatformKey(platform)] || getPlatformLabel(platform);
+}
+
+function isPlatformDisabledError(error) {
+  return error?.code === 'PLATFORM_DISABLED' ||
+    /PLATFORM_DISABLED|analysis for this platform is currently disabled/i.test(error?.message || '');
 }
 
 function getSvmEmotionKeywords(explanationResults, category) {
@@ -169,6 +210,53 @@ function buildEmotionData(reviews, predictions, platform, topicResponse = null, 
   };
 }
 
+function buildActiveAnalysisView(activeState) {
+  const reviews = Array.isArray(activeState?.reviews) ? activeState.reviews : [];
+  const predictions = activeState?.svmResult?.predictions;
+  if (!Array.isArray(predictions) || predictions.length !== reviews.length) {
+    return { record: activeState, emotionData: null, topicAnalysis: null };
+  }
+
+  const explanationResults = Array.isArray(activeState.svmResult.results) &&
+    activeState.svmResult.results.length === reviews.length
+    ? activeState.svmResult.results.map((result, index) => ({
+        category: result?.category === predictions[index] ? result.category : predictions[index],
+        emotionDrivers: Array.isArray(result?.emotionDrivers)
+          ? result.emotionDrivers.filter((driver) => typeof driver === 'string')
+          : [],
+        contextualResolution: typeof result?.contextualResolution?.explanation === 'string'
+          ? result.contextualResolution
+          : null,
+      }))
+    : predictions.map((category) => ({ category, emotionDrivers: [], contextualResolution: null }));
+  const platform = getPlatformLabel(activeState.platform);
+  const topicAnalysis = hasValidTopicAnalysis(activeState.topicResult, reviews.length)
+    ? activeState.topicResult
+    : null;
+  const topicStatus = topicAnalysis
+    ? 'ready'
+    : activeState.topicError ? 'unavailable' : ENABLE_TOPIC_ANALYSIS ? 'pending' : 'disabled';
+  const emotionData = buildEmotionData(reviews, predictions, platform, topicAnalysis, topicStatus, explanationResults);
+  const reviewAnalysis = explanationResults.map((result, index) => ({
+    review: reviews[index],
+    category: result.category,
+    emotionDrivers: result.emotionDrivers,
+    contextualResolution: result.contextualResolution,
+  }));
+  const record = {
+    ...activeState,
+    platform,
+    page_url: activeState.page_url,
+    pageKey: activeState.pageKey || getPageKey(activeState.platform, activeState.page_url),
+    productTitle: activeState.productTitle || activeState.targetTitle || 'Product Review',
+    targetTitle: activeState.targetTitle || activeState.productTitle || 'Product Review',
+    reviewAnalysis,
+    topicAnalysis,
+    emotionData,
+  };
+  return { record, emotionData, topicAnalysis };
+}
+
 /**
  * Resolves the currently active tab at the exact moment of execution.
  * Prioritizes lastFocusedWindow (accurate for Side Panel & multi-window setups)
@@ -241,13 +329,26 @@ export default function PopupPage() {
 
   // Synchronized authenticated user state
   const [currentUser, setCurrentUser] = useState(() => authService.getCurrentUser());
+  const [savedProfile, setSavedProfile] = useState(() => authService.getCurrentUser());
+  const setAuthenticatedUser = (user) => {
+    setCurrentUser(user);
+    setSavedProfile(user);
+  };
   const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
+  const [isProfileDirty, setIsProfileDirty] = useState(false);
+  const [showUnsavedChangesConfirmation, setShowUnsavedChangesConfirmation] = useState(false);
   const isLoggedIn = !!currentUser;
 
   const [theme, setTheme] = useState(() => localStorage.getItem('voxreview-theme') || 'light');
   const [authToastMessage, setAuthToastMessage] = useState('');
   const [activeTab, setActiveTab] = useState('analyze');
+  const [platformAvailability, setPlatformAvailability] = useState({
+    platform: null,
+    name: '',
+    status: 'checking',
+  });
   const [analysisStatus, setAnalysisStatus] = useState('idle');
+  const [analysisError, setAnalysisError] = useState('');
   const [emotionData, setEmotionData] = useState(null);
   const [topicAnalysis, setTopicAnalysis] = useState(null);
   const [currentAnalysisRecord, setCurrentAnalysisRecord] = useState(null);
@@ -284,6 +385,146 @@ export default function PopupPage() {
   const ignoreAutomaticScrapesRef = useRef(false);
   const analysisRevisionRef = useRef(0);
   const analysisResolvedPageKeyRef = useRef(null);
+  const lastAuthUserIdRef = useRef(null);
+  const profileRefreshRef = useRef({ userId: null, promise: null });
+  const availabilityRequestRef = useRef(0);
+  const previousNonAnalyzeTabRef = useRef('saved');
+  const discardProfileDraftRef = useRef(null);
+  const isProfileDirtyRef = useRef(false);
+  const leaveGuardRef = useRef(null);
+  if (!leaveGuardRef.current) leaveGuardRef.current = createUnsavedChangesGuard();
+  const blocker = useBlocker(isProfileDirty && activeTab === 'profile');
+  const blockerRef = useRef(blocker);
+  blockerRef.current = blocker;
+
+  const checkCurrentPlatformAvailability = useCallback(async () => {
+    const platformKey = getAvailabilityPlatformKey(activeContextRef.current.platform)
+      || getAvailabilityPlatformKey(detectedPlatformRef.current)
+      || getAvailabilityPlatformKey(detectedPlatform)
+      || getAvailabilityPlatformKey(detectPlatformFromUrl(activeTabUrl));
+    if (!platformKey) {
+      setPlatformAvailability({ platform: null, name: '', status: 'available' });
+      return;
+    }
+
+    const requestId = ++availabilityRequestRef.current;
+    setPlatformAvailability((current) => ({
+      platform: platformKey,
+      name: current.platform === platformKey ? current.name : getPlatformDisplayName(platformKey),
+      status: 'checking',
+    }));
+    try {
+      const result = await fetchPlatformAvailability(platformKey);
+      if (requestId !== availabilityRequestRef.current) return;
+      setPlatformAvailability({
+        platform: platformKey,
+        name: result.name,
+        status: result.isActive ? 'available' : 'disabled',
+      });
+    } catch (error) {
+      if (requestId !== availabilityRequestRef.current) return;
+      setPlatformAvailability({
+        platform: platformKey,
+        name: getPlatformDisplayName(platformKey),
+        status: 'unverified',
+      });
+      if (import.meta.env.DEV) console.error('VoxReview: Platform availability check failed:', error);
+    }
+  }, [activeTabUrl, detectedPlatform]);
+
+  const performTabChange = (nextTab) => {
+    if (nextTab !== 'analyze') {
+      previousNonAnalyzeTabRef.current = nextTab;
+    } else if (activeTab !== 'analyze') {
+      previousNonAnalyzeTabRef.current = activeTab;
+    }
+    setActiveTab(nextTab);
+  };
+
+  const handleProfileDirtyChange = useCallback((isDirty) => {
+    isProfileDirtyRef.current = isDirty;
+    setIsProfileDirty(isDirty);
+  }, []);
+
+  const requestProfileLeave = useCallback((action) => {
+    const shouldConfirm = isProfileDirtyRef.current && activeTab === 'profile';
+    if (!shouldConfirm) {
+      if (activeTab === 'profile') discardProfileDraftRef.current?.();
+      action();
+      return;
+    }
+
+    leaveGuardRef.current.request(
+      action,
+      true,
+      () => setShowUnsavedChangesConfirmation(true),
+    );
+  }, [activeTab]);
+
+  const handleTabChange = (nextTab) => {
+    if (nextTab === activeTab) return;
+    requestProfileLeave(() => performTabChange(nextTab));
+  };
+
+  const handleStayOnProfile = () => {
+    leaveGuardRef.current.cancel();
+    setShowUnsavedChangesConfirmation(false);
+    if (blockerRef.current.state === 'blocked') blockerRef.current.reset();
+  };
+
+  const handleLeaveWithoutSaving = () => {
+    setShowUnsavedChangesConfirmation(false);
+    leaveGuardRef.current.confirm(() => {
+      discardProfileDraftRef.current?.();
+      isProfileDirtyRef.current = false;
+      setIsProfileDirty(false);
+    });
+  };
+
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    leaveGuardRef.current.request(
+      () => blocker.proceed(),
+      true,
+      () => setShowUnsavedChangesConfirmation(true),
+    );
+  }, [blocker]);
+
+  useEffect(() => {
+    if (!isProfileDirty || activeTab !== 'profile') return undefined;
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [activeTab, isProfileDirty]);
+
+  const applyActiveAnalysisState = (activeState) => {
+    if (!activeState?.pageKey || activeState.pageKey !== activeContextRef.current.pageKey) return;
+    const { record, emotionData: restoredEmotionData, topicAnalysis: restoredTopics } = buildActiveAnalysisView(activeState);
+    analysisResolvedPageKeyRef.current = activeState.pageKey;
+    setCurrentAnalysisRecord(record);
+    setHasResolvedActiveTab(true);
+    setDetectedPlatform(activeState.platform || activeContextRef.current.platform);
+    setScrapedIsProductPage(Array.isArray(activeState.reviews) && activeState.reviews.length > 0);
+    setScrapedProductTitle(activeState.productTitle || activeState.targetTitle || null);
+    setScrapedCategory(activeState.category ?? null);
+    setScrapedRating(activeState.rating ?? null);
+    setScrapedProductImage(activeState.productImage ?? null);
+    setScrapedReviews(Array.isArray(activeState.reviews) ? activeState.reviews : []);
+    lastScrapedReviewsRef.current = Array.isArray(activeState.reviews) ? activeState.reviews : [];
+    setScrapedHasError(false);
+    setScrapedErrorMessage('');
+    setEmotionData(restoredEmotionData);
+    setTopicAnalysis(restoredTopics);
+    setHasSavedAnalysis(false);
+    setSaveAnalysisError('');
+    setAnalysisError(activeState.error || '');
+    setAnalysisStatus(activeState.status === 'error'
+      ? 'idle'
+      : restoredEmotionData ? 'completed' : activeState.status === 'analyzing' ? 'analyzing' : 'idle');
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -322,6 +563,22 @@ export default function PopupPage() {
   useEffect(() => {
     detectedPlatformRef.current = detectedPlatform;
   }, [detectedPlatform]);
+
+  useEffect(() => {
+    if (activeTab !== 'analyze' || !hasResolvedActiveTab || isSiteUnsupported) {
+      availabilityRequestRef.current += 1;
+      return undefined;
+    }
+
+    void checkCurrentPlatformAvailability();
+    const intervalId = setInterval(() => {
+      void checkCurrentPlatformAvailability();
+    }, 15000);
+    return () => {
+      availabilityRequestRef.current += 1;
+      clearInterval(intervalId);
+    };
+  }, [activeTab, checkCurrentPlatformAvailability, hasResolvedActiveTab, isSiteUnsupported]);
 
   const syncScrapeData = (data) => {
     if (!data) return;
@@ -484,8 +741,11 @@ export default function PopupPage() {
   }, [theme]);
 
   useEffect(() => {
+    let isMounted = true;
     const updateActiveTabContext = async () => {
+      if (!activeContextRef.current.isResolved) setHasResolvedActiveTab(false);
       const activeTabObj = await resolveCurrentActiveTab();
+      if (!isMounted) return;
       const activeUrl = activeTabObj?.url || '';
       if (!activeUrl) return;
 
@@ -513,12 +773,12 @@ export default function PopupPage() {
       };
       activeContextRef.current = context;
       setActiveTabUrl(activeUrl);
-      setHasResolvedActiveTab(true);
 
       console.log('[POPUP] current tab:', { tabId: context.tabId, url: activeUrl, platform: urlBasedPlatform });
       console.log('[POPUP] page key:', newPageKey);
 
       if (urlBasedPlatform === 'unknown') {
+        setHasResolvedActiveTab(true);
         ignoreAutomaticScrapesRef.current = false;
         rescanAnalysisPendingRef.current = null;
         if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
@@ -546,6 +806,7 @@ export default function PopupPage() {
       setDetectedPlatform(urlBasedPlatform);
 
       if (pageGenuinelyChanged) {
+        setHasResolvedActiveTab(false);
         ignoreAutomaticScrapesRef.current = false;
         rescanAnalysisPendingRef.current = null;
         if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
@@ -571,7 +832,15 @@ export default function PopupPage() {
       if (activeContextRef.current.generation !== context.generation || analysisRevisionRef.current !== restoreRevision) return;
       if (analysisResolvedPageKeyRef.current === context.pageKey) return;
 
+      const activeAnalysis = await getActiveAnalysisForPage(context.pageKey);
+      if (activeContextRef.current.generation !== context.generation || analysisRevisionRef.current !== restoreRevision) return;
+      if (activeAnalysis) {
+        applyActiveAnalysisState(activeAnalysis);
+        return;
+      }
+
       if (existingAnalysis) {
+        setHasResolvedActiveTab(true);
         analysisResolvedPageKeyRef.current = context.pageKey;
         setCurrentAnalysisRecord(existingAnalysis);
         setHasSavedAnalysis(hasValidTopicAnalysis(existingAnalysis.topicAnalysis, existingAnalysis.reviews || []) || !ENABLE_TOPIC_ANALYSIS);
@@ -695,6 +964,7 @@ export default function PopupPage() {
         setScrapedErrorMessage('');
         setAnalysisStatus('completed');
       } else {
+        setHasResolvedActiveTab(true);
         setEmotionData(null);
         setTopicAnalysis(null);
         setCurrentAnalysisRecord(null);
@@ -739,43 +1009,77 @@ export default function PopupPage() {
 
       let handleStorageChange;
       if (chrome.storage?.local) {
+        const refreshProfileOnce = (userId) => {
+          if (!userId) return Promise.resolve(null);
+          if (profileRefreshRef.current.userId === userId && profileRefreshRef.current.promise) {
+            return profileRefreshRef.current.promise;
+          }
+
+          const refreshPromise = authService.refreshCurrentUserProfile()
+            .then((liveUser) => {
+              if (isMounted && liveUser?.id === userId) {
+                setAuthenticatedUser(liveUser);
+              }
+              return liveUser;
+            })
+            .catch((error) => {
+              console.error('VoxReview: Could not refresh the signed-in profile:', error);
+              return null;
+            })
+            .finally(() => {
+              if (profileRefreshRef.current.promise === refreshPromise) {
+                profileRefreshRef.current = { userId: null, promise: null };
+              }
+            });
+          profileRefreshRef.current = { userId, promise: refreshPromise };
+          return refreshPromise;
+        };
+
         chrome.storage.local.get(['voxreviewLastScrape', 'voxreview_auth_session'], async (result) => {
           syncScrapeData(result?.voxreviewLastScrape);
 
           const extSession = result?.voxreview_auth_session;
           if (extSession?.user && extSession?.token) {
-            authService.setSession(extSession);
-            setCurrentUser(extSession.user);
+            lastAuthUserIdRef.current = extSession.user.id || null;
+            authService.cacheSessionLocally(extSession);
+            setAuthenticatedUser(extSession.user);
 
-            const liveUser = await authService.refreshCurrentUserProfile();
-            if (liveUser) {
-              setCurrentUser(liveUser);
-            }
+            await refreshProfileOnce(extSession.user.id);
           } else {
-            setCurrentUser(null);
+            lastAuthUserIdRef.current = null;
+            authService.cacheSessionLocally(null);
+            setAuthenticatedUser(null);
           }
         });
 
         handleStorageChange = (changes, areaName) => {
           if (areaName !== 'local') return;
 
+          if (changes[ACTIVE_ANALYSIS_STORAGE_KEY]) {
+            const activeState = changes[ACTIVE_ANALYSIS_STORAGE_KEY].newValue?.[activeContextRef.current.pageKey];
+            if (activeState) applyActiveAnalysisState(activeState);
+          }
+
           if (changes.voxreview_auth_session) {
             const newSession = changes.voxreview_auth_session.newValue;
             if (newSession && newSession.user) {
-              authService.setSession(newSession);
-              setCurrentUser(newSession.user);
-
-              authService.refreshCurrentUserProfile().then((liveUser) => {
-                if (liveUser) {
-                  setCurrentUser(liveUser);
-                }
-              }).catch(() => {});
-
-              setAuthToastMessage("You're now signed in.");
-              setTimeout(() => setAuthToastMessage(''), 4000);
+              authService.cacheSessionLocally(newSession);
+              const authChanged = shouldRefreshProfileForAuthChange(
+                { user: { id: lastAuthUserIdRef.current } },
+                newSession,
+              );
+              lastAuthUserIdRef.current = newSession.user.id || null;
+              if (authChanged) {
+                setAuthenticatedUser(newSession.user);
+                refreshProfileOnce(newSession.user.id);
+                setAuthToastMessage("You're now signed in.");
+                setTimeout(() => setAuthToastMessage(''), 4000);
+              }
             } else {
-              authService.logout();
-              setCurrentUser(null);
+              lastAuthUserIdRef.current = null;
+              profileRefreshRef.current = { userId: null, promise: null };
+              authService.clearSessionLocally();
+              setAuthenticatedUser(null);
               setAuthToastMessage('');
             }
           }
@@ -792,6 +1096,7 @@ export default function PopupPage() {
       }
 
       return () => {
+        isMounted = false;
         chrome.tabs?.onActivated?.removeListener(handleTabActivated);
         chrome.tabs?.onUpdated?.removeListener(handleTabUpdated);
         chrome.windows?.onFocusChanged?.removeListener(handleWindowFocusChanged);
@@ -803,9 +1108,20 @@ export default function PopupPage() {
   }, []);
 
   const platformLabel = getPlatformLabel(detectedPlatform);
+  const availabilityPlatformKey = getAvailabilityPlatformKey(activeContextRef.current.platform)
+    || getAvailabilityPlatformKey(detectedPlatform)
+    || getAvailabilityPlatformKey(detectPlatformFromUrl(activeTabUrl));
+  const availabilityStatus = availabilityPlatformKey
+    ? platformAvailability.platform === availabilityPlatformKey
+      ? platformAvailability.status
+      : 'checking'
+    : 'available';
+  const availabilityPlatformName = platformAvailability.platform === availabilityPlatformKey
+    ? platformAvailability.name
+    : getPlatformDisplayName(availabilityPlatformKey);
 
   const handleAnalyzeClick = async (reviewsToAnalyze = scrapedReviews, scrapeMetadata = null) => {
-    if (analysisStatus === 'analyzing') return;
+    if (analysisStatus === 'analyzing' || availabilityStatus !== 'available') return;
     const analyzeStartedAt = performance.now();
     const analysisRevision = ++analysisRevisionRef.current;
     analysisResolvedPageKeyRef.current = activeContextRef.current.pageKey || getPageKey(
@@ -818,13 +1134,69 @@ export default function PopupPage() {
     const analysisPlatformLabel = scrapeMetadata?.platform
       ? getPlatformLabel(scrapeMetadata.platform)
       : platformLabel;
+    const analysisPlatform = scrapeMetadata?.platform
+      || activeContextRef.current.platform
+      || detectedPlatform;
     setCurrentAnalysisRecord(null);
     setHasSavedAnalysis(false);
     setSaveAnalysisError('');
+    setAnalysisError('');
     setIsSavingAnalysis(false);
     setScrapedReviews(analysisReviews);
     setTopicAnalysis(null);
     setAnalysisStatus('analyzing');
+
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage && chrome.storage?.local) {
+      const pageUrl = scrapeMetadata?.url || activeTabUrlRef.current || window.location.href;
+      const platform = analysisPlatform;
+      const pageKey = getPageKey(platform, pageUrl);
+      const analysis = {
+        platform,
+        page_url: pageUrl,
+        pageKey,
+        productTitle: scrapeMetadata?.productTitle || scrapedProductTitle || 'Product Review',
+        targetTitle: scrapeMetadata?.productTitle || scrapedProductTitle || 'Product Review',
+        rating: scrapeMetadata?.rating ?? scrapedRating,
+        category: scrapeMetadata?.category ?? scrapedCategory,
+        productImage: scrapeMetadata?.productImage ?? scrapedProductImage,
+        reviews: analysisReviews,
+        force: Boolean(scrapeMetadata?.rescanRequestId),
+      };
+
+      try {
+        const response = await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage({ type: 'startAnalysis', analysis }, (result) => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve(result);
+          });
+        });
+        if (!response?.ok) {
+          const startError = new Error(
+            (typeof response?.error === 'string' ? response.error : response?.error?.message)
+              || response?.message
+              || 'Analysis could not be started.',
+          );
+          startError.code = response?.code || response?.error?.code || null;
+          throw startError;
+        }
+        if (response.state) applyActiveAnalysisState(response.state);
+      } catch (error) {
+        if (analysisRevisionRef.current !== analysisRevision) return;
+        if (isPlatformDisabledError(error)) {
+          setPlatformAvailability({
+            platform: getAvailabilityPlatformKey(analysisPlatform) || availabilityPlatformKey,
+            name: getPlatformDisplayName(analysisPlatform),
+            status: 'disabled',
+          });
+          setCurrentAnalysisRecord(null);
+          setEmotionData(null);
+          setTopicAnalysis(null);
+        }
+        setAnalysisStatus('idle');
+        setAnalysisError(error.message || 'Emotion analysis failed. Please retry.');
+      }
+      return;
+    }
 
     try {
       const reviewTexts = analysisReviews.map(getReviewText);
@@ -834,16 +1206,22 @@ export default function PopupPage() {
 
       const svmStartedAt = performance.now();
       console.log('[Analyze] SVM request start');
-      const response = await fetch(SVM_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reviews: reviewTexts }),
+      const payload = await requestSvmBatch(reviewTexts, {
+        platform: analysisPlatform,
+        onFailure: (error) => {
+          if (analysisRevisionRef.current !== analysisRevision) return;
+          if (isPlatformDisabledError(error)) {
+            setPlatformAvailability({
+              platform: getAvailabilityPlatformKey(analysisPlatform) || availabilityPlatformKey,
+              name: getPlatformDisplayName(analysisPlatform),
+              status: 'disabled',
+            });
+          }
+          setAnalysisStatus('idle');
+          setAnalysisError(error.message || 'SVM analysis failed. Please retry.');
+        },
       });
-      const payload = await response.json();
       console.log(`[Analyze] SVM: ${Math.round(performance.now() - svmStartedAt)} ms`);
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || 'SVM analysis failed.');
-      }
       if (!Array.isArray(payload.predictions) ||
         payload.predictions.length !== analysisReviews.length ||
         payload.predictions.some((category) => !VALID_CATEGORIES.has(category))) {
@@ -859,8 +1237,15 @@ export default function PopupPage() {
             emotionDrivers: Array.isArray(result?.emotionDrivers)
               ? result.emotionDrivers.filter((driver) => typeof driver === 'string')
               : [],
+            contextualResolution: typeof result?.contextualResolution?.explanation === 'string'
+              ? result.contextualResolution
+              : null,
           }))
-        : payload.predictions.map((category) => ({ category, emotionDrivers: [] }));
+        : payload.predictions.map((category) => ({
+            category,
+            emotionDrivers: [],
+            contextualResolution: null,
+          }));
       const nextEmotionData = buildEmotionData(
         analysisReviews,
         payload.predictions,
@@ -890,6 +1275,7 @@ export default function PopupPage() {
           review: analysisReviews[index],
           category: result.category,
           emotionDrivers: result.emotionDrivers,
+          contextualResolution: result.contextualResolution,
         })),
         topicAnalysis: null,
         emotionData: nextEmotionData,
@@ -939,6 +1325,18 @@ export default function PopupPage() {
         setHasSavedAnalysis(false);
       } catch (topicError) {
         if (analysisRevisionRef.current !== analysisRevision) return;
+        if (isPlatformDisabledError(topicError)) {
+          setPlatformAvailability({
+            platform: getAvailabilityPlatformKey(analysisPlatform) || availabilityPlatformKey,
+            name: getPlatformDisplayName(analysisPlatform),
+            status: 'disabled',
+          });
+          setCurrentAnalysisRecord(null);
+          setEmotionData(null);
+          setTopicAnalysis(null);
+          setAnalysisStatus('idle');
+          return;
+        }
         console.warn('VoxReview: review topic analysis unavailable:', topicError);
         analysisRevisionRef.current += 1;
         analysisResolvedPageKeyRef.current = getPageKey(record.platform, record.page_url);
@@ -967,6 +1365,7 @@ export default function PopupPage() {
       setCurrentAnalysisRecord(null);
       setHasSavedAnalysis(false);
       setAnalysisStatus('idle');
+      setAnalysisError(error.message || 'Emotion analysis failed. Please retry.');
     }
   };
 
@@ -975,21 +1374,27 @@ export default function PopupPage() {
     const fetchedReviews = Array.isArray(scrapeData.reviews) ? scrapeData.reviews : [];
     const newReviews = getNewReviews(savedReviews, fetchedReviews);
     const refreshedAt = Date.now();
+    const updatedRecord = await saveAnalysisForPage({
+      ...savedItem,
+      last_refreshed_at: refreshedAt,
+    });
+    if (!updatedRecord) throw new Error('Unable to update the saved refresh timestamp.');
+    return {
+      success: true,
+      newReviewCount: newReviews.length,
+      newReviews,
+      message: newReviews.length ? `${newReviews.length} new reviews detected` : 'No new reviews found',
+      record: updatedRecord,
+      lastRefreshedAt: refreshedAt,
+    };
+  };
 
-    if (newReviews.length === 0) {
-      const updatedRecord = await saveAnalysisForPage({
-        ...savedItem,
-        last_refreshed_at: refreshedAt,
-      });
-      if (!updatedRecord) throw new Error('Unable to update the saved refresh timestamp.');
-      return {
-        success: true,
-        newReviewCount: 0,
-        message: 'No new reviews found',
-        record: updatedRecord,
-      };
+  const handleAnalyzeNewSavedReviews = async (savedItem, newReviews) => {
+    if (!Array.isArray(newReviews) || newReviews.length === 0) {
+      throw new Error('No new reviews are waiting to be analyzed.');
     }
-
+    const savedReviews = Array.isArray(savedItem.reviews) ? savedItem.reviews : [];
+    const refreshedAt = Date.now();
     const savedQuotes = Array.isArray(savedItem.emotionData?.quotes)
       ? savedItem.emotionData.quotes
       : [];
@@ -1024,13 +1429,8 @@ export default function PopupPage() {
       throw new Error('A newly fetched review did not contain usable review text.');
     }
 
-    const svmResponse = await fetch(SVM_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reviews: newReviewTexts }),
-    });
-    const svmPayload = await svmResponse.json();
-    if (!svmResponse.ok || !svmPayload.success || !Array.isArray(svmPayload.predictions) ||
+    const svmPayload = await requestSvmBatch(newReviewTexts, { platform: savedItem.platform });
+    if (!Array.isArray(svmPayload.predictions) ||
       svmPayload.predictions.length !== newReviews.length ||
       svmPayload.predictions.some((category) => !VALID_CATEGORIES.has(category))) {
       throw new Error(svmPayload.error || 'SVM analysis failed for new reviews.');
@@ -1045,8 +1445,15 @@ export default function PopupPage() {
           emotionDrivers: Array.isArray(result?.emotionDrivers)
             ? result.emotionDrivers.filter((driver) => typeof driver === 'string')
             : [],
+          contextualResolution: typeof result?.contextualResolution?.explanation === 'string'
+            ? result.contextualResolution
+            : null,
         }))
-      : svmPayload.predictions.map((category) => ({ category, emotionDrivers: [] }));
+      : svmPayload.predictions.map((category) => ({
+          category,
+          emotionDrivers: [],
+          contextualResolution: null,
+        }));
 
     let newTopicPayload = null;
     if (ENABLE_TOPIC_ANALYSIS) {
@@ -1059,7 +1466,7 @@ export default function PopupPage() {
         newTopicPayload = await requestTopicAnalysis(
           newReviewTexts,
           controller.signal,
-          getPlatformLabel(savedItem.platform || scrapeData.platform),
+          getPlatformLabel(savedItem.platform),
         );
       } finally {
         clearTimeout(timeout);
@@ -1069,7 +1476,7 @@ export default function PopupPage() {
     const newEmotionData = buildEmotionData(
       newReviews,
       svmPayload.predictions,
-      getPlatformLabel(savedItem.platform || scrapeData.platform),
+      getPlatformLabel(savedItem.platform),
       newTopicPayload,
       ENABLE_TOPIC_ANALYSIS ? 'ready' : 'disabled',
       newExplanationResults,
@@ -1079,6 +1486,7 @@ export default function PopupPage() {
       review: newReviews[index],
       category: result.category,
       emotionDrivers: result.emotionDrivers,
+      contextualResolution: result.contextualResolution,
     }))];
     const combinedPredictions = combinedReviewAnalysis.map((result) => result.category);
     const combinedTopicResults = [
@@ -1182,7 +1590,7 @@ export default function PopupPage() {
       percentage: `${mergedEmotionData.dominantEmotion.percentage}%`,
       priorityResults: combinedQuotes.map((quote) => quote.priority).filter(Boolean),
       timestamp: refreshedAt,
-      last_refreshed_at: refreshedAt,
+      last_refreshed_at: savedItem.last_refreshed_at || refreshedAt,
     });
     if (!mergedRecord) throw new Error('Unable to update the existing saved analysis.');
 
@@ -1261,7 +1669,9 @@ export default function PopupPage() {
     setCurrentAnalysisRecord(null);
     setHasSavedAnalysis(false);
     setSaveAnalysisError('');
+    setAnalysisError('');
     setIsSavingAnalysis(false);
+    void deleteActiveAnalysisForPage(activeContextRef.current.pageKey);
     setScrapedReviews([]);
     // Keep the last same-page scrape only as an in-memory source for Analyze Again.
     setScrapedHasError(false);
@@ -1271,17 +1681,19 @@ export default function PopupPage() {
   };
 
   // Log in / Sign up redirects to the existing Web Application authentication routes
-  const handleOpenLogin = () => openWebAppAuth('/login');
-  const handleOpenRegister = () => openWebAppAuth('/register');
+  const handleOpenLogin = () => requestProfileLeave(() => openWebAppAuth('/login'));
+  const handleOpenRegister = () => requestProfileLeave(() => openWebAppAuth('/register'));
 
   // Logout clears session and notifies extension to return to Guest Mode
   const handleLogout = () => {
-    setShowLogoutConfirmation(true);
+    requestProfileLeave(() => {
+      setShowLogoutConfirmation(true);
+    });
   };
 
   const confirmLogout = async () => {
     await authService.logout();
-    setCurrentUser(null);
+    setAuthenticatedUser(null);
     setAuthToastMessage('');
     setShowLogoutConfirmation(false);
   };
@@ -1417,7 +1829,7 @@ export default function PopupPage() {
           getPageKey(detectPlatformFromUrl(tab.url), tab.url) === savedPageKey);
         if (!activeTabObj) {
           setIsRescanning(false);
-          return false;
+          return { success: false, needsOpen: true };
         }
       } else {
         activeTabObj = await resolveCurrentActiveTab();
@@ -1533,6 +1945,58 @@ export default function PopupPage() {
     }
   };
 
+  const handleOpenSavedPage = async (savedItem) => {
+    const extensionApi = globalThis.chrome;
+    if (!savedItem?.page_url || !extensionApi?.tabs?.create) {
+      throw new Error('Unable to open the original product page.');
+    }
+
+    const openedTab = await new Promise((resolve, reject) => {
+      extensionApi.tabs.create({ url: savedItem.page_url, active: true }, (tab) => {
+        if (extensionApi.runtime?.lastError || !tab?.id) {
+          reject(new Error(extensionApi.runtime?.lastError?.message || 'Unable to open the original product page.'));
+          return;
+        }
+        resolve(tab);
+      });
+    });
+
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        extensionApi.tabs.onUpdated.removeListener(onUpdated);
+        if (error) reject(error);
+        else resolve();
+      };
+      const onUpdated = (tabId, changeInfo) => {
+        if (tabId === openedTab.id && changeInfo.status === 'complete') finish();
+      };
+      const timeout = setTimeout(() => finish(new Error('The original product page did not finish opening.')), 30000);
+      extensionApi.tabs.onUpdated.addListener(onUpdated);
+      extensionApi.tabs.get(openedTab.id, (tab) => {
+        if (extensionApi.runtime?.lastError) {
+          finish(new Error(extensionApi.runtime.lastError.message));
+        } else if (tab?.status === 'complete') {
+          finish();
+        }
+      });
+    });
+
+    const result = await handleRescanPage(savedItem);
+    if (!result?.success) {
+      throw new Error(result?.error || 'Unable to refresh this analysis. Please check that the original page is available.');
+    }
+    return result;
+  };
+
+  const handleAnalyzeNewReviews = async (savedItem, reviews) => {
+    const latestSavedItem = await getAnalysisForPage(savedItem.platform, savedItem.page_url) || savedItem;
+    return handleAnalyzeNewSavedReviews(latestSavedItem, reviews);
+  };
+
   const availableReviewCount = scrapedReviews.length || lastScrapedReviewsRef.current.length;
   const hasReviewsForAnalysis = scrapedReviews.length > 0 || lastScrapedReviewsRef.current.length > 0;
 
@@ -1542,7 +2006,9 @@ export default function PopupPage() {
         {/* Extension Header */}
         <Header
           isLoggedIn={isLoggedIn}
-          userName={currentUser?.username || currentUser?.name}
+          userName={savedProfile?.username || savedProfile?.name}
+          avatarUrl={savedProfile?.avatarUrl}
+          userInitial={savedProfile?.firstName || savedProfile?.username || savedProfile?.email}
           onLogout={handleLogout}
           onLoginClick={handleOpenLogin}
         />
@@ -1569,11 +2035,24 @@ export default function PopupPage() {
         <div className="popup-stage">
           {activeTab === 'analyze' && (
             <>
-              {/* ── 1. Website Not Supported (FIRST CHECK) ── */}
-              {isSiteUnsupported ? (
+              {!hasResolvedActiveTab ? (
+                <div className="analysis-section" role="status" aria-live="polite">
+                  <div className="analysis-glass-card">Restoring current page analysis…</div>
+                </div>
+              ) : (
+                <>
+                  {/* ── 1. Website Not Supported (FIRST CHECK) ── */}
+                  {isSiteUnsupported ? (
                 <UnsupportedSiteView
                   onRescan={handleRescanPage}
                   isRescanning={isRescanning}
+                />
+              ) : availabilityStatus !== 'available' ? (
+                <PlatformUnavailableView
+                  platformName={availabilityPlatformName}
+                  status={availabilityStatus}
+                  isChecking={availabilityStatus === 'checking'}
+                  onCheckAgain={() => { void checkCurrentPlatformAvailability(); }}
                 />
               ) : scrapedHasError ? (
                 /* ── 2. Scraper Error / Exception ── */
@@ -1680,6 +2159,7 @@ export default function PopupPage() {
                   <AnalysisResults
                     key={analysisViewRevision}
                     status={analysisStatus}
+                    analysisError={analysisError}
                     isLoggedIn={isLoggedIn}
                     onSaveAnalysis={handleSaveAnalysis}
                     isSaving={isSavingAnalysis}
@@ -1689,9 +2169,12 @@ export default function PopupPage() {
                     topicAnalysis={topicAnalysis}
                     scrapedReviews={scrapedReviews}
                     onSaveRedirect={handleOpenLogin}
+                    onOpenLogin={handleOpenLogin}
                     onClearAnalysis={handleClearAnalysis}
                     platform={detectedPlatform}
                   />
+                </>
+                  )}
                 </>
               )}
             </>
@@ -1703,6 +2186,8 @@ export default function PopupPage() {
               onLoginClick={handleOpenLogin}
               onSelectSaved={handleSelectSavedItem}
               onRefreshSaved={handleRescanPage}
+              onOpenSavedPage={handleOpenSavedPage}
+              onAnalyzeNewReviews={handleAnalyzeNewReviews}
               onSavedCountChange={setSavedAnalysisCount}
             />
           )}
@@ -1714,20 +2199,29 @@ export default function PopupPage() {
               onLoginClick={handleOpenLogin}
               onRegisterClick={handleOpenRegister}
               onLogout={handleLogout}
-              onProfileUpdated={setCurrentUser}
+              onSavedProfileUpdated={setAuthenticatedUser}
               theme={theme}
               onThemeToggle={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+              onDirtyChange={handleProfileDirtyChange}
+              onRequestLeave={requestProfileLeave}
+              registerDiscardDraft={(fn) => { discardProfileDraftRef.current = fn; }}
             />
           )}
         </div>
 
         {/* Bottom Navigation */}
-        <BottomNavBar activeTab={activeTab} onTabChange={setActiveTab} savedCount={savedAnalysisCount} />
+        <BottomNavBar activeTab={activeTab} onTabChange={handleTabChange} savedCount={savedAnalysisCount} isLoggedIn={isLoggedIn} />
       </div>
       {showLogoutConfirmation && (
         <LogoutConfirmationModalExtension
           onCancel={() => setShowLogoutConfirmation(false)}
           onConfirm={confirmLogout}
+        />
+      )}
+      {showUnsavedChangesConfirmation && (
+        <UnsavedChangesConfirmationModal
+          onStay={handleStayOnProfile}
+          onLeave={handleLeaveWithoutSaving}
         />
       )}
     </div>

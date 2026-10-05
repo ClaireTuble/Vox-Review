@@ -1,4 +1,50 @@
-importScripts("healthTestConfig.js");
+import { HEALTH_TEST_URLS } from "./healthTestConfig.js";
+import { createAnalysisJobCoordinator } from "../src/services/activeAnalysisState.js";
+import { createActivityReporter } from "../src/services/activityReporter.js";
+import { requestSvmBatch } from "../src/Users/utils/svmRequest.js";
+
+const TOPIC_API_URL = "http://localhost:5000/api/nlp/topics/predict";
+const TOPIC_REQUEST_TIMEOUT_BASE_MS = 75_000;
+const TOPIC_REQUEST_TIMEOUT_PER_REVIEW_MS = 12_000;
+const VALID_TOPIC_LABELS = new Set([
+  "Quality", "Performance / Functionality", "Features / Content", "Service / Support",
+  "Delivery / Transaction", "Price / Value", "Usability / Experience",
+  "Accuracy / Expectations", "Availability / Accessibility", "Environment / Location", "Other / General",
+]);
+const analysisJobs = createAnalysisJobCoordinator({
+  requestSvm: (reviews, platform) => requestSvmBatch(reviews, { platform }),
+  requestTopics: async (reviews, platform) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      TOPIC_REQUEST_TIMEOUT_BASE_MS + reviews.length * TOPIC_REQUEST_TIMEOUT_PER_REVIEW_MS,
+    );
+    try {
+      const normalizedPlatform = String(platform || "").trim().toLowerCase();
+      const platformKey = ({ "google reviews": "google", "google play": "googleplay" })[normalizedPlatform] || normalizedPlatform;
+      const response = await fetch(TOPIC_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviews, platform: platformKey }),
+        signal: controller.signal,
+      });
+      const payload = await response.json();
+      const validResults = Array.isArray(payload?.results) && payload.results.length === reviews.length &&
+        payload.results.every((result) => Array.isArray(result?.topics) && result.topics.every((topic) => (
+          VALID_TOPIC_LABELS.has(topic?.label) && typeof topic.score === "number"
+        )));
+      if (!response.ok || !payload?.success || !validResults) {
+        throw new Error(payload?.message || payload?.error || "Review topic response was invalid.");
+      }
+      return payload;
+    } finally {
+      clearTimeout(timeout);
+    }
+  },
+  topicsEnabled: import.meta.env?.VITE_ENABLE_TOPIC_ANALYSIS !== "false",
+  onCompleted: (analysis) => activityReporter.reportAnalysisCompletion(analysis),
+});
+void analysisJobs.resume();
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const BACKEND_URLS = ["http://localhost:5000", "http://127.0.0.1:5000"];
@@ -111,18 +157,47 @@ async function runHealthCheck(platform, requestId) {
 
 const VALID_PLATFORMS = new Set(["shopee", "lazada", "google", "googleplay", "steam"]);
 
+// ── Platform Active Check ─────────────────────────────────────────────────────
+// Queries the backend health status API to determine whether a platform is
+// enabled (is_active). Returns false if the platform is disabled by the Super
+// Admin, allowing callers to gate scraping/analysis accordingly.
+async function checkPlatformActive(platformKey) {
+  const key = String(platformKey || "").trim().toLowerCase();
+  if (!VALID_PLATFORMS.has(key)) throw new Error("This platform is currently unavailable.");
+  for (const baseUrl of BACKEND_URLS) {
+    try {
+      const res = await fetch(`${baseUrl}/api/health/status`);
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.success && Array.isArray(data.platforms)) {
+        const entry = data.platforms.find((p) => p.platform === key);
+        if (!entry || typeof entry.is_active !== "boolean") continue;
+        return entry.is_active;
+      }
+    } catch { /* try next URL */ }
+  }
+  throw new Error("Platform availability could not be verified. Please try again.");
+}
+
 // ── User Activity report helper (fire-and-forget) ────────────────────────────
 // Reports regular user platform usage ("Used") using stored Auth session.
-async function reportUserActivityToBackend(platform, productTitle = "", productUrl = "") {
+async function reportUserActivityToBackend(platform, productTitle = "", productUrl = "", activityType = "Used", analysisRunId = null) {
   if (!platform || platform === "unknown") return;
   const platformKey = String(platform).trim().toLowerCase();
-  if (!VALID_PLATFORMS.has(platformKey)) return;
+  if (!VALID_PLATFORMS.has(platformKey)) return false;
 
-  try {
+  return new Promise((resolve) => {
     chrome.storage.local.get(["voxreview_auth_session"], async (res) => {
+      if (chrome.runtime.lastError) {
+        resolve(false);
+        return;
+      }
       const session = res.voxreview_auth_session;
       const token = session?.token;
-      if (!token) return;
+      if (!token) {
+        resolve(false);
+        return;
+      }
 
       for (const baseUrl of BACKEND_URLS) {
         try {
@@ -134,21 +209,37 @@ async function reportUserActivityToBackend(platform, productTitle = "", productU
             },
             body: JSON.stringify({
               platform: platformKey,
-              activity_type: "Used",
+              activity_type: activityType,
               product_title: productTitle || "",
               product_url: productUrl || "",
+              ...(analysisRunId ? { analysis_run_id: analysisRunId } : {}),
             }),
           });
-          if (resp.ok) return;
+          if (resp.ok) {
+            resolve(true);
+            return;
+          }
         } catch (err) {
           // Try next URL fallback
         }
       }
+      resolve(false);
     });
-  } catch (err) {
+  }).catch((err) => {
     console.warn("VoxReview: User activity report notice:", err.message);
-  }
+    return false;
+  });
 }
+
+const activityReporter = createActivityReporter({
+  postActivity: (payload) => reportUserActivityToBackend(
+    payload.platform,
+    payload.product_title,
+    payload.product_url,
+    payload.activity_type,
+    payload.analysis_run_id,
+  ),
+});
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("VoxReview installed");
@@ -178,13 +269,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "startAnalysis") {
+    const analysisPlatform = String(message.analysis?.platform || "").trim().toLowerCase();
+    checkPlatformActive(analysisPlatform).then((active) => {
+      if (!active) {
+        sendResponse({
+          ok: false,
+          error: "This platform is currently unavailable.",
+        });
+        return;
+      }
+      analysisJobs.start(message.analysis).then(sendResponse).catch((error) => sendResponse({
+        ok: false,
+        error: error?.message || "Analysis could not be started.",
+      }));
+    }).catch((error) => sendResponse({
+      ok: false,
+      error: error?.message || "Analysis could not be started.",
+    }));
+    return true;
+  }
+
   // ── pageDetected / productDetected (Decoupled Activity Reporting) ─────────
   // Fired ONLY when the content script on an active tab confirms a supported platform page
   if (message?.type === "pageDetected" || message?.type === "productDetected") {
     const { platform, isProductPage = true, productTitle = "", productUrl = "" } = message;
     const pageUrl = productUrl || sender.tab?.url || "";
     if (isProductPage && platform && VALID_PLATFORMS.has(String(platform).toLowerCase())) {
-      reportUserActivityToBackend(platform, productTitle, pageUrl);
+      void activityReporter.reportPageDetection({ platform, productTitle, productUrl: pageUrl });
     }
     sendResponse({ ok: true });
     return;
@@ -214,89 +326,101 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
-    const pageUrl = url || sender.tab?.url || "";
-    const isProductPage = message.isProductPage ?? true;
-
-    console.log("Received scrape:", {
-      platform,
-      productTitle,
-      reviewsCount: reviews.length,
-      url: pageUrl,
-    });
-
-    // Clear any unsupported-site flag for this tab since we now have valid data.
-    chrome.storage.local.set({ voxreviewSiteStatus: { unsupported: false } });
-
-    // ── Immediate Health Report Dispatch ───────────────────────────────────────
-    if (isProductPage) {
-      if (reviews.length > 0) {
-        // SUCCESS: reviews were actually extracted
-        reportHealthToBackend({
-          platform,
-          status: "Working",
-          lastSuccessfulStage: "Data Transfer",
-          errorStage: null,
-          errorMessage: null,
-        });
-      } else {
-        // WARNING: product page confirmed but no reviews found in DOM
-        reportHealthToBackend({
-          platform,
-          status: "Warning",
-          lastSuccessfulStage: "Review Section Detection",
-          errorStage: "Review Extraction",
-          errorMessage: "Product page detected but no reviews found in DOM.",
-        });
-      }
-    }
-
-    chrome.storage.local.get(["voxreviewLastScrape"], (result) => {
-      const currentScrape = result.voxreviewLastScrape || {};
-
-      // Session change: different product, URL, rating filter, or first run
-      const isDifferentProduct = currentScrape.productTitle && currentScrape.productTitle !== productTitle;
-      const isDifferentUrl = currentScrape.url && pageUrl && currentScrape.url !== pageUrl;
-      const isDifferentFilter = currentScrape.ratingFilter !== undefined && currentScrape.ratingFilter !== ratingFilter;
-      const productChanged = forceRefresh || isDifferentProduct || isDifferentUrl || isDifferentFilter || !currentScrape.sessionId;
-
-      let finalReviews = reviews; // always replace on filter/product change
-      const sessionId = Date.now();
-
-      if (productChanged) {
-        finalReviews = reviews; // clear old session reviews completely
-      } else {
-        // Same product & same filter: deduplicate & merge
-        const existingReviews = currentScrape.reviews || [];
-        const reviewMap = new Map();
-        existingReviews.forEach((r) => reviewMap.set(r.id || r.text, r));
-        reviews.forEach((r) => reviewMap.set(r.id || r.text, r));
-        finalReviews = Array.from(reviewMap.values());
+    // Enforce disabled-platform check before processing scraped reviews
+    checkPlatformActive(String(platform).toLowerCase()).then((platformActive) => {
+      if (!platformActive) {
+        sendResponse({ ok: false, error: "This platform is currently unavailable." });
+        return;
       }
 
-      const scrapeData = {
-        sessionId: sessionId,
-        platform: platform,
-        isProductPage: message.isProductPage ?? true,
-        productTitle: productTitle,
-        productImage: productImage,
-        rating: rating,
-        category: category,
-        ratingFilter: ratingFilter,
-        reviews: finalReviews,
-        reviewCount: finalReviews.length,
+      const pageUrl = url || sender.tab?.url || "";
+      const isProductPage = message.isProductPage ?? true;
+
+      console.log("Received scrape:", {
+        platform,
+        productTitle,
+        reviewsCount: reviews.length,
         url: pageUrl,
-        rescanRequestId: message.rescanRequestId || null,
-        timestamp: Date.now(),
-        tabId: sender.tab?.id ?? null,
-      };
-
-      chrome.storage.local.set({ voxreviewLastScrape: scrapeData }, () => {
-        console.log("Stored scrape data to chrome.storage.local:", scrapeData);
-        console.log("[BACKGROUND] storage updated:", { platform, reviewCount: finalReviews.length, tabId: scrapeData.tabId });
       });
+
+      // Clear any unsupported-site flag for this tab since we now have valid data.
+      chrome.storage.local.set({ voxreviewSiteStatus: { unsupported: false } });
+
+      // ── Immediate Health Report Dispatch ───────────────────────────────────────
+      if (isProductPage) {
+        if (reviews.length > 0) {
+          // SUCCESS: reviews were actually extracted
+          reportHealthToBackend({
+            platform,
+            status: "Working",
+            lastSuccessfulStage: "Data Transfer",
+            errorStage: null,
+            errorMessage: null,
+          });
+        } else {
+          // WARNING: product page confirmed but no reviews found in DOM
+          reportHealthToBackend({
+            platform,
+            status: "Warning",
+            lastSuccessfulStage: "Review Section Detection",
+            errorStage: "Review Extraction",
+            errorMessage: "Product page detected but no reviews found in DOM.",
+          });
+        }
+      }
+
+      chrome.storage.local.get(["voxreviewLastScrape"], (result) => {
+        const currentScrape = result.voxreviewLastScrape || {};
+
+        // Session change: different product, URL, rating filter, or first run
+        const isDifferentProduct = currentScrape.productTitle && currentScrape.productTitle !== productTitle;
+        const isDifferentUrl = currentScrape.url && pageUrl && currentScrape.url !== pageUrl;
+        const isDifferentFilter = currentScrape.ratingFilter !== undefined && currentScrape.ratingFilter !== ratingFilter;
+        const productChanged = forceRefresh || isDifferentProduct || isDifferentUrl || isDifferentFilter || !currentScrape.sessionId;
+
+        let finalReviews = reviews; // always replace on filter/product change
+        const sessionId = Date.now();
+
+        if (productChanged) {
+          finalReviews = reviews; // clear old session reviews completely
+        } else {
+          // Same product & same filter: deduplicate & merge
+          const existingReviews = currentScrape.reviews || [];
+          const reviewMap = new Map();
+          existingReviews.forEach((r) => reviewMap.set(r.id || r.text, r));
+          reviews.forEach((r) => reviewMap.set(r.id || r.text, r));
+          finalReviews = Array.from(reviewMap.values());
+        }
+
+        const scrapeData = {
+          sessionId: sessionId,
+          platform: platform,
+          isProductPage: message.isProductPage ?? true,
+          productTitle: productTitle,
+          productImage: productImage,
+          rating: rating,
+          category: category,
+          ratingFilter: ratingFilter,
+          reviews: finalReviews,
+          reviewCount: finalReviews.length,
+          url: pageUrl,
+          rescanRequestId: message.rescanRequestId || null,
+          timestamp: Date.now(),
+          tabId: sender.tab?.id ?? null,
+        };
+
+        chrome.storage.local.set({ voxreviewLastScrape: scrapeData }, () => {
+          console.log("Stored scrape data to chrome.storage.local:", scrapeData);
+          console.log("[BACKGROUND] storage updated:", { platform, reviewCount: finalReviews.length, tabId: scrapeData.tabId });
+        });
+      });
+
+      sendResponse({ ok: true });
+    }).catch(() => {
+      sendResponse({ ok: true });
     });
 
-    sendResponse({ ok: true });
+    return true;
   }
 
   // ── scrapeError ─────────────────────────────────────────────────────────────
