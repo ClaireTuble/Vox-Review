@@ -46,7 +46,11 @@ COPY Frontend/nlp/topic_worker.py \
     Frontend/nlp/predict_topics_batch.py \
     Frontend/nlp/topic_applicability.py \
     Frontend/nlp/topic_taxonomy.py \
-    ./Frontend/nlp/
+    /app/Frontend/nlp/
+RUN test -f /app/Frontend/nlp/topic_worker.py \
+    && test -f /app/Frontend/nlp/predict_topics_batch.py \
+    && test -f /app/Frontend/nlp/topic_applicability.py \
+    && test -f /app/Frontend/nlp/topic_taxonomy.py
 COPY Frontend/nlp/preprocessing/preprocess.py ./Frontend/nlp/preprocessing/
 COPY Frontend/nlp/models/svm_model.joblib ./Frontend/nlp/models/
 
