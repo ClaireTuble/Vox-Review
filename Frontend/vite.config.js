@@ -3,7 +3,7 @@ import process from "node:process";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
-function extensionManifestPlugin(apiUrl) {
+function extensionManifestPlugin(apiUrl, appUrl) {
   return {
     name: "extension-manifest",
     generateBundle() {
@@ -17,28 +17,29 @@ function extensionManifestPlugin(apiUrl) {
         return hostname === "localhost" || hostname === "127.0.0.1";
       });
       const apiHostPermission = apiUrl ? `${new URL(apiUrl).origin}/*` : null;
+      const appOrigin = new URL(appUrl || "http://localhost:5173").origin;
+      const appHostPermission = `${appOrigin}/*`;
       const hostPermissions = [
         ...new Set([
           ...localHostPermissions,
           ...(apiHostPermission ? [apiHostPermission] : []),
+          appHostPermission,
         ]),
       ];
-      const hostPermissionsMatch = manifestSource.match(
-        /("host_permissions"\s*:\s*)\[[\s\S]*?\]/,
+      manifest.host_permissions = hostPermissions;
+      manifest.content_scripts = manifest.content_scripts.filter(
+        (contentScript) => !contentScript.js.includes("assets/authSync.js"),
       );
-      if (!hostPermissionsMatch) {
-        throw new Error("Could not find host_permissions in extension/manifest.json.");
-      }
-      const formattedPermissions = JSON.stringify(hostPermissions, null, 2)
-        .replace(/\n/g, "\n  ");
+      manifest.content_scripts.push({
+        matches: [`${appOrigin}/*`],
+        js: ["assets/authSync.js"],
+        run_at: "document_idle",
+      });
 
       this.emitFile({
         type: "asset",
         fileName: "manifest.json",
-        source: manifestSource.replace(
-          hostPermissionsMatch[0],
-          `${hostPermissionsMatch[1]}${formattedPermissions}`,
-        ),
+        source: `${JSON.stringify(manifest, null, 2)}\n`,
       });
     },
   };
@@ -47,11 +48,17 @@ function extensionManifestPlugin(apiUrl) {
 export default defineConfig(({ mode }) => {
   const isExtensionBuild = mode === "extension";
   const env = loadEnv(mode, process.cwd(), "VITE_");
+  const appOrigin = new URL(env.VITE_APP_URL || "http://localhost:5173").origin;
 
   return {
+    define: isExtensionBuild
+      ? { __VOXREVIEW_APP_ORIGIN__: JSON.stringify(appOrigin) }
+      : {},
     plugins: [
       react(),
-      ...(isExtensionBuild ? [extensionManifestPlugin(env.VITE_API_URL)] : []),
+      ...(isExtensionBuild
+        ? [extensionManifestPlugin(env.VITE_API_URL, env.VITE_APP_URL)]
+        : []),
     ],
     base: isExtensionBuild ? "./" : "/",
     ...(isExtensionBuild
@@ -63,6 +70,7 @@ export default defineConfig(({ mode }) => {
               input: {
                 popup: "./src/extension.jsx",
                 content: "./extension/content.js",
+                authSync: "./extension/authSync.js",
                 background: "./extension/background.js",
               },
               output: {

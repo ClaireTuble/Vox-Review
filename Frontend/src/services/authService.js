@@ -1,4 +1,5 @@
 import { adminSupabase, supabase } from '../lib/supabase.js';
+import { APP_BASE_URL } from './appConfig.js';
 import { API_BASE_URL } from './apiConfig.js';
 import {
   buildProfileUser,
@@ -166,6 +167,21 @@ async function readRegularUserExtensionSession({ persistSession = true } = {}) {
 
 const isExtensionRuntime = typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:';
 
+if (!isExtensionRuntime && typeof window !== 'undefined') {
+  window.addEventListener('voxreview_extension_logout', async (event) => {
+    if (event.target !== window || window.location.origin !== new URL(APP_BASE_URL).origin) return;
+
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.warn('VoxReview: Website sign-out sync failed:', error.message);
+      }
+    } catch (error) {
+      console.warn('VoxReview: Website sign-out sync failed:', error?.message || error);
+    }
+  });
+}
+
 export function normalizeAuthErrorMessage(error, flow = 'login') {
   const rawMessage = typeof error === 'string' ? error : error?.message || '';
   const message = String(rawMessage).trim();
@@ -272,7 +288,7 @@ export function openWebAppAuth(route = '/login') {
   );
 
   const cleanRoute = route.startsWith('/') ? route : `/${route}`;
-  const baseUrl = isExtension ? 'http://localhost:5173' : window.location.origin;
+  const baseUrl = isExtension ? APP_BASE_URL : window.location.origin;
   const targetUrl = `${baseUrl}${cleanRoute}`;
 
   if (globalThis.chrome?.tabs?.create) {
@@ -516,6 +532,14 @@ export const authService = {
         window.dispatchEvent(new CustomEvent('voxreview_superadmin_auth_sync', { detail: null }));
       }
       return;
+    }
+
+    if (isExtensionRuntime && globalThis.chrome?.runtime?.sendMessage) {
+      try {
+        await globalThis.chrome.runtime.sendMessage({ type: 'extensionLogoutSync' });
+      } catch (error) {
+        console.warn('VoxReview: Could not send website sign-out sync:', error?.message || error);
+      }
     }
 
     try {

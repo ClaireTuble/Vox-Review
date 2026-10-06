@@ -2,6 +2,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useVoxLogo } from '../../utils/useVoxLogo.js';
 import authService from '../../services/authService.js';
+import HeaderLogoutConfirmationModal from './HeaderLogoutConfirmationModal.jsx';
 import '../css/Navigation.css';
 
 export default function Navigation({ activePage }) {
@@ -9,6 +10,7 @@ export default function Navigation({ activePage }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [isAuthenticated, setIsAuthenticated] = useState(() => authService.isAuthenticated());
+  const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
 
   const getActiveFromCurrentState = () => {
     if (location.pathname === '/about') return 'about';
@@ -100,6 +102,8 @@ export default function Navigation({ activePage }) {
     }
   };
 
+  const currentUser = isAuthenticated ? authService.getCurrentUser() : null;
+
   return (
     <header className="landing-header">
       <div className="landing-header-container">
@@ -144,7 +148,31 @@ export default function Navigation({ activePage }) {
               <Link to="/after-login" className="nav-link login-btn">
                 Getting Started
               </Link>
-              <button type="button" onClick={handleSignOut} className="nav-link login-btn">
+              <button
+                type="button"
+                onClick={() => setShowLogoutConfirmation(true)}
+                className="nav-link login-btn nav-signout-btn"
+                title={
+                  currentUser?.fullName
+                  || currentUser?.username
+                  || currentUser?.name
+                  || currentUser?.email
+                  || 'Signed-in account'
+                }
+              >
+                {currentUser?.avatarUrl ? (
+                  <img
+                    className="nav-account-avatar"
+                    src={currentUser.avatarUrl}
+                    alt=""
+                  />
+                ) : (
+                  <span className="nav-account-avatar nav-account-avatar-fallback" aria-hidden="true">
+                    {(currentUser?.firstName || currentUser?.username || currentUser?.email || 'U')
+                      .charAt(0)
+                      .toUpperCase()}
+                  </span>
+                )}
                 Sign Out
               </button>
             </>
@@ -155,6 +183,12 @@ export default function Navigation({ activePage }) {
           )}
         </div>
       </div>
+      {showLogoutConfirmation && (
+        <HeaderLogoutConfirmationModal
+          onCancel={() => setShowLogoutConfirmation(false)}
+          onConfirm={handleSignOut}
+        />
+      )}
     </header>
   );
 }

@@ -482,22 +482,56 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Synchronizes the web application's authentication session to chrome.storage.local
   // so the extension popup automatically recognizes authenticated vs guest users.
   if (message?.type === "userAuthSync") {
-    const session = message.session || null;
-    console.log("VoxReview background: Auth session synced:", session);
-
-    if (!session || !session.user || !session.token) {
-      chrome.storage.local.remove(["voxreview_auth_session"]).catch((err) =>
-        console.error("Failed to clear auth session:", err)
-      );
-      sendResponse({ ok: true });
+    let senderOrigin = null;
+    try {
+      senderOrigin = sender.tab?.url ? new URL(sender.tab.url).origin : null;
+    } catch {
+      senderOrigin = null;
+    }
+    if (senderOrigin !== __VOXREVIEW_APP_ORIGIN__) {
+      sendResponse({ ok: false });
       return;
+    }
+
+    const session = message.session || null;
+
+    if (!session || session.user?.role !== "user" || !session.user?.id || !session.token) {
+      chrome.storage.local.remove(["voxreview_auth_session"])
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => {
+          console.error("Failed to clear auth session:", error);
+          sendResponse({ ok: false });
+        });
+      return true;
     }
 
     chrome.storage.local.set({
       voxreview_auth_session: session,
-    }).catch((err) => console.error("Failed to store auth session:", err));
+    }).then(() => sendResponse({ ok: true })).catch((error) => {
+      console.error("Failed to store auth session:", error);
+      sendResponse({ ok: false });
+    });
+    return true;
+  }
 
-    sendResponse({ ok: true });
+  if (message?.type === "extensionLogoutSync") {
+    if (sender.id !== chrome.runtime.id || sender.tab) {
+      sendResponse({ ok: false });
+      return;
+    }
+
+    chrome.tabs.query({ url: `${__VOXREVIEW_APP_ORIGIN__}/*` })
+      .then((tabs) => Promise.all(
+        tabs
+          .filter((tab) => Number.isInteger(tab.id))
+          .map((tab) => chrome.tabs.sendMessage(tab.id, { type: "extensionLogoutSync" })),
+      ))
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => {
+        console.warn("Could not synchronize extension logout to the website:", error);
+        sendResponse({ ok: false });
+      });
+    return true;
   }
 
   // ── rescanPage ──────────────────────────────────────────────────────────────

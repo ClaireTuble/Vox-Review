@@ -1,16 +1,12 @@
 {
   "manifest_version": 3,
-
   "name": "VoxReview",
   "version": "1.0.0",
-
   "description": "AI-powered review analysis extension",
-
   "action": {
     "default_title": "VoxReview",
     "default_popup": "popup.html"
   },
-
   "permissions": [
     "activeTab",
     "tabs",
@@ -18,23 +14,22 @@
     "scripting",
     "sidePanel"
   ],
-
   "side_panel": {
     "default_path": "popup.html"
   },
-
   "host_permissions": [
     "http://localhost/*",
     "http://127.0.0.1/*",
     "http://localhost:5000/*",
-    "http://127.0.0.1:5000/*"
+    "http://127.0.0.1:5000/*",
+    "http://localhost:5173/*",
+    "https://vox-review-production.up.railway.app/*",
+    "https://vox-review-git-feature-supabase-auth-admin-platforms-vox-review.vercel.app/*"
   ],
-
   "background": {
     "service_worker": "assets/background.js",
     "type": "module"
   },
-
   "content_scripts": [
     {
       "matches": [
@@ -122,6 +117,15 @@
       "js": [
         "scraper/detector.js",
         "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://vox-review-git-feature-supabase-auth-admin-platforms-vox-review.vercel.app/*"
+      ],
+      "js": [
+        "assets/authSync.js"
       ],
       "run_at": "document_idle"
     }

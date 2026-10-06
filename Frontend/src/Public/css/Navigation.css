@@ -72,6 +72,32 @@
   gap: 14px;
 }
 
+.nav-link.login-btn.nav-signout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #E2E8F0;
+  padding: 6px 14px;
+  line-height: 1;
+}
+
+.nav-account-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+
+.nav-account-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(241, 245, 249, 0.8);
+  color: #334155;
+  font-size: 10px;
+}
+
 .nav-link.login-btn {
   background: transparent;
   border: none;

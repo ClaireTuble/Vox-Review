@@ -92,10 +92,30 @@
   color: #334155;
   font-size: 14px;
   font-weight: 600;
-  padding: 8px 18px;
+  padding: 6px 14px;
   border-radius: 8px;
   transition: all 0.2s ease;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auth-nav-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+
+.auth-nav-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(241, 245, 249, 0.8);
+  color: #334155;
+  font-size: 10px;
 }
 
 .auth-nav-signout-btn:hover {

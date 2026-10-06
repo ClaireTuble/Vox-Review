@@ -478,41 +478,45 @@ export default function ProfileView({
       {activeView === 'main' && (
         <div className="profile-menu-container">
           <div className="settings-group">
-            {/* User Profile item */}
-            <div
-              className="menu-item-row"
-              onClick={() => isLoggedIn ? setActiveView('user-profile') : onLoginClick('/login')}
-              role="button"
-            >
-              <div className="menu-item-left">
-                <div className="menu-item-icon">
-                  <User size={15} color="var(--accent-color)" />
+            {isLoggedIn && (
+              <>
+                {/* User Profile item */}
+                <div
+                  className="menu-item-row"
+                  onClick={() => isLoggedIn ? setActiveView('user-profile') : onLoginClick('/login')}
+                  role="button"
+                >
+                  <div className="menu-item-left">
+                    <div className="menu-item-icon">
+                      <User size={15} color="var(--accent-color)" />
+                    </div>
+                    <div className="menu-item-text">
+                      <span className="menu-item-title">User Profile</span>
+                      <span className="menu-item-sub">View &amp; manage account information</span>
+                    </div>
+                  </div>
+                  <ChevronRight size={16} className="menu-item-arrow" />
                 </div>
-                <div className="menu-item-text">
-                  <span className="menu-item-title">User Profile</span>
-                  <span className="menu-item-sub">View &amp; manage account information</span>
-                </div>
-              </div>
-              <ChevronRight size={16} className="menu-item-arrow" />
-            </div>
 
-            {/* Security item */}
-            <div
-              className="menu-item-row"
-              onClick={() => isLoggedIn ? setActiveView('security') : onLoginClick('/login')}
-              role="button"
-            >
-              <div className="menu-item-left">
-                <div className="menu-item-icon">
-                  <ShieldCheck size={15} color="var(--accent-color)" />
+                {/* Security item */}
+                <div
+                  className="menu-item-row"
+                  onClick={() => isLoggedIn ? setActiveView('security') : onLoginClick('/login')}
+                  role="button"
+                >
+                  <div className="menu-item-left">
+                    <div className="menu-item-icon">
+                      <ShieldCheck size={15} color="var(--accent-color)" />
+                    </div>
+                    <div className="menu-item-text">
+                      <span className="menu-item-title">Security</span>
+                      <span className="menu-item-sub">Password &amp; authentication</span>
+                    </div>
+                  </div>
+                  <ChevronRight size={16} className="menu-item-arrow" />
                 </div>
-                <div className="menu-item-text">
-                  <span className="menu-item-title">Security</span>
-                  <span className="menu-item-sub">Password &amp; authentication</span>
-                </div>
-              </div>
-              <ChevronRight size={16} className="menu-item-arrow" />
-            </div>
+              </>
+            )}
 
             {/* Dark Mode toggle item */}
             <div className="menu-item-row no-hover">

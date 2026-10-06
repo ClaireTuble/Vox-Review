@@ -1,6 +1,8 @@
 import { Link, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { useVoxLogo } from '../../utils/useVoxLogo.js';
 import authService from '../../services/authService.js';
+import HeaderLogoutConfirmationModal from './HeaderLogoutConfirmationModal.jsx';
 import '../css/AuthNavigation.css';
 
 /**
@@ -12,6 +14,8 @@ import '../css/AuthNavigation.css';
 export default function AuthNavigation({ activePage = 'after-login' }) {
   const logo = useVoxLogo();
   const navigate = useNavigate();
+  const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
+  const currentUser = authService.getCurrentUser();
 
   const handleSignOut = async () => {
     await authService.logout('user');
@@ -45,13 +49,32 @@ export default function AuthNavigation({ activePage = 'after-login' }) {
           <button
             type="button"
             id="auth-nav-signout-btn"
-            onClick={handleSignOut}
+            onClick={() => setShowLogoutConfirmation(true)}
             className="auth-nav-signout-btn"
           >
+            {currentUser?.avatarUrl ? (
+              <img
+                className="auth-nav-avatar"
+                src={currentUser.avatarUrl}
+                alt=""
+              />
+            ) : (
+              <span className="auth-nav-avatar auth-nav-avatar-fallback" aria-hidden="true">
+                {(currentUser?.firstName || currentUser?.username || currentUser?.email || 'U')
+                  .charAt(0)
+                  .toUpperCase()}
+              </span>
+            )}
             Sign Out
           </button>
         </div>
       </div>
+      {showLogoutConfirmation && (
+        <HeaderLogoutConfirmationModal
+          onCancel={() => setShowLogoutConfirmation(false)}
+          onConfirm={handleSignOut}
+        />
+      )}
     </header>
   );
 }
