@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
+
 const SAFE_TOPIC_WORKER_FIELDS = new Set([
   "event",
   "requestId",
   "workerPid",
+  "operation",
   "model",
   "cached",
   "loadDurationMs",
@@ -10,6 +13,11 @@ const SAFE_TOPIC_WORKER_FIELDS = new Set([
   "embeddingCount",
   "reviewCount",
   "torchNumThreads",
+  "previousTorchNumThreads",
+  "processCpuCount",
+  "cgroupCpuQuotaCount",
+  "candidateCount",
+  "batchSize",
   "inferenceDurationMs",
   "refinementDurationMs",
   "resultCount",
@@ -21,6 +29,10 @@ const SAFE_TOPIC_WORKER_FIELDS = new Set([
   "errorCategory",
   "stage",
   "platform",
+  "cpuAffinityCount",
+  "cpuQuotaMicros",
+  "cpuQuotaPeriodMicros",
+  "torchThreadLimit",
 ]);
 const SAFE_TOPIC_WORKER_EVENTS = new Set([
   "topic_request_received",
@@ -29,12 +41,16 @@ const SAFE_TOPIC_WORKER_EVENTS = new Set([
   "model_load_failed",
   "model_load_complete",
   "model_cache_reused",
+  "torch_thread_limit_applied",
   "topic_embeddings_start",
   "topic_embeddings_complete",
   "topic_embeddings_cache_reused",
   "review_inference_start",
   "review_inference_complete",
   "topic_refinement_complete",
+  "keyword_score_inference_start",
+  "keyword_score_inference_complete",
+  "torch_thread_configuration",
   "result_serialization_complete",
   "result_output_complete",
 ]);
@@ -101,6 +117,7 @@ function isSafeTopicWorkerValue(key, value) {
   if (key === "platform") return /^(google|googleplay|shopee|steam|lazada|agoda)$/.test(value);
   if (key === "errorType") return SAFE_EXCEPTION_TYPES.has(value);
   if (key === "requestId") return /^\d{1,20}$/.test(value);
+  if (key === "operation") return value === "classify" || value === "keyword-scores";
   return false;
 }
 
@@ -135,6 +152,8 @@ export function sanitizeTopicWorkerStderr(value) {
 export function getSafeTopicRequestMetadata(req) {
   const requestContext = req.get?.("x-voxreview-request-context") || "";
   const clientRequestId = req.get?.("x-voxreview-client-request-id") || "";
+  const pageKey = req.get?.("x-voxreview-page-key") || "";
+  const forceRefresh = req.get?.("x-voxreview-force-refresh") === "true";
   return {
     requestContext: SAFE_REQUEST_CONTEXTS.has(requestContext)
       ? requestContext
@@ -142,5 +161,10 @@ export function getSafeTopicRequestMetadata(req) {
     clientRequestId: /^[A-Za-z0-9_-]{1,100}$/.test(clientRequestId)
       ? clientRequestId
       : null,
+    pageIdentity: typeof pageKey === "string" &&
+      /^[a-z0-9_-]+:[^\r\n\t]{1,450}$/i.test(pageKey)
+      ? createHash("sha256").update(pageKey.trim()).digest("hex").slice(0, 24)
+      : null,
+    forceRefresh,
   };
 }

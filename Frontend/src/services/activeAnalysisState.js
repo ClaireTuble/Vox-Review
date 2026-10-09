@@ -57,7 +57,30 @@ export async function setActiveAnalysisState(state) {
   if (!pageKey) return null;
 
   const states = await getActiveAnalysisStates();
-  const updatedState = { ...states[pageKey], ...state, pageKey, updatedAt: Date.now() };
+  const existingState = states[pageKey];
+  const sameReviewSet = getActiveAnalysisReviewSetSignature(existingState) &&
+    getActiveAnalysisReviewSetSignature(existingState) ===
+      getActiveAnalysisReviewSetSignature(state);
+  const existingTopicResult = existingState?.topicResult;
+  const hasExistingSuccessfulTopics = sameReviewSet && hasCompletedTopicResult(existingState);
+  const hasIncomingSuccessfulTopics = hasCompletedTopicResult(state);
+  const updatedState = { ...existingState, ...state, pageKey, updatedAt: Date.now() };
+  if (hasExistingSuccessfulTopics && !hasIncomingSuccessfulTopics) {
+    updatedState.topicResult = existingTopicResult;
+    updatedState.topicError = null;
+    if (existingState.status === 'completed' && state.status === 'completed') {
+      updatedState.runId = existingState.runId;
+      updatedState.completedAt = existingState.completedAt;
+    }
+    console.info('VoxReview: Preserved successful topic result during active-state update.', {
+      pageKey,
+      reviewCount: existingState.reviews.length,
+      reviewSetSignature: getActiveAnalysisReviewSetSignature(existingState),
+      operation: 'classify',
+      outcome: 'preserved',
+      preservedSuccessfulResult: true,
+    });
+  }
   states[pageKey] = updatedState;
   await writeStorage(ACTIVE_ANALYSIS_STORAGE_KEY, states);
   return updatedState;
@@ -69,6 +92,44 @@ export async function deleteActiveAnalysisForPage(pageKey) {
   if (!states[pageKey]) return;
   delete states[pageKey];
   await writeStorage(ACTIVE_ANALYSIS_STORAGE_KEY, states);
+}
+
+function getReviewTexts(reviews) {
+  return reviews.map((review) => (
+    typeof review === 'string'
+      ? review
+      : review?.text || review?.reviewText || review?.comment || review?.review || ''
+  ));
+}
+
+export function getActiveAnalysisReviewSetSignature(state) {
+  return Array.isArray(state?.reviews)
+    ? state.reviewSetSignature || getTopicReviewSetSignature(getReviewTexts(state.reviews))
+    : null;
+}
+
+function hasCompletedTopicResult(state) {
+  return Array.isArray(state?.reviews) &&
+    Array.isArray(state?.topicResult?.results) &&
+    state.topicResult.results.length === state.reviews.length &&
+    state.topicResult.results.every((result) => Array.isArray(result?.topics));
+}
+
+export function getMatchingSavedTopicResult(activeState, savedAnalysis) {
+  if (!activeState?.pageKey || !savedAnalysis) return null;
+  const savedPageKey = getPageKey(savedAnalysis.platform, savedAnalysis.page_url) || savedAnalysis.pageKey;
+  const activeSignature = getActiveAnalysisReviewSetSignature(activeState);
+  const savedSignature = getActiveAnalysisReviewSetSignature(savedAnalysis);
+  if (!activeSignature || savedPageKey !== activeState.pageKey ||
+    activeSignature !== savedSignature) return null;
+  return savedAnalysis.topicAnalysis || null;
+}
+
+export function isMatchingActiveAnalysisIdentity(state, identity) {
+  return Boolean(identity?.reviewSetSignature) &&
+    state?.pageKey === identity?.pageKey &&
+    state?.runId === identity?.runId &&
+    getActiveAnalysisReviewSetSignature(state) === identity?.reviewSetSignature;
 }
 
 export function createAnalysisJobCoordinator({
@@ -196,15 +257,7 @@ export function createAnalysisJobCoordinator({
     start(input) {
       const pageKey = getPageKey(input?.platform, input?.page_url) || input?.pageKey;
       if (!pageKey || !Array.isArray(input?.reviews)) return Promise.resolve({ ok: false, error: 'Invalid analysis context.' });
-      const getStateReviewSignature = (state) => state?.reviewSetSignature || (
-        Array.isArray(state?.reviews)
-          ? getTopicReviewSetSignature(state.reviews.map((review) => (
-              typeof review === 'string'
-                ? review
-                : review?.text || review?.reviewText || review?.comment || review?.review || ''
-            )))
-          : null
-      );
+      const getStateReviewSignature = getActiveAnalysisReviewSetSignature;
       const inputReviewSignature = getTopicReviewSetSignature(input.reviews.map((review) => (
         typeof review === 'string'
           ? review

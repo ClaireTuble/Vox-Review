@@ -6,13 +6,20 @@ export const TOPIC_REQUEST_TIMEOUT_PER_REVIEW_MS = 12_000;
 let nextTopicRequestSequence = 0;
 
 export function getTopicReviewSetSignature(reviews) {
-  const serialized = JSON.stringify(reviews);
+  const texts = Array.isArray(reviews)
+    ? reviews.map((review) => (
+        typeof review === 'string'
+          ? review
+          : review?.text || review?.reviewText || review?.comment || review?.review || ''
+      ))
+    : [];
+  const serialized = JSON.stringify(texts);
   let hash = 0xcbf29ce484222325n;
   for (let index = 0; index < serialized.length; index += 1) {
     hash ^= BigInt(serialized.charCodeAt(index));
     hash = BigInt.asUintN(64, hash * 0x100000001b3n);
   }
-  return `${reviews.length}-${hash.toString(16).padStart(16, '0')}`;
+  return `${texts.length}-${hash.toString(16).padStart(16, '0')}`;
 }
 
 export function createTopicAnalysisRequestCoordinator({
@@ -27,14 +34,16 @@ export function createTopicAnalysisRequestCoordinator({
     request(reviews, platform, {
       pageKey,
       requestContext = 'unspecified',
+      operation = 'classify',
       signal,
       force = false,
     } = {}) {
-      if (!pageKey || !Array.isArray(reviews)) {
+      if (!pageKey || !Array.isArray(reviews) ||
+        !['classify', 'keyword-scores'].includes(operation)) {
         return Promise.reject(new Error('Topic analysis requires a page key and review list.'));
       }
       const reviewSetSignature = getTopicReviewSetSignature(reviews);
-      const identity = `${pageKey}\u001f${reviewSetSignature}`;
+      const identity = `${operation}\u001f${pageKey}\u001f${reviewSetSignature}`;
       if (!force && successful.has(identity)) {
         const result = successful.get(identity);
         successful.delete(identity);
@@ -43,6 +52,7 @@ export function createTopicAnalysisRequestCoordinator({
           pageKey,
           reviewCount: reviews.length,
           reviewSetSignature,
+          operation,
           requestContext,
           outcome: 'cached',
         });
@@ -55,6 +65,7 @@ export function createTopicAnalysisRequestCoordinator({
           pageKey,
           reviewCount: reviews.length,
           reviewSetSignature,
+          operation,
           requestContext,
           outcome: 'deduplicated',
         });
@@ -68,12 +79,15 @@ export function createTopicAnalysisRequestCoordinator({
         pageKey,
         reviewCount: reviews.length,
         reviewSetSignature,
+        operation,
         requestContext,
       });
       const requestPromise = Promise.resolve()
         .then(() => request(reviews, platform, {
+          operation,
           signal,
           requestContext,
+          pageKey,
           force,
           clientRequestId: requestId,
         }))
@@ -87,6 +101,7 @@ export function createTopicAnalysisRequestCoordinator({
             pageKey,
             reviewCount: reviews.length,
             reviewSetSignature,
+            operation,
             requestContext,
             durationMs: Date.now() - startedAt,
             outcome: 'success',
@@ -98,6 +113,7 @@ export function createTopicAnalysisRequestCoordinator({
             pageKey,
             reviewCount: reviews.length,
             reviewSetSignature,
+            operation,
             requestContext,
             durationMs: Date.now() - startedAt,
             httpStatus: error?.httpStatus ?? null,
@@ -155,6 +171,22 @@ function hasValidTopicResponse(payload, expectedReviewCount) {
     ));
 }
 
+function hasValidTopicKeywordScoreResponse(payload, expectedReviewCount) {
+  return Array.isArray(payload?.results) &&
+    payload.results.length === expectedReviewCount &&
+    payload.results.every((result, index) => (
+      result?.reviewIndex === index &&
+      Array.isArray(result?.topicScores) &&
+      result.topicScores.length === VALID_TOPIC_LABELS.size &&
+      new Set(result.topicScores.map((topic) => topic?.label)).size === VALID_TOPIC_LABELS.size &&
+      result.topicScores.every((topic) => (
+        VALID_TOPIC_LABELS.has(topic?.label) &&
+        typeof topic.score === 'number' &&
+        Number.isFinite(topic.score)
+      ))
+    ));
+}
+
 function safeErrorCode(value) {
   const code = String(value || '');
   return /^[A-Za-z0-9_-]{1,100}$/.test(code) ? code : null;
@@ -169,6 +201,9 @@ export async function requestTopicAnalysis(
     apiBaseUrl = API_BASE_URL,
     requestContext = 'unspecified',
     clientRequestId = `topic-client-${Date.now()}-${++nextTopicRequestSequence}`,
+    pageKey = null,
+    force = false,
+    operation = 'classify',
   } = {},
 ) {
   const normalizedPlatform = String(platform || '').trim().toLowerCase();
@@ -192,8 +227,16 @@ export async function requestTopicAnalysis(
         'X-VoxReview-Client-Request-Id': /^[A-Za-z0-9_-]{1,100}$/.test(clientRequestId)
           ? clientRequestId
           : 'topic-client-invalid',
+        ...(typeof pageKey === 'string' && pageKey.length <= 500
+          ? { 'X-VoxReview-Page-Key': pageKey }
+          : {}),
+        ...(force ? { 'X-VoxReview-Force-Refresh': 'true' } : {}),
       },
-      body: JSON.stringify({ reviews, platform: platformKey }),
+      body: JSON.stringify({
+        reviews,
+        platform: platformKey,
+        ...(operation === 'classify' ? {} : { operation }),
+      }),
       signal,
     });
     try {
@@ -202,7 +245,11 @@ export async function requestTopicAnalysis(
       throw new Error('Topic analysis returned a non-JSON response.', { cause: error });
     }
 
-    if (!response.ok || !payload?.success || !hasValidTopicResponse(payload, reviews.length)) {
+    const validResults = operation === 'keyword-scores'
+      ? hasValidTopicKeywordScoreResponse(payload, reviews.length)
+      : hasValidTopicResponse(payload, reviews.length);
+    if (!['classify', 'keyword-scores'].includes(operation) ||
+      !response.ok || !payload?.success || !validResults) {
       const error = new Error(
         payload?.message || payload?.error || 'Topic analysis returned an invalid response.',
       );
@@ -217,6 +264,7 @@ export async function requestTopicAnalysis(
       durationMs: Date.now() - requestStartedAt,
       reviewCount: reviews.length,
       resultCount: payload.results.length,
+      operation,
       outcome: 'success',
     });
     return payload;
@@ -247,6 +295,7 @@ export async function requestTopicAnalysis(
       code: safeErrorCode(error?.code || payload?.error),
       details,
       reviewCount: Array.isArray(reviews) ? reviews.length : 0,
+      operation,
     });
     throw error;
   }

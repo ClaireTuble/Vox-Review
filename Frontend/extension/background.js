@@ -10,7 +10,14 @@ import {
 import { API_BASE_URL } from "../src/services/apiConfig.js";
 
 const topicRequests = createTopicAnalysisRequestCoordinator({
-  request: async (reviews, platform, { signal, requestContext, clientRequestId }) => {
+  request: async (reviews, platform, {
+    signal,
+    requestContext,
+    clientRequestId,
+    pageKey,
+    force,
+    operation,
+  }) => {
     const controller = new AbortController();
     const forwardAbort = () => controller.abort(signal.reason);
     if (signal?.aborted) controller.abort(signal.reason);
@@ -21,6 +28,9 @@ const topicRequests = createTopicAnalysisRequestCoordinator({
         signal: controller.signal,
         requestContext,
         clientRequestId,
+        pageKey,
+        force,
+        operation,
       });
     } finally {
       timeout.clear();
@@ -289,11 +299,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "requestTopicAnalysis") {
-    const { reviews, platform, pageKey, requestContext, force } = message.request || {};
+    const { reviews, platform, pageKey, requestContext, force, operation } = message.request || {};
     topicRequests.request(reviews, platform, {
       pageKey,
       requestContext: requestContext || "popup-request",
       force: Boolean(force),
+      operation: operation || "classify",
     }).then(
       (result) => sendResponse({ ok: true, result }),
       (error) => sendResponse({

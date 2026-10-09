@@ -348,6 +348,79 @@ test('topic candidates include meaningful source phrases with natural function w
   assert.ok(!phrases.includes('the'));
 });
 
+test('selected topic keywords score meaningful phrases from the long review for their assigned topics', () => {
+  const review = `Been playing this game for almost a year now, and I could say it's 'almost' perfect. The gameplay is as expected from a hack and slash, lots of mini games and events to grind on so you never run out of things to do in-game, and the gacha can be forgiving (sometimes). The downside is the update, everytime. Though it's not as frequent as other games (2 months or so between each update), the update is so huge it feels as if you're re-installing the game. The network and server issues don't help`;
+  const entries = [{ review, topicResultIndex: 0 }];
+  const expectedByTopic = {
+    Quality: { 'almost perfect': 0.84 },
+    'Features / Content': {
+      gameplay: 0.8,
+      'mini games': 0.82,
+      events: 0.81,
+      gacha: 0.83,
+    },
+    'Performance / Functionality': {
+      'network and server issues': 0.86,
+      're-installing the game': 0.85,
+    },
+    'Service / Support': { 'network and server issues': 0.74 },
+  };
+  const labels = Object.keys(expectedByTopic);
+  const topicAnalysis = {
+    results: [{
+      reviewIndex: 0,
+      topics: labels.map((label) => ({ label, score: 0.8 })),
+    }],
+  };
+  const candidates = getTopicKeywordCandidates(entries, topicAnalysis);
+  const candidateKeys = new Set(candidates.map((candidate) => candidate.toLocaleLowerCase()));
+  for (const phrase of Object.values(expectedByTopic).flatMap(Object.keys)) {
+    assert.ok(candidateKeys.has(phrase), 'expected phrase to reach topic scoring');
+  }
+
+  topicAnalysis.keywordScores = Object.fromEntries(candidates.map((candidate) => [
+    candidate.toLocaleLowerCase(),
+    makeTopicScores('Other / General', 0.2),
+  ]));
+  for (const [label, phraseScores] of Object.entries(expectedByTopic)) {
+    for (const [phrase, score] of Object.entries(phraseScores)) {
+      topicAnalysis.keywordScores[phrase][label] = score;
+    }
+  }
+
+  const keywordsByTopic = Object.fromEntries(labels.map((label) => [
+    label,
+    getMeaningfulKeywords(entries, label, topicAnalysis),
+  ]));
+  for (const [label, phraseScores] of Object.entries(expectedByTopic)) {
+    for (const phrase of Object.keys(phraseScores)) {
+      if (phraseScores[phrase] >= 0.75) {
+        assert.ok(keywordsByTopic[label].includes(phrase));
+      } else {
+        assert.ok(!keywordsByTopic[label].includes(phrase));
+      }
+    }
+  }
+  assert.ok(!keywordsByTopic['Features / Content'].includes('almost perfect'));
+  assert.ok(!keywordsByTopic['Service / Support'].includes('network and server issues'));
+});
+
+test('missing keyword scores keep successful topic assignments and safe empty keywords', () => {
+  const topicAnalysis = {
+    results: [{
+      reviewIndex: 0,
+      topics: [{ label: 'Service / Support', score: 0.8 }],
+    }],
+  };
+  const [serviceTopic] = aggregateTopicsForReviews(
+    [{ review: 'Customer support was unhelpful.', topicResultIndex: 0 }],
+    topicAnalysis,
+  ).filter((topic) => topic.label === 'Service / Support');
+
+  assert.equal(serviceTopic.count, 1);
+  assert.deepEqual(serviceTopic.keywords, []);
+});
+
 test('topic keywords remove relevant standalone words when a longer phrase covers them', () => {
   const review = 'This is not worth it.';
   const topicAnalysis = {

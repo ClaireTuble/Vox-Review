@@ -91,6 +91,58 @@ test('a failed request with no cached success can be retried', async () => {
   assert.equal(calls, 2);
 });
 
+test('classification and keyword-score operations do not collide in request deduplication', async () => {
+  const operations = [];
+  const coordinator = createTopicAnalysisRequestCoordinator({
+    request: async (_reviews, _platform, { operation }) => {
+      operations.push(operation);
+      return { success: true, operation };
+    },
+  });
+  const shared = { pageKey: 'google:place:sample' };
+
+  const classification = coordinator.request(['same text'], 'google', shared);
+  const keywordScores = coordinator.request(['same text'], 'google', {
+    ...shared,
+    operation: 'keyword-scores',
+  });
+  const duplicateKeywordScores = coordinator.request(['same text'], 'google', {
+    ...shared,
+    operation: 'keyword-scores',
+  });
+
+  assert.equal((await classification).operation, 'classify');
+  assert.equal((await keywordScores).operation, 'keyword-scores');
+  assert.equal((await duplicateKeywordScores).operation, 'keyword-scores');
+  assert.deepEqual(operations, ['classify', 'keyword-scores']);
+});
+
+test('failed keyword scoring does not evict a successful classification result', async () => {
+  let calls = 0;
+  const classification = {
+    success: true,
+    results: [{ topics: [{ label: 'Quality', score: 0.8 }] }],
+  };
+  const coordinator = createTopicAnalysisRequestCoordinator({
+    request: async (_reviews, _platform, { operation }) => {
+      calls += 1;
+      if (operation === 'keyword-scores') {
+        throw Object.assign(new Error('keyword service unavailable'), { httpStatus: 503 });
+      }
+      return classification;
+    },
+  });
+  const identity = { pageKey: 'google:place:sample' };
+
+  assert.equal(await coordinator.request(['review'], 'google', identity), classification);
+  await assert.rejects(coordinator.request(['review'], 'google', {
+    ...identity,
+    operation: 'keyword-scores',
+  }), { httpStatus: 503 });
+  assert.equal(await coordinator.request(['review'], 'google', identity), classification);
+  assert.equal(calls, 2);
+});
+
 test('allows extra inference and queue time for a three-review topic request', () => {
   let triggerTimeout;
   let scheduledTimeout;
@@ -124,6 +176,7 @@ test('uses the deployed topic route and sends the backend request contract', asy
       apiBaseUrl: 'https://vox-review-production.up.railway.app/',
       requestContext: 'topic-keyword-scoring',
       clientRequestId: 'topic-123-1',
+      pageKey: 'google:place:sample',
       fetchImpl: async (url, options) => {
         requestedUrl = url;
         requestOptions = options;
@@ -155,7 +208,63 @@ test('uses the deployed topic route and sends the backend request contract', asy
   });
   assert.equal(requestOptions.headers['X-VoxReview-Request-Context'], 'topic-keyword-scoring');
   assert.equal(requestOptions.headers['X-VoxReview-Client-Request-Id'], 'topic-123-1');
+  assert.equal(requestOptions.headers['X-VoxReview-Page-Key'], 'google:place:sample');
   assert.equal(result.model, 'intfloat/multilingual-e5-small');
+});
+
+test('keyword scoring requests use the raw-score operation response shape', async () => {
+  let requestOptions;
+  const labels = [
+    'Quality', 'Performance / Functionality', 'Features / Content',
+    'Service / Support', 'Delivery / Transaction', 'Price / Value',
+    'Usability / Experience', 'Accuracy / Expectations',
+    'Availability / Accessibility', 'Environment / Location', 'Other / General',
+  ];
+  const result = await requestTopicAnalysis(
+    ['candidate phrase'],
+    'steam',
+    {
+      operation: 'keyword-scores',
+      fetchImpl: async (_url, options) => {
+        requestOptions = options;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            model: 'intfloat/multilingual-e5-small',
+            results: [{
+              reviewIndex: 0,
+              topicScores: labels.map((label) => ({ label, score: 0.5 })),
+            }],
+          }),
+        };
+      },
+    },
+  );
+
+  assert.equal(JSON.parse(requestOptions.body).operation, 'keyword-scores');
+  assert.equal(result.results[0].topicScores.length, 11);
+  assert.equal(result.results[0].topics, undefined);
+});
+
+test('an explicit forced refresh is forwarded to the backend cache boundary', async () => {
+  let requestHeaders;
+  await requestTopicAnalysis(['review'], 'shopee', {
+    pageKey: 'shopee:i.123.456',
+    force: true,
+    fetchImpl: async (_url, options) => {
+      requestHeaders = options.headers;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, results: [{ reviewIndex: 0, topics: [] }] }),
+      };
+    },
+  });
+
+  assert.equal(requestHeaders['X-VoxReview-Page-Key'], 'shopee:i.123.456');
+  assert.equal(requestHeaders['X-VoxReview-Force-Refresh'], 'true');
 });
 
 test('reports a failed HTTP status without logging request review text', async () => {

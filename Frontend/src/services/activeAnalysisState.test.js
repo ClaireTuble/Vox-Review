@@ -4,7 +4,9 @@ import {
   ACTIVE_ANALYSIS_STORAGE_KEY,
   createAnalysisJobCoordinator,
   deleteActiveAnalysisForPage,
+  getMatchingSavedTopicResult,
   getActiveAnalysisForPage,
+  isMatchingActiveAnalysisIdentity,
   setActiveAnalysisState,
 } from './activeAnalysisState.js';
 import { getPageKey } from './pageAnalysisStorage.js';
@@ -62,6 +64,125 @@ test('returning to a prior page restores its results without showing another pag
   assert.equal(restored.status, 'completed');
   assert.deepEqual(restored.svmResult.predictions, [1]);
   assert.equal(restored.topicResult.results.length, 1);
+});
+
+test('Page A to Page B to Page A restores A without rerunning its analysis', async () => {
+  let svmCalls = 0;
+  let topicCalls = 0;
+  const coordinator = createAnalysisJobCoordinator({
+    requestSvm: async () => ({ predictions: [++svmCalls] }),
+    requestTopics: async () => {
+      topicCalls += 1;
+      return { results: [{ topics: [{ label: 'Quality', score: 0.8 }] }] };
+    },
+  });
+  const pageA = input();
+  const pageB = input('https://shopee.ph/product/123/789');
+
+  const firstA = await coordinator.start(pageA);
+  const analysisB = await coordinator.start(pageB);
+  const returnedA = await coordinator.start(pageA);
+
+  assert.equal(firstA.started, true);
+  assert.equal(analysisB.started, true);
+  assert.equal(returnedA.started, false);
+  assert.equal(returnedA.state.runId, firstA.state.runId);
+  assert.deepEqual(returnedA.state.topicResult, firstA.state.topicResult);
+  assert.equal(svmCalls, 2);
+  assert.equal(topicCalls, 2);
+});
+
+test('reopening the popup restores the persisted success without a new request', async () => {
+  const page = input();
+  await setActiveAnalysisState({
+    ...page,
+    status: 'completed',
+    svmResult: { predictions: [1] },
+    topicResult: { results: [{ reviewIndex: 0, topics: [{ label: 'Quality', score: 0.8 }] }] },
+  });
+  let svmCalls = 0;
+  let topicCalls = 0;
+  const reopenedPopupCoordinator = createAnalysisJobCoordinator({
+    requestSvm: async () => { svmCalls += 1; return { predictions: [1] }; },
+    requestTopics: async () => { topicCalls += 1; return { results: [] }; },
+  });
+
+  const restored = await reopenedPopupCoordinator.start(page);
+
+  assert.equal(restored.started, false);
+  assert.equal(restored.state.topicResult.results[0].topics[0].label, 'Quality');
+  assert.equal(svmCalls, 0);
+  assert.equal(topicCalls, 0);
+});
+
+test('saved topics are eligible for restore only for the same page and review set', async () => {
+  const page = input();
+  const active = {
+    ...page,
+    status: 'completed',
+    reviewSetSignature: getTopicReviewSetSignature(['Works well']),
+    topicError: 'temporary failure',
+  };
+  const saved = {
+    ...page,
+    topicAnalysis: { results: [{ reviewIndex: 0, topics: [{ label: 'Quality', score: 0.8 }] }] },
+  };
+
+  assert.equal(getMatchingSavedTopicResult(active, saved), saved.topicAnalysis);
+  assert.equal(getMatchingSavedTopicResult(active, {
+    ...saved,
+    reviews: [{ text: 'Changed review' }],
+  }), null);
+  assert.equal(getMatchingSavedTopicResult(active, {
+    ...saved,
+    page_url: 'https://shopee.ph/product/123/789',
+  }), null);
+});
+
+test('a same-review state failure cannot overwrite an already persisted topic success', async () => {
+  const page = input();
+  const topics = { results: [{ reviewIndex: 0, topics: [{ label: 'Quality', score: 0.8 }] }] };
+  await setActiveAnalysisState({
+    ...page,
+    runId: 'run-success',
+    status: 'completed',
+    topicResult: topics,
+    topicError: null,
+  });
+
+  const staleWrite = await setActiveAnalysisState({
+    ...page,
+    runId: 'run-stale',
+    status: 'completed',
+    topicResult: null,
+    topicError: 'temporary failure',
+  });
+
+  assert.deepEqual(staleWrite.topicResult, topics);
+  assert.equal(staleWrite.topicError, null);
+  assert.equal(staleWrite.runId, 'run-success');
+});
+
+test('a stale topic retry cannot update a different run or review set', async () => {
+  const page = input();
+  const state = {
+    ...page,
+    runId: 'run-a',
+    reviewSetSignature: getTopicReviewSetSignature(['Works well']),
+  };
+  const identity = {
+    pageKey: state.pageKey,
+    runId: state.runId,
+    reviewSetSignature: state.reviewSetSignature,
+  };
+
+  assert.equal(isMatchingActiveAnalysisIdentity(state, identity), true);
+  assert.equal(isMatchingActiveAnalysisIdentity({ ...state, runId: 'run-b' }, identity), false);
+  assert.equal(isMatchingActiveAnalysisIdentity({
+    ...state,
+    reviews: [{ text: 'Changed review' }],
+    reviewSetSignature: getTopicReviewSetSignature(['Changed review']),
+  }, identity), false);
 });
 
 test('clearing active state removes only that page and leaves saved history untouched', async () => {
@@ -418,4 +539,45 @@ test('a failed same-review Rescan retains the previous successful topic result',
   assert.deepEqual(rescanned.state.topicResult, previousTopicResult);
   assert.match(rescanned.state.topicError, /temporary topic failure/);
   assert.equal(rescanned.state.status, 'completed');
+});
+
+test('a disconnected popup does not interrupt a persisted background topic retry', async () => {
+  const page = input();
+  const previousState = {
+    ...page,
+    status: 'completed',
+    stage: 'complete',
+    runId: 'prior-run',
+    svmResult: { predictions: [1] },
+    topicResult: null,
+    topicError: 'previous delivery failed',
+  };
+  await setActiveAnalysisState(previousState);
+  let finishTopicRequest;
+  const coordinator = createAnalysisJobCoordinator({
+    requestSvm: async () => { throw new Error('SVM result should be reused'); },
+    requestTopics: () => new Promise((resolve) => { finishTopicRequest = resolve; }),
+  });
+
+  const retry = coordinator.start({
+    ...previousState,
+    requestContext: 'active-analysis-retry',
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const retryingState = await getActiveAnalysisForPage(page.pageKey);
+  assert.equal(retryingState.status, 'analyzing');
+
+  const successfulTopics = {
+    results: [{ reviewIndex: 0, topics: [{ label: 'Quality', score: 0.85 }] }],
+  };
+  const popupDisconnected = true;
+  finishTopicRequest(successfulTopics);
+  const completed = await retry;
+  const persisted = await getActiveAnalysisForPage(page.pageKey);
+
+  assert.equal(popupDisconnected, true);
+  assert.deepEqual(completed.state.topicResult, successfulTopics);
+  assert.deepEqual(persisted.topicResult, successfulTopics);
+  assert.equal(persisted.status, 'completed');
+  assert.equal(persisted.topicError, null);
 });

@@ -155,9 +155,19 @@ function getReviewKeywordCandidates(reviewText) {
         const previous = tokens[end - 1];
         const previousEnd = previous.index + previous[0].length;
         const gap = source.slice(previousEnd, tokens[end].index);
-        if (!/^\s+$/.test(gap) || markupBoundaries.has(previousEnd)) break;
+        const gapWithoutQuotes = gap.replace(/['"“”‘’]/gu, '');
+        if ((!/^\s+$/.test(gap) && !/^\s+$/.test(gapWithoutQuotes)) ||
+            markupBoundaries.has(previousEnd)) break;
       }
 
+      const rawCandidateTokens = tokens.slice(start, end + 1)
+        .map((token) => token[0].toLocaleLowerCase());
+      const preservesMiniGames = rawCandidateTokens.length === 2 &&
+        rawCandidateTokens[0] === 'mini' && rawCandidateTokens[1] === 'games';
+      const preservesReinstallingGame = rawCandidateTokens.length === 3 &&
+        rawCandidateTokens[0] === 're-installing' &&
+        rawCandidateTokens[1] === 'the' &&
+        rawCandidateTokens[2] === 'game';
       let firstToken = start;
       let lastToken = end;
       const startsWithNegation = ['never', 'no', 'not'].includes(
@@ -176,13 +186,16 @@ function getReviewKeywordCandidates(reviewText) {
       while (lastToken > firstToken && (
         isBoundaryWord(tokens[lastToken]) ||
         GENERIC_REVIEW_WORDS.has(tokens[lastToken][0].toLocaleLowerCase())
-      ) && !(preservesNegativeIt && lastToken === end)) lastToken -= 1;
+      ) && !(preservesNegativeIt && lastToken === end) &&
+          !preservesMiniGames && !preservesReinstallingGame) lastToken -= 1;
       const candidateTokens = tokens.slice(firstToken, lastToken + 1).map((token) => token[0]);
       const contentTokens = candidateTokens
         .flatMap((token) => token.toLocaleLowerCase().split('-'))
         .filter((token) => (
           !COMMON_REVIEW_WORDS.has(token) &&
-          !GENERIC_REVIEW_WORDS.has(token) &&
+          (!GENERIC_REVIEW_WORDS.has(token) ||
+            (preservesMiniGames && token === 'games') ||
+            (preservesReinstallingGame && token === 'game')) &&
           !PHRASE_CONNECTORS.has(token) &&
           !ORDINARY_REVIEW_VERBS.has(token) &&
           !(candidateTokens.length === 1 && GENERIC_STANDALONE_TOPIC_WORDS.has(token))
@@ -208,7 +221,7 @@ function getReviewKeywordCandidates(reviewText) {
         candidateTokens.at(-1).toLocaleLowerCase() === 'assemble' &&
         candidateTokens.includes('to') &&
         contentTokens.some((token) => token !== 'assemble')
-      );
+      ) || preservesReinstallingGame;
       if (containsGenericActionVerb && !isMeaningfulActionPhrase) continue;
       if (INCOMPLETE_PHRASE_ENDINGS.has(candidateTokens.at(-1).toLocaleLowerCase())) continue;
       const hasUnhelpfulFunctionWord = candidateTokens.some((token) => (
@@ -216,15 +229,17 @@ function getReviewKeywordCandidates(reviewText) {
           COMMON_REVIEW_WORDS.has(part) &&
           !PHRASE_CONNECTORS.has(part) &&
           !['no', 'not', 'never'].includes(part) &&
+          !(preservesReinstallingGame && part === 'the') &&
           !(part === 'it' && preservesNegativeIt && token === candidateTokens.at(-1))
         ))
       ));
       if (hasUnhelpfulFunctionWord) continue;
 
-      const term = source.slice(
+      const sourceTerm = source.slice(
         tokens[firstToken].index,
         tokens[lastToken].index + tokens[lastToken][0].length,
       );
+      const term = sourceTerm.replace(/['"“”‘’](?=\s)|(?<=\s)['"“”‘’]/gu, '');
       const key = term.toLocaleLowerCase();
       candidates.set(key, term);
     }

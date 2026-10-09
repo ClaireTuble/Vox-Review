@@ -7,7 +7,11 @@ import os
 import sys
 from time import perf_counter
 
-from predict_topics_batch import classify_reviews, set_topic_request_id
+from predict_topics_batch import (
+    classify_reviews,
+    score_topic_candidates,
+    set_topic_request_id,
+)
 
 
 for line in sys.stdin:
@@ -18,19 +22,26 @@ for line in sys.stdin:
     request_id = request.get("id")
     reviews = request.get("reviews")
     platform = request.get("platform")
+    operation = request.get("operation", "classify")
     set_topic_request_id(request_id)
     print(
         json.dumps({
             "event": "topic_request_received",
             "requestId": request_id,
             "workerPid": os.getpid(),
+            "operation": operation,
             "reviewCount": len(reviews) if isinstance(reviews, list) else None,
         }),
         file=sys.stderr,
         flush=True,
     )
     try:
-        response = classify_reviews(reviews, platform)
+        if operation == "classify":
+            response = classify_reviews(reviews, platform)
+        elif operation == "keyword-scores":
+            response = score_topic_candidates(reviews)
+        else:
+            raise ValueError("Unsupported topic worker operation")
         response.update({"id": request_id, "success": True})
     except Exception as error:
         error_message = str(error)
@@ -43,6 +54,7 @@ for line in sys.stdin:
                 "event": "topic_request_failed",
                 "requestId": request_id,
                 "workerPid": os.getpid(),
+                "operation": operation,
                 "errorType": type(error).__name__,
                 "error": error_message[:500],
                 "requestDurationMs": round((perf_counter() - request_started) * 1000, 3),
@@ -58,6 +70,7 @@ for line in sys.stdin:
         json.dumps({
             "event": "result_serialization_complete",
             "requestId": request_id,
+            "operation": operation,
             "serializationDurationMs": round((perf_counter() - serialization_started) * 1000, 3),
             "responseBytes": len(serialized_response.encode("utf-8")),
             "requestDurationMs": round((perf_counter() - request_started) * 1000, 3),
@@ -72,6 +85,7 @@ for line in sys.stdin:
         json.dumps({
             "event": "result_output_complete",
             "requestId": request_id,
+            "operation": operation,
             "outputDurationMs": round((perf_counter() - output_started) * 1000, 3),
         }),
         file=sys.stderr,

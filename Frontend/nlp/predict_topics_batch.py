@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
+from pathlib import Path
 from time import perf_counter
 
 import torch
@@ -21,6 +23,8 @@ from topic_taxonomy import (
 )
 
 TOPIC_BATCH_SIZE = int(os.getenv("TOPIC_BATCH_SIZE", "16"))
+TOPIC_KEYWORD_BATCH_SIZE = 64
+MAX_TORCH_THREADS = 8
 MAX_LENGTH = 512
 REVIEW_PREFIX = "query: "
 TOPIC_PREFIX = "passage: "
@@ -52,10 +56,19 @@ def get_topic_configuration() -> tuple[str, str, None]:
     return "e5", TOPIC_MODEL_NAME, None
 
 
-def encode_texts(texts, prefix: str, tokenizer, model) -> torch.Tensor:
+def encode_texts(
+    texts,
+    prefix: str,
+    tokenizer,
+    model,
+    batch_size: int | None = None,
+) -> torch.Tensor:
+    batch_size = TOPIC_BATCH_SIZE if batch_size is None else batch_size
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
     embeddings = []
-    for start in range(0, len(texts), TOPIC_BATCH_SIZE):
-        batch = [prefix + text for text in texts[start:start + TOPIC_BATCH_SIZE]]
+    for start in range(0, len(texts), batch_size):
+        batch = [prefix + text for text in texts[start:start + batch_size]]
         tokens = tokenizer(
             batch,
             max_length=MAX_LENGTH,
@@ -71,9 +84,101 @@ def encode_texts(texts, prefix: str, tokenizer, model) -> torch.Tensor:
     return torch.cat(embeddings, dim=0)
 
 
+def get_cgroup_cpu_quota_values() -> tuple[int, int] | None:
+    quota_files = (
+        (Path("/sys/fs/cgroup/cpu.max"), None),
+        (
+            Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us"),
+            Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us"),
+        ),
+    )
+    for quota_path, period_path in quota_files:
+        try:
+            if period_path is None:
+                quota_text, period_text = quota_path.read_text().split()
+                if quota_text == "max":
+                    continue
+                quota, period = int(quota_text), int(period_text)
+            else:
+                quota = int(quota_path.read_text())
+                period = int(period_path.read_text())
+        except (OSError, ValueError):
+            continue
+        if quota > 0 and period > 0:
+            return quota, period
+    return None
+
+
+def get_cgroup_cpu_quota_count() -> int | None:
+    quota_values = get_cgroup_cpu_quota_values()
+    if quota_values is None:
+        return None
+    quota, period = quota_values
+    return max(1, math.floor(quota / period))
+
+
+def get_topic_torch_thread_limit(
+    process_cpu_count: int | None = None,
+    cpu_quota_count: int | None = None,
+    cpu_affinity_count: int | None = None,
+) -> int:
+    available_cpus = process_cpu_count or 1
+    if cpu_affinity_count is not None:
+        available_cpus = min(available_cpus, cpu_affinity_count)
+    if cpu_quota_count is not None:
+        available_cpus = min(available_cpus, cpu_quota_count)
+    return max(1, min(available_cpus, MAX_TORCH_THREADS))
+
+
+def get_cpu_affinity_count() -> int | None:
+    try:
+        return len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        return None
+
+
+def configure_torch_threads() -> int:
+    current_threads = torch.get_num_threads()
+    process_cpu_count = getattr(os, "process_cpu_count", os.cpu_count)() or 1
+    cpu_affinity_count = get_cpu_affinity_count()
+    cpu_quota_values = get_cgroup_cpu_quota_values()
+    cpu_quota_count = get_cgroup_cpu_quota_count()
+    thread_limit = get_topic_torch_thread_limit(
+        process_cpu_count,
+        cpu_quota_count,
+        cpu_affinity_count,
+    )
+    configured_threads = min(current_threads, thread_limit)
+    if configured_threads != current_threads:
+        torch.set_num_threads(configured_threads)
+    os.environ["OMP_NUM_THREADS"] = str(configured_threads)
+    os.environ["MKL_NUM_THREADS"] = str(configured_threads)
+    if hasattr(torch, "set_num_interop_threads"):
+        try:
+            torch.set_num_interop_threads(1)
+        except RuntimeError:
+            pass
+    log_model_event(
+        "torch_thread_configuration",
+        previousTorchNumThreads=current_threads,
+        torchNumThreads=torch.get_num_threads(),
+        processCpuCount=process_cpu_count,
+        cpuAffinityCount=cpu_affinity_count,
+        cgroupCpuQuotaCount=cpu_quota_count,
+        cpuQuotaMicros=cpu_quota_values[0] if cpu_quota_values else None,
+        cpuQuotaPeriodMicros=cpu_quota_values[1] if cpu_quota_values else None,
+        torchThreadLimit=thread_limit,
+    )
+    return configured_threads
+
+
+configure_torch_threads()
+
+
 def get_topic_embeddings():
     global _tokenizer, _model, _topic_embeddings
 
+    configure_torch_threads()
     if _model is None or _tokenizer is None:
         load_started = perf_counter()
         log_model_event("model_load_start", cached=False, model=TOPIC_MODEL_NAME)
@@ -214,6 +319,64 @@ def classify_reviews(reviews: list[str], platform: str | None = None) -> dict:
         "model": model_name,
         "threshold": threshold,
         "results": results,
+    }
+
+
+def score_topic_candidates(reviews: list[str]) -> dict:
+    if not isinstance(reviews, list) or any(
+        not isinstance(review, str) or not review.strip()
+        for review in reviews
+    ):
+        raise ValueError("reviews must be a list of non-empty strings")
+    if TOPIC_KEYWORD_BATCH_SIZE < 1:
+        raise ValueError("TOPIC_KEYWORD_BATCH_SIZE must be at least 1")
+
+    provider, model_name, _ = get_topic_configuration()
+    if not reviews:
+        return {
+            "provider": provider,
+            "model": model_name,
+            "results": [],
+        }
+
+    tokenizer, model, topic_embeddings = get_topic_embeddings()
+    candidates = [sanitize_unpaired_surrogates(review) for review in reviews]
+    inference_started = perf_counter()
+    log_model_event(
+        "keyword_score_inference_start",
+        candidateCount=len(candidates),
+        batchSize=TOPIC_KEYWORD_BATCH_SIZE,
+        torchNumThreads=torch.get_num_threads(),
+    )
+    with torch.inference_mode():
+        candidate_embeddings = encode_texts(
+            candidates,
+            REVIEW_PREFIX,
+            tokenizer,
+            model,
+            batch_size=TOPIC_KEYWORD_BATCH_SIZE,
+        )
+        similarities = candidate_embeddings @ topic_embeddings.T
+    log_model_event(
+        "keyword_score_inference_complete",
+        inferenceDurationMs=round((perf_counter() - inference_started) * 1000, 3),
+        candidateCount=len(candidates),
+        batchSize=TOPIC_KEYWORD_BATCH_SIZE,
+    )
+
+    return {
+        "provider": provider,
+        "model": model_name,
+        "results": [
+            {
+                "reviewIndex": candidate_index,
+                "topicScores": [
+                    {"label": label, "score": float(scores[index])}
+                    for index, label in enumerate(TOPIC_LABELS)
+                ],
+            }
+            for candidate_index, scores in enumerate(similarities)
+        ],
     }
 
 

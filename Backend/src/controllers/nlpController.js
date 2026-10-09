@@ -4,6 +4,13 @@ import { fileURLToPath } from "node:url";
 import { PersistentJsonWorker } from "../utils/persistentJsonWorker.js";
 import { getTopicProcessTimeoutMs } from "../utils/topicWorkerTimeout.js";
 import {
+  createTopicAnalysisResultCache,
+  computeAndCacheTopicResult,
+  getTopicResultCacheKey,
+  getTopicReviewSetSignature,
+  runTopicKeywordScoreBatches,
+} from "../utils/topicAnalysisResultCache.js";
+import {
   getSafeTopicRequestMetadata,
   sanitizeTopicWorkerStderr,
 } from "../utils/topicWorkerDiagnostics.js";
@@ -20,6 +27,7 @@ const validTopicLabels = new Set([
   "Delivery / Transaction", "Price / Value", "Usability / Experience",
   "Accuracy / Expectations", "Availability / Accessibility", "Environment / Location", "Other / General",
 ]);
+const validTopicOperations = new Set(["classify", "keyword-scores"]);
 let topicWorker = null;
 let topicWorkerBuffer = "";
 let topicRequestId = 0;
@@ -31,6 +39,9 @@ const pendingTopicRequests = new Map();
 const topicQueue = [];
 const topicRequestDiagnostics = new Map();
 const topicWorkerRequestIds = new WeakMap();
+const topicResultCache = createTopicAnalysisResultCache();
+const inFlightTopicComputations = new Map();
+const TOPIC_KEYWORD_QUEUE_BATCH_SIZE = 32;
 const svmWorker = new PersistentJsonWorker({
   command: pythonExecutable,
   args: [svmWorkerScript],
@@ -58,6 +69,9 @@ function getTopicResultCounts(response) {
     assignmentCount: results
       ? results.reduce((total, result) => total + (Array.isArray(result?.topics) ? result.topics.length : 0), 0)
       : null,
+    topicScoreCount: results
+      ? results.reduce((total, result) => total + (Array.isArray(result?.topicScores) ? result.topicScores.length : 0), 0)
+      : null,
   };
 }
 
@@ -83,6 +97,7 @@ function logTopicWorkerResult(diagnostics, response = null) {
   const counts = getTopicResultCounts(response);
   diagnostics.resultCount = counts.resultCount;
   diagnostics.assignmentCount = counts.assignmentCount;
+  diagnostics.topicScoreCount = counts.topicScoreCount;
   console.log("[TOPIC WORKER RESULT]", {
     requestId: diagnostics.requestId,
     clientRequestId: diagnostics.clientRequestId,
@@ -94,6 +109,7 @@ function logTopicWorkerResult(diagnostics, response = null) {
     stdoutValidJson: diagnostics.stdoutValidJson,
     resultCount: diagnostics.resultCount,
     assignmentCount: diagnostics.assignmentCount,
+    topicScoreCount: diagnostics.topicScoreCount,
   });
 }
 
@@ -222,7 +238,12 @@ function ensureTopicWorker(requestId) {
   const worker = spawn(pythonExecutable, [topicWorkerScript], {
     cwd: nlpDirectory,
     windowsHide: true,
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      OMP_NUM_THREADS: process.env.OMP_NUM_THREADS || "8",
+      MKL_NUM_THREADS: process.env.MKL_NUM_THREADS || "8",
+      TORCH_NUM_THREADS: process.env.TORCH_NUM_THREADS || "8",
+    },
   });
   topicWorker = worker;
   topicWorkerRequestIds.set(worker, requestId);
@@ -376,6 +397,32 @@ function validateTopicResponse(response, reviews) {
   };
 }
 
+function validateTopicKeywordScoreResponse(response, reviews) {
+  const results = response?.results;
+  if (
+    !response?.success ||
+    !Array.isArray(results) ||
+    results.length !== reviews.length ||
+    results.some((result, index) => (
+      result?.reviewIndex !== index ||
+      !Array.isArray(result?.topicScores) ||
+      result.topicScores.length !== validTopicLabels.size ||
+      new Set(result.topicScores.map((topic) => topic?.label)).size !== validTopicLabels.size ||
+      result.topicScores.some((topic) => (
+        !validTopicLabels.has(topic?.label) ||
+        typeof topic?.score !== "number" ||
+        !Number.isFinite(topic.score)
+      ))
+    ))
+  ) {
+    throw new Error(response?.error || "Topic classifier returned invalid keyword scores");
+  }
+  return {
+    model: typeof response.model === "string" ? response.model : null,
+    results,
+  };
+}
+
 function processNextTopicRequest() {
   if (isStoppingTopicWorker || isProcessingTopic || topicQueue.length === 0) return;
   const item = topicQueue.shift();
@@ -384,19 +431,38 @@ function processNextTopicRequest() {
     return;
   }
   isProcessingTopic = true;
-  const { requestId, reviews, platform, resolve, reject, topicProcessTimeoutMs, diagnostics } = item;
-  diagnostics.queueWaitMs = Date.now() - item.queuedAt;
+  const {
+    requestId,
+    reviews,
+    platform,
+    operation,
+    resolve,
+    reject,
+    topicProcessTimeoutMs,
+    diagnostics,
+  } = item;
+  const queueWaitMs = Date.now() - item.queuedAt;
+  diagnostics.queueWaitMs ??= queueWaitMs;
+  diagnostics.totalQueueWaitMs = (diagnostics.totalQueueWaitMs || 0) + queueWaitMs;
+  diagnostics.computationStartedAt ??= Date.now();
   diagnostics.workerStartedAt = Date.now();
   diagnostics.stderr = "";
   diagnostics.stdoutBytesReceived = 0;
+  diagnostics.workerResultLogged = false;
   diagnostics.reviews = reviews;
   activeTopicDiagnostics = diagnostics;
   console.log("[TOPIC WORKER START]", {
     requestId,
     clientRequestId: diagnostics.clientRequestId,
     requestContext: diagnostics.requestContext,
+    pageIdentity: diagnostics.pageIdentity,
+    reviewSetSignature: diagnostics.reviewSetSignature,
+    operation,
     queueWaitMs: diagnostics.queueWaitMs,
     reviewCount: reviews.length,
+    candidateChunkIndex: diagnostics.candidateChunkIndex ?? null,
+    candidateChunkCount: diagnostics.candidateChunkCount ?? null,
+    candidateChunkOffset: diagnostics.candidateChunkOffset ?? null,
   });
 
   let timeout = null;
@@ -436,7 +502,9 @@ function processNextTopicRequest() {
   pendingTopicRequests.set(requestId, {
     resolve: (response) => {
       try {
-        resolve(validateTopicResponse(response, reviews));
+        resolve(operation === "keyword-scores"
+          ? validateTopicKeywordScoreResponse(response, reviews)
+          : validateTopicResponse(response, reviews));
       } catch (error) {
         reject(error);
       } finally {
@@ -453,7 +521,7 @@ function processNextTopicRequest() {
     const worker = ensureTopicWorker(requestId);
     topicWorkerRequestId = requestId;
     topicWorkerRequestIds.set(worker, requestId);
-    const requestLine = `${JSON.stringify({ id: requestId, reviews, platform })}\n`;
+    const requestLine = `${JSON.stringify({ id: requestId, reviews, platform, operation })}\n`;
     console.log("[TOPIC WORKER INPUT]", {
       requestId,
       platform: diagnostics.platform,
@@ -480,7 +548,7 @@ function processNextTopicRequest() {
   }
 }
 
-function runTopicPrediction(reviews, platform, diagnostics, registerCancel) {
+function enqueueTopicWorkerRequest(reviews, platform, operation, diagnostics, registerCancel) {
   return new Promise((resolve, reject) => {
     const { requestId } = diagnostics;
     const topicProcessTimeoutMs = getTopicProcessTimeoutMs(reviews.length);
@@ -488,6 +556,7 @@ function runTopicPrediction(reviews, platform, diagnostics, registerCancel) {
       requestId,
       reviews,
       platform,
+      operation,
       diagnostics,
       queuedAt: Date.now(),
       resolve,
@@ -508,8 +577,54 @@ function runTopicPrediction(reviews, platform, diagnostics, registerCancel) {
         }
       });
     }
-    topicQueue.push(queueItem);
+    if (operation === "classify") {
+      const firstKeywordIndex = topicQueue.findIndex((item) => item.operation === "keyword-scores");
+      if (firstKeywordIndex !== -1) {
+        topicQueue.splice(firstKeywordIndex, 0, queueItem);
+      } else {
+        topicQueue.push(queueItem);
+      }
+    } else {
+      topicQueue.push(queueItem);
+    }
     processNextTopicRequest();
+  });
+}
+
+function runTopicPrediction(reviews, platform, operation, diagnostics, registerCancel) {
+  if (operation !== "keyword-scores") {
+    return enqueueTopicWorkerRequest(reviews, platform, operation, diagnostics, registerCancel);
+  }
+
+  let cancelled = false;
+  let cancelCurrentBatch = null;
+  if (typeof registerCancel === "function") {
+    registerCancel(() => {
+      cancelled = true;
+      cancelCurrentBatch?.();
+    });
+  }
+  let chunkIndex = 0;
+  const chunkCount = Math.ceil(reviews.length / TOPIC_KEYWORD_QUEUE_BATCH_SIZE);
+  return runTopicKeywordScoreBatches(reviews, {
+    batchSize: TOPIC_KEYWORD_QUEUE_BATCH_SIZE,
+    isCancelled: () => cancelled,
+    runBatch: (batch, offset) => {
+      chunkIndex += 1;
+      diagnostics.candidateChunkIndex = chunkIndex;
+      diagnostics.candidateChunkCount = chunkCount;
+      diagnostics.candidateChunkOffset = offset;
+      diagnostics.candidateChunkSize = batch.length;
+      return enqueueTopicWorkerRequest(
+        batch,
+        platform,
+        operation,
+        diagnostics,
+        (cancel) => { cancelCurrentBatch = cancel; },
+      ).finally(() => {
+        cancelCurrentBatch = null;
+      });
+    },
   });
 }
 
@@ -518,10 +633,15 @@ export async function predictTopics(req, res) {
   const requestStartedAt = Date.now();
   const reviews = req.body?.reviews;
   const reviewCount = Array.isArray(reviews) ? reviews.length : 0;
+  const requestedOperation = req.body?.operation ?? "classify";
+  const operation = validTopicOperations.has(requestedOperation)
+    ? requestedOperation
+    : "invalid";
   const requestMetadata = getSafeTopicRequestMetadata(req);
   const diagnostics = {
     requestId,
     ...requestMetadata,
+    reviewSetSignature: getTopicReviewSetSignature(reviews),
     reviewCount,
     platform: typeof (req.get?.("x-voxreview-platform") || req.body?.platform) === "string"
       ? (req.get?.("x-voxreview-platform") || req.body?.platform).slice(0, 40)
@@ -537,11 +657,22 @@ export async function predictTopics(req, res) {
     stdoutBytesReceived: 0,
     reviews,
   };
+  const cacheKey = operation === "classify"
+    ? getTopicResultCacheKey({
+        pageIdentity: diagnostics.pageIdentity,
+        platform: diagnostics.platform,
+        operation,
+        reviews,
+      })
+    : null;
   topicRequestDiagnostics.set(requestId, diagnostics);
   console.log("[TOPIC BACKEND START]", {
     requestId,
     clientRequestId: diagnostics.clientRequestId,
     requestContext: diagnostics.requestContext,
+    pageIdentity: diagnostics.pageIdentity,
+    reviewSetSignature: diagnostics.reviewSetSignature,
+    operation,
     reviewCount,
     timestamp: new Date(requestStartedAt).toISOString(),
   });
@@ -552,8 +683,19 @@ export async function predictTopics(req, res) {
       requestId,
       clientRequestId: diagnostics.clientRequestId,
       requestContext: diagnostics.requestContext,
+      pageIdentity: diagnostics.pageIdentity,
+      reviewSetSignature: diagnostics.reviewSetSignature,
+      operation,
+      queueWaitMs: diagnostics.queueWaitMs ?? null,
+      totalQueueWaitMs: diagnostics.totalQueueWaitMs ?? null,
+      computationDurationMs: diagnostics.computationStartedAt
+        ? (diagnostics.computationCompletedAt || Date.now()) - diagnostics.computationStartedAt
+        : null,
+      cacheHit: Boolean(diagnostics.cacheHit),
       finalHttpStatus: status,
       elapsedMs: Date.now() - requestStartedAt,
+      computationOutcome: diagnostics.computationOutcome || "not_started",
+      clientDisconnected,
       terminalOutcome: clientDisconnected
         ? "client_disconnected"
         : status >= 200 && status < 300 ? "success" : "failure",
@@ -569,9 +711,57 @@ export async function predictTopics(req, res) {
     const failureReason = "reviews must contain between 1 and 500 items";
     return respond(400, { success: false, error: failureReason }, failureReason);
   }
+  if (operation === "invalid") {
+    const failureReason = "operation must be classify or keyword-scores";
+    return respond(400, { success: false, error: failureReason }, failureReason);
+  }
   if (reviews.some((review) => typeof review !== "string" || !review.trim())) {
     const failureReason = "each review must be a non-empty string";
     return respond(400, { success: false, error: failureReason }, failureReason);
+  }
+  if (cacheKey && !requestMetadata.forceRefresh) {
+    const cachedResult = topicResultCache.get(cacheKey);
+    if (cachedResult) {
+      diagnostics.cacheHit = true;
+      console.info("[TOPIC BACKEND CACHE HIT]", {
+        requestId,
+        clientRequestId: diagnostics.clientRequestId,
+        requestContext: diagnostics.requestContext,
+        pageIdentity: diagnostics.pageIdentity,
+        reviewSetSignature: diagnostics.reviewSetSignature,
+        operation,
+        reviewCount,
+        outcome: "restored",
+        preservedSuccessfulResult: true,
+      });
+      return respond(200, { success: true, ...cachedResult });
+    }
+
+    if (inFlightTopicComputations.has(cacheKey)) {
+      diagnostics.deduplicated = true;
+      console.info("[TOPIC BACKEND IN-FLIGHT JOIN]", {
+        requestId,
+        clientRequestId: diagnostics.clientRequestId,
+        requestContext: diagnostics.requestContext,
+        pageIdentity: diagnostics.pageIdentity,
+        reviewSetSignature: diagnostics.reviewSetSignature,
+        operation,
+        reviewCount,
+        outcome: "deduplicated",
+      });
+      try {
+        const inFlightResult = await inFlightTopicComputations.get(cacheKey);
+        diagnostics.computationCompletedAt = Date.now();
+        diagnostics.computationOutcome = "success";
+        return respond(200, { success: true, ...inFlightResult });
+      } catch (error) {
+        diagnostics.computationCompletedAt = Date.now();
+        diagnostics.computationOutcome = error?.code === "CLIENT_CANCELLED" ? "cancelled" : "failure";
+        const errorMessage = error?.message || String(error);
+        const safeErrorMessage = safeTopicDiagnosticText(errorMessage, reviews);
+        return respond(503, { success: false, error: "Review topic model unavailable" }, safeErrorMessage);
+      }
+    }
   }
   let cancelCallback = null;
   const cancelQueuedRequest = () => {
@@ -582,7 +772,12 @@ export async function predictTopics(req, res) {
       requestId,
       clientRequestId: diagnostics.clientRequestId,
       requestContext: diagnostics.requestContext,
+      pageIdentity: diagnostics.pageIdentity,
+      reviewSetSignature: diagnostics.reviewSetSignature,
+      operation,
+      queueWaitMs: diagnostics.queueWaitMs ?? null,
       workerStarted: diagnostics.workerStartedAt != null,
+      outcome: "client_disconnected",
       elapsedMs: Date.now() - requestStartedAt,
     });
     if (cancelCallback) cancelCallback();
@@ -595,12 +790,49 @@ export async function predictTopics(req, res) {
     const platform = diagnostics.platform === "not provided"
       ? null
       : diagnostics.platform;
-    const predictionResponse = await runTopicPrediction(reviews, platform, diagnostics, (fn) => {
-      cancelCallback = fn;
-      if (clientDisconnected) cancelCallback();
-    });
+    const computePrediction = () => runTopicPrediction(
+      reviews,
+      platform,
+      operation,
+      diagnostics,
+      (fn) => {
+        cancelCallback = fn;
+        if (clientDisconnected) cancelCallback();
+      },
+    );
+    const predictionPromise = cacheKey
+      ? computeAndCacheTopicResult(topicResultCache, cacheKey, computePrediction)
+      : computePrediction();
+    if (cacheKey) inFlightTopicComputations.set(cacheKey, predictionPromise);
+
+    let predictionResponse;
+    try {
+      predictionResponse = await predictionPromise;
+    } finally {
+      if (cacheKey && inFlightTopicComputations.get(cacheKey) === predictionPromise) {
+        inFlightTopicComputations.delete(cacheKey);
+      }
+    }
+    diagnostics.computationCompletedAt = Date.now();
+    diagnostics.computationOutcome = "success";
+    if (cacheKey && predictionResponse?.results?.length === reviewCount) {
+      console.info("[TOPIC BACKEND RESULT CACHED]", {
+        requestId,
+        clientRequestId: diagnostics.clientRequestId,
+        requestContext: diagnostics.requestContext,
+        pageIdentity: diagnostics.pageIdentity,
+        reviewSetSignature: diagnostics.reviewSetSignature,
+        operation,
+        reviewCount,
+        ...getTopicResultCounts(predictionResponse),
+        outcome: "cached",
+        preservedSuccessfulResult: true,
+      });
+    }
     return respond(200, { success: true, ...predictionResponse });
   } catch (error) {
+    diagnostics.computationCompletedAt = Date.now();
+    diagnostics.computationOutcome = error?.code === "CLIENT_CANCELLED" ? "cancelled" : "failure";
     const errorMessage = error?.message || String(error);
     const stderrExcerpt = sanitizeTopicWorkerStderr(diagnostics.stderr);
     const safeErrorMessage = safeTopicDiagnosticText(errorMessage, reviews);

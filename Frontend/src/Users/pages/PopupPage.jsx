@@ -6,7 +6,10 @@ import { getAnalysisForPage, getSavedAnalysisCount, saveAnalysisForPage, getPage
 import {
   ACTIVE_ANALYSIS_STORAGE_KEY,
   deleteActiveAnalysisForPage,
+  getActiveAnalysisReviewSetSignature,
   getActiveAnalysisForPage,
+  getMatchingSavedTopicResult,
+  isMatchingActiveAnalysisIdentity,
   setActiveAnalysisState,
 } from '../../services/activeAnalysisState.js';
 import Header from '../components/Header.jsx';
@@ -88,7 +91,15 @@ function hasValidTopicKeywordScores(payload, expectedCandidateCount) {
     ));
 }
 
-async function requestTopicAnalysis(reviewTexts, signal, platform, requestContext, pageKey, force = false) {
+async function requestTopicAnalysis(
+  reviewTexts,
+  signal,
+  platform,
+  requestContext,
+  pageKey,
+  force = false,
+  operation = 'classify',
+) {
   if (pageKey && globalThis.chrome?.runtime?.sendMessage && globalThis.chrome?.storage?.local) {
     const response = await new Promise((resolve, reject) => {
       globalThis.chrome.runtime.sendMessage({
@@ -99,6 +110,7 @@ async function requestTopicAnalysis(reviewTexts, signal, platform, requestContex
           pageKey,
           requestContext,
           force,
+          operation,
         },
       }, (result) => {
         if (globalThis.chrome.runtime.lastError) reject(new Error(globalThis.chrome.runtime.lastError.message));
@@ -113,10 +125,17 @@ async function requestTopicAnalysis(reviewTexts, signal, platform, requestContex
     }
     return response.result;
   }
-  if (!pageKey) return sendTopicAnalysisRequest(reviewTexts, platform, { signal, requestContext });
+  if (!pageKey) {
+    return sendTopicAnalysisRequest(reviewTexts, platform, {
+      signal,
+      requestContext,
+      operation,
+    });
+  }
   return popupTopicRequests.request(reviewTexts, platform, {
     pageKey,
     requestContext,
+    operation,
     signal,
     force,
   });
@@ -517,6 +536,8 @@ export default function PopupPage() {
           getPlatformLabel(detectedPlatform),
           'topic-keyword-scoring',
           activeContextRef.current.pageKey || currentAnalysisRecord?.pageKey,
+          false,
+          'keyword-scores',
         );
         timeout.clear();
         timeout = null;
@@ -738,29 +759,103 @@ export default function PopupPage() {
       if (!topicRetryKeysRef.current.has(retryKey)) {
         topicRetryKeysRef.current.add(retryKey);
         const reviewTexts = activeState.reviews.map(getReviewText);
-        const controller = new AbortController();
-        const timeout = createTopicRequestTimeout(controller, reviewTexts.length);
-        void requestTopicAnalysis(
-          reviewTexts,
-          controller.signal,
-          getPlatformLabel(activeState.platform),
-          'active-analysis-retry',
-          activeState.pageKey,
-        ).then(async (topicResult) => {
+        const retryIdentity = {
+          pageKey: activeState.pageKey,
+          runId: activeState.runId,
+          reviewSetSignature: activeState.reviewSetSignature ||
+            getTopicReviewSetSignature(reviewTexts),
+        };
+        const retryGeneration = activeContextRef.current.generation;
+        const applyRetriedTopicResult = async (topicResult) => {
+          if (activeContextRef.current.pageKey !== retryIdentity.pageKey ||
+            activeContextRef.current.generation !== retryGeneration) {
+            console.info('VoxReview: Stale topic retry result was not applied.', {
+              ...retryIdentity,
+              reviewCount: reviewTexts.length,
+              operation: 'classify',
+              outcome: 'stale',
+              preservedSuccessfulResult: hasValidTopicAnalysis(topicAnalysisRef.current, reviewTexts.length),
+            });
+            return;
+          }
+          const latestState = await getActiveAnalysisForPage(retryIdentity.pageKey);
+          if (!isMatchingActiveAnalysisIdentity(latestState, retryIdentity) ||
+            hasValidTopicAnalysis(latestState?.topicResult, reviewTexts.length)) {
+            console.info('VoxReview: Stale topic retry result was not applied.', {
+              ...retryIdentity,
+              reviewCount: reviewTexts.length,
+              operation: 'classify',
+              outcome: 'stale',
+              preservedSuccessfulResult: hasValidTopicAnalysis(latestState?.topicResult, reviewTexts.length),
+            });
+            return;
+          }
           const updatedState = await setActiveAnalysisState({
-            ...activeState,
+            ...latestState,
             topicResult,
             topicError: null,
           });
-          if (updatedState && activeContextRef.current.pageKey === activeState.pageKey) {
+          if (updatedState && activeContextRef.current.pageKey === retryIdentity.pageKey &&
+            activeContextRef.current.generation === retryGeneration) {
             applyActiveAnalysisState(updatedState);
           }
-        }).catch(() => {
-          // The request helper logs sanitized endpoint and failure diagnostics.
+        };
+        const reportRetryFailure = (error) => {
+          console.warn('VoxReview: Topic retry failed during active-state restoration.', {
+            ...retryIdentity,
+            reviewCount: reviewTexts.length,
+            operation: 'classify',
+            outcome: 'failure',
+            errorType: ['AbortError', 'TimeoutError', 'TypeError'].includes(error?.name)
+              ? error.name
+              : 'Error',
+            preservedSuccessfulResult: hasValidTopicAnalysis(topicAnalysisRef.current, reviewTexts.length),
+          });
           topicRetryKeysRef.current.delete(retryKey);
-        }).finally(() => {
-          timeout.clear();
-        });
+        };
+        if (globalThis.chrome?.runtime?.sendMessage && globalThis.chrome?.storage?.local) {
+          globalThis.chrome.runtime.sendMessage({
+            type: 'startAnalysis',
+            analysis: {
+              ...activeState,
+              pageKey: activeState.pageKey,
+              requestContext: 'active-analysis-retry',
+              force: false,
+            },
+          }, (response) => {
+            if (globalThis.chrome.runtime.lastError || !response?.ok) {
+              reportRetryFailure(new Error(
+                globalThis.chrome.runtime.lastError?.message ||
+                response?.error ||
+                'Background topic retry could not be started.',
+              ));
+              return;
+            }
+            const retriedTopicResult = response.state?.topicResult;
+            if (hasValidTopicAnalysis(retriedTopicResult, reviewTexts.length)) {
+              console.info('VoxReview: Topic retry result persisted by background analysis.', {
+                pageKey: retryIdentity.pageKey,
+                reviewCount: reviewTexts.length,
+                reviewSetSignature: retryIdentity.reviewSetSignature,
+                operation: 'classify',
+                outcome: 'persisted',
+                preservedSuccessfulResult: true,
+              });
+            }
+          });
+        } else {
+          const controller = new AbortController();
+          const timeout = createTopicRequestTimeout(controller, reviewTexts.length);
+          void requestTopicAnalysis(
+            reviewTexts,
+            controller.signal,
+            getPlatformLabel(activeState.platform),
+            'active-analysis-retry',
+            activeState.pageKey,
+          ).then(applyRetriedTopicResult)
+            .catch(reportRetryFailure)
+            .finally(() => timeout.clear());
+        }
       }
     }
   };
@@ -1070,7 +1165,49 @@ export default function PopupPage() {
       const activeAnalysis = await getActiveAnalysisForPage(context.pageKey);
       if (activeContextRef.current.generation !== context.generation || analysisRevisionRef.current !== restoreRevision) return;
       if (activeAnalysis) {
-        applyActiveAnalysisState(activeAnalysis);
+        const savedTopicResult = getMatchingSavedTopicResult(activeAnalysis, existingAnalysis);
+        const activeReviewCount = Array.isArray(activeAnalysis.reviews) ? activeAnalysis.reviews.length : 0;
+        const shouldRestoreSavedTopics = activeAnalysis.status === 'completed' &&
+          !hasValidTopicAnalysis(activeAnalysis.topicResult, activeReviewCount) &&
+          hasValidTopicAnalysis(savedTopicResult, activeReviewCount);
+        const stateToRestore = shouldRestoreSavedTopics
+          ? { ...activeAnalysis, topicResult: savedTopicResult, topicError: null }
+          : activeAnalysis;
+        if (shouldRestoreSavedTopics) {
+          console.info('VoxReview: Topic analysis restored from saved page results.', {
+            pageKey: context.pageKey,
+            reviewCount: activeReviewCount,
+            reviewSetSignature: getActiveAnalysisReviewSetSignature(activeAnalysis),
+            operation: 'classify',
+            outcome: 'restored',
+            preservedSuccessfulResult: true,
+          });
+          try {
+            await setActiveAnalysisState(stateToRestore);
+          } catch (error) {
+            console.warn('VoxReview: Could not persist restored topic results.', {
+              pageKey: context.pageKey,
+              reviewCount: activeReviewCount,
+              reviewSetSignature: getActiveAnalysisReviewSetSignature(activeAnalysis),
+              operation: 'classify',
+              errorType: error?.name === 'QuotaExceededError' ? 'storage_quota' : 'storage_error',
+              outcome: 'failure',
+              preservedSuccessfulResult: true,
+            });
+          }
+        } else {
+          console.info('VoxReview: Topic analysis restored from active page state.', {
+            pageKey: context.pageKey,
+            reviewCount: activeReviewCount,
+            reviewSetSignature: getActiveAnalysisReviewSetSignature(activeAnalysis),
+            operation: 'classify',
+            outcome: 'restored',
+            preservedSuccessfulResult: hasValidTopicAnalysis(stateToRestore.topicResult, activeReviewCount),
+          });
+        }
+        if (activeContextRef.current.generation !== context.generation ||
+          analysisRevisionRef.current !== restoreRevision) return;
+        applyActiveAnalysisState(stateToRestore);
         return;
       }
 

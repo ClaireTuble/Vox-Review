@@ -48,6 +48,7 @@ class FakeEmbeddings:
     def __init__(self):
         self.prefixes = []
         self.calls = []
+        self.batch_sizes = []
         self.topic_vectors = torch.eye(len(TOPIC_LABELS))
         self.review_vectors = {
             "English review": self.vector({0: 0.9, 1: 0.8}),
@@ -61,9 +62,10 @@ class FakeEmbeddings:
             values[index] = score
         return functional.normalize(values, p=2, dim=0)
 
-    def __call__(self, texts, prefix, tokenizer, model):
+    def __call__(self, texts, prefix, tokenizer, model, batch_size=None):
         self.prefixes.append(prefix)
         self.calls.append(list(texts))
+        self.batch_sizes.append(batch_size)
         if prefix == predict_topics_batch.TOPIC_PREFIX:
             return self.topic_vectors.clone()
         return torch.stack([
@@ -143,6 +145,67 @@ class TopicProviderTests(unittest.TestCase):
         predict_topics_batch.AutoModel.from_pretrained.assert_called_once_with(TOPIC_MODEL_NAME)
         self.assertEqual(self.embeddings.prefixes.count(predict_topics_batch.TOPIC_PREFIX), 1)
         self.assertTrue(self.model.eval_called)
+
+    def test_keyword_scoring_returns_raw_scores_without_topic_refinement(self):
+        review = "English review"
+        full_result = predict_topics_batch.classify_reviews([review])["results"][0]
+        with patch.object(
+            predict_topics_batch,
+            "refine_topic_scores",
+            side_effect=AssertionError("keyword scoring must not refine assignments"),
+        ):
+            scores_result = predict_topics_batch.score_topic_candidates([review])["results"][0]
+
+        self.assertEqual(scores_result["reviewIndex"], 0)
+        self.assertNotIn("topics", scores_result)
+        self.assertEqual(scores_result["topicScores"], full_result["topicScores"])
+        self.assertEqual(
+            self.embeddings.batch_sizes[-1],
+            predict_topics_batch.TOPIC_KEYWORD_BATCH_SIZE,
+        )
+
+    def test_keyword_score_batches_keep_candidate_alignment_and_raw_scores(self):
+        candidates = [f"candidate phrase {index}" for index in range(70)]
+        full_scores = predict_topics_batch.classify_reviews(candidates)["results"]
+        keyword_scores = predict_topics_batch.score_topic_candidates(candidates)["results"]
+
+        self.assertEqual([result["reviewIndex"] for result in keyword_scores], list(range(70)))
+        self.assertEqual(
+            [result["topicScores"] for result in keyword_scores],
+            [result["topicScores"] for result in full_scores],
+        )
+        self.assertEqual(
+            self.embeddings.batch_sizes[-1],
+            predict_topics_batch.TOPIC_KEYWORD_BATCH_SIZE,
+        )
+
+    def test_topic_thread_limit_respects_allocation_and_caps_oversubscription(self):
+        self.assertEqual(
+            predict_topics_batch.get_topic_torch_thread_limit(48, 2),
+            2,
+        )
+        self.assertEqual(
+            predict_topics_batch.get_topic_torch_thread_limit(48, 8, 4),
+            4,
+        )
+        self.assertEqual(
+            predict_topics_batch.get_topic_torch_thread_limit(12),
+            8,
+        )
+        self.assertEqual(
+            predict_topics_batch.get_topic_torch_thread_limit(4),
+            4,
+        )
+        with (
+            patch.object(predict_topics_batch.torch, "get_num_threads", return_value=48),
+            patch.object(predict_topics_batch.torch, "set_num_threads") as set_threads,
+            patch.object(predict_topics_batch.os, "process_cpu_count", return_value=12),
+            patch.object(predict_topics_batch, "get_cpu_affinity_count", return_value=8),
+            patch.object(predict_topics_batch, "get_cgroup_cpu_quota_count", return_value=4),
+            patch.object(predict_topics_batch, "log_model_event"),
+        ):
+            self.assertEqual(predict_topics_batch.configure_torch_threads(), 4)
+        set_threads.assert_called_once_with(4)
 
     def test_preserves_duplicate_and_multilingual_reviews(self):
         reviews = [
