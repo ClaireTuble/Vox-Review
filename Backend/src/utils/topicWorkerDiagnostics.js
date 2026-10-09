@@ -1,0 +1,146 @@
+const SAFE_TOPIC_WORKER_FIELDS = new Set([
+  "event",
+  "requestId",
+  "workerPid",
+  "model",
+  "cached",
+  "loadDurationMs",
+  "descriptionCount",
+  "embeddingDurationMs",
+  "embeddingCount",
+  "reviewCount",
+  "torchNumThreads",
+  "inferenceDurationMs",
+  "refinementDurationMs",
+  "resultCount",
+  "serializationDurationMs",
+  "responseBytes",
+  "requestDurationMs",
+  "outputDurationMs",
+  "errorType",
+  "errorCategory",
+  "stage",
+  "platform",
+]);
+const SAFE_TOPIC_WORKER_EVENTS = new Set([
+  "topic_request_received",
+  "topic_request_failed",
+  "model_load_start",
+  "model_load_failed",
+  "model_load_complete",
+  "model_cache_reused",
+  "topic_embeddings_start",
+  "topic_embeddings_complete",
+  "topic_embeddings_cache_reused",
+  "review_inference_start",
+  "review_inference_complete",
+  "topic_refinement_complete",
+  "result_serialization_complete",
+  "result_output_complete",
+]);
+const SAFE_REQUEST_CONTEXTS = new Set([
+  "active-analysis-retry",
+  "background-analysis",
+  "manual-rescan",
+  "popup-analyze",
+  "popup-analysis",
+  "popup-request",
+  "popup-restore",
+  "popup-retry",
+  "saved-analysis-refresh",
+  "saved-analysis-restore",
+  "saved-page-topic-restore",
+  "topic-keyword-scoring",
+  "unspecified",
+  "worker-recovery",
+]);
+const SAFE_TOPIC_STAGES = new Set([
+  "model_load",
+  "request_validation",
+  "result_output",
+  "result_serialization",
+  "review_inference",
+  "topic_embeddings",
+  "topic_refinement",
+  "unknown",
+]);
+const SAFE_TOPIC_ERROR_CATEGORIES = new Set([
+  "client_cancelled",
+  "inference",
+  "model_initialization",
+  "refinement",
+  "request_validation",
+  "serialization",
+  "unknown",
+  "worker_process",
+]);
+const SAFE_EXCEPTION_TYPES = new Set([
+  "AttributeError",
+  "ImportError",
+  "IndexError",
+  "JSONDecodeError",
+  "KeyError",
+  "MemoryError",
+  "ModuleNotFoundError",
+  "OSError",
+  "RuntimeError",
+  "TimeoutError",
+  "TypeError",
+  "ValueError",
+]);
+
+function isSafeTopicWorkerValue(key, value) {
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "boolean") return true;
+  if (typeof value !== "string") return false;
+
+  if (key === "event") return SAFE_TOPIC_WORKER_EVENTS.has(value);
+  if (key === "stage") return SAFE_TOPIC_STAGES.has(value);
+  if (key === "errorCategory") return SAFE_TOPIC_ERROR_CATEGORIES.has(value);
+  if (key === "model") return value === "intfloat/multilingual-e5-small";
+  if (key === "platform") return /^(google|googleplay|shopee|steam|lazada|agoda)$/.test(value);
+  if (key === "errorType") return SAFE_EXCEPTION_TYPES.has(value);
+  if (key === "requestId") return /^\d{1,20}$/.test(value);
+  return false;
+}
+
+export function sanitizeTopicWorkerStderr(value) {
+  return String(value ?? "")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        const parsed = JSON.parse(line);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("unstructured worker diagnostic");
+        }
+        const safe = Object.fromEntries(
+          Object.entries(parsed).filter(([key, fieldValue]) => (
+            SAFE_TOPIC_WORKER_FIELDS.has(key) &&
+            isSafeTopicWorkerValue(key, fieldValue)
+          )),
+        );
+        if (!safe.event) throw new Error("missing worker event");
+        return JSON.stringify(safe);
+      } catch {
+        return JSON.stringify({
+          event: "unstructured_stderr_redacted",
+          byteCount: Buffer.byteLength(line),
+        });
+      }
+    })
+    .join("\n");
+}
+
+export function getSafeTopicRequestMetadata(req) {
+  const requestContext = req.get?.("x-voxreview-request-context") || "";
+  const clientRequestId = req.get?.("x-voxreview-client-request-id") || "";
+  return {
+    requestContext: SAFE_REQUEST_CONTEXTS.has(requestContext)
+      ? requestContext
+      : "unspecified",
+    clientRequestId: /^[A-Za-z0-9_-]{1,100}$/.test(clientRequestId)
+      ? clientRequestId
+      : null,
+  };
+}

@@ -2,46 +2,39 @@ import { HEALTH_TEST_URLS } from "./healthTestConfig.js";
 import { createAnalysisJobCoordinator } from "../src/services/activeAnalysisState.js";
 import { createActivityReporter } from "../src/services/activityReporter.js";
 import { requestSvmBatch } from "../src/Users/utils/svmRequest.js";
+import {
+  createTopicAnalysisRequestCoordinator,
+  createTopicRequestTimeout,
+  requestTopicAnalysis,
+} from "../src/Users/utils/topicAnalysisRequest.js";
 import { API_BASE_URL } from "../src/services/apiConfig.js";
 
-const TOPIC_API_URL = `${API_BASE_URL}/api/nlp/topics/predict`;
-const TOPIC_REQUEST_TIMEOUT_BASE_MS = 75_000;
-const TOPIC_REQUEST_TIMEOUT_PER_REVIEW_MS = 12_000;
-const VALID_TOPIC_LABELS = new Set([
-  "Quality", "Performance / Functionality", "Features / Content", "Service / Support",
-  "Delivery / Transaction", "Price / Value", "Usability / Experience",
-  "Accuracy / Expectations", "Availability / Accessibility", "Environment / Location", "Other / General",
-]);
-const analysisJobs = createAnalysisJobCoordinator({
-  requestSvm: (reviews, platform) => requestSvmBatch(reviews, { platform }),
-  requestTopics: async (reviews, platform) => {
+const topicRequests = createTopicAnalysisRequestCoordinator({
+  request: async (reviews, platform, { signal, requestContext, clientRequestId }) => {
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      TOPIC_REQUEST_TIMEOUT_BASE_MS + reviews.length * TOPIC_REQUEST_TIMEOUT_PER_REVIEW_MS,
-    );
+    const forwardAbort = () => controller.abort(signal.reason);
+    if (signal?.aborted) controller.abort(signal.reason);
+    else signal?.addEventListener("abort", forwardAbort, { once: true });
+    const timeout = createTopicRequestTimeout(controller, reviews.length);
     try {
-      const normalizedPlatform = String(platform || "").trim().toLowerCase();
-      const platformKey = ({ "google reviews": "google", "google play": "googleplay" })[normalizedPlatform] || normalizedPlatform;
-      const response = await fetch(TOPIC_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviews, platform: platformKey }),
+      return await requestTopicAnalysis(reviews, platform, {
         signal: controller.signal,
+        requestContext,
+        clientRequestId,
       });
-      const payload = await response.json();
-      const validResults = Array.isArray(payload?.results) && payload.results.length === reviews.length &&
-        payload.results.every((result) => Array.isArray(result?.topics) && result.topics.every((topic) => (
-          VALID_TOPIC_LABELS.has(topic?.label) && typeof topic.score === "number"
-        )));
-      if (!response.ok || !payload?.success || !validResults) {
-        throw new Error(payload?.message || payload?.error || "Review topic response was invalid.");
-      }
-      return payload;
     } finally {
-      clearTimeout(timeout);
+      timeout.clear();
+      signal?.removeEventListener("abort", forwardAbort);
     }
   },
+});
+const analysisJobs = createAnalysisJobCoordinator({
+  requestSvm: (reviews, platform, signal) => requestSvmBatch(reviews, { platform, signal }),
+  requestTopics: (reviews, platform, signal, context = {}) => topicRequests.request(
+    reviews,
+    platform,
+    { ...context, signal },
+  ),
   topicsEnabled: import.meta.env?.VITE_ENABLE_TOPIC_ANALYSIS !== "false",
   onCompleted: (analysis) => activityReporter.reportAnalysisCompletion(analysis),
 });
@@ -49,6 +42,7 @@ void analysisJobs.resume();
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const BACKEND_URLS = [API_BASE_URL];
+const PLATFORM_AVAILABILITY_TIMEOUT_MS = 15_000;
 const HEALTH_CHECK_TIMEOUT_MS = 45_000;
 const activeHealthChecks = new Set();
 
@@ -166,8 +160,10 @@ async function checkPlatformActive(platformKey) {
   const key = String(platformKey || "").trim().toLowerCase();
   if (!VALID_PLATFORMS.has(key)) throw new Error("This platform is currently unavailable.");
   for (const baseUrl of BACKEND_URLS) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), PLATFORM_AVAILABILITY_TIMEOUT_MS);
     try {
-      const res = await fetch(`${baseUrl}/api/health/status`);
+      const res = await fetch(`${baseUrl}/api/health/status`, { signal: controller.signal });
       if (!res.ok) continue;
       const data = await res.json();
       if (data.success && Array.isArray(data.platforms)) {
@@ -176,6 +172,7 @@ async function checkPlatformActive(platformKey) {
         return entry.is_active;
       }
     } catch { /* try next URL */ }
+    finally { clearTimeout(timeoutId); }
   }
   throw new Error("Platform availability could not be verified. Please try again.");
 }
@@ -288,6 +285,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       ok: false,
       error: error?.message || "Analysis could not be started.",
     }));
+    return true;
+  }
+
+  if (message?.type === "requestTopicAnalysis") {
+    const { reviews, platform, pageKey, requestContext, force } = message.request || {};
+    topicRequests.request(reviews, platform, {
+      pageKey,
+      requestContext: requestContext || "popup-request",
+      force: Boolean(force),
+    }).then(
+      (result) => sendResponse({ ok: true, result }),
+      (error) => sendResponse({
+        ok: false,
+        error: error?.message || "Topic analysis failed.",
+        httpStatus: error?.httpStatus ?? null,
+        code: error?.code || null,
+      }),
+    );
     return true;
   }
 
@@ -417,8 +432,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
 
       sendResponse({ ok: true });
-    }).catch(() => {
-      sendResponse({ ok: true });
+    }).catch((error) => {
+      sendResponse({
+        ok: false,
+        error: error?.message || "Platform availability could not be verified.",
+      });
     });
 
     return true;

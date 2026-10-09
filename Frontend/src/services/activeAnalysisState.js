@@ -1,4 +1,5 @@
 import { getPageKey } from './pageAnalysisStorage.js';
+import { getTopicReviewSetSignature } from '../Users/utils/topicAnalysisRequest.js';
 
 export const ACTIVE_ANALYSIS_STORAGE_KEY = 'voxreview_active_analysis_states';
 
@@ -80,31 +81,59 @@ export function createAnalysisJobCoordinator({
   onCompleted = () => {},
 }) {
   const jobs = new Map();
+  let stateWriteQueue = Promise.resolve();
 
-  async function run(initialState, runningJob, persistInitial = true) {
+  function persistState(state) {
+    const write = stateWriteQueue.then(() => writeState(state));
+    stateWriteQueue = write.catch(() => {});
+    return write;
+  }
+
+  function isCurrentJob(pageKey, runningJob) {
+    return jobs.get(pageKey) === runningJob && !runningJob.controller.signal.aborted;
+  }
+
+  async function run(pageKey, initialState, runningJob, persistInitial = true) {
     try {
-      if (persistInitial) await writeState(initialState);
+      if (persistInitial) await persistState(initialState);
       const reviewTexts = initialState.reviews.map((review) => (
         typeof review === 'string' ? review : review?.text || review?.reviewText || review?.comment || review?.review || ''
       ));
-      const svmResult = initialState.svmResult || await requestSvm(reviewTexts, initialState.platform);
+      const svmResult = initialState.svmResult || await requestSvm(
+        reviewTexts,
+        initialState.platform,
+        runningJob.controller.signal,
+      );
+      if (!isCurrentJob(pageKey, runningJob)) return runningJob.state;
       if (!Array.isArray(svmResult?.predictions) ||
         svmResult.predictions.length !== initialState.reviews.length ||
         svmResult.predictions.some((category) => ![1, 2, 3, 4, 5, 6].includes(category))) {
         throw new Error('SVM returned an invalid Category prediction payload.');
       }
       runningJob.state = { ...initialState, svmResult, stage: topicsEnabled ? 'topics' : 'complete' };
-      await writeState(runningJob.state);
+      await persistState(runningJob.state);
+      if (!isCurrentJob(pageKey, runningJob)) return runningJob.state;
 
       let topicResult = initialState.topicResult || null;
       let topicError = initialState.topicError || null;
-      if (topicsEnabled && !topicResult && !topicError) {
+      if (topicsEnabled && (!topicResult || initialState.force)) {
         try {
-          topicResult = await requestTopics(reviewTexts, initialState.platform);
+          topicResult = await requestTopics(
+            reviewTexts,
+            initialState.platform,
+            runningJob.controller.signal,
+            {
+              pageKey,
+              requestContext: initialState.requestContext || 'background-analysis',
+              force: Boolean(initialState.force),
+            },
+          );
         } catch (error) {
+          if (!isCurrentJob(pageKey, runningJob)) return runningJob.state;
           topicError = error?.message || 'Review topic analysis unavailable.';
         }
       }
+      if (!isCurrentJob(pageKey, runningJob)) return runningJob.state;
 
       runningJob.state = {
         ...initialState,
@@ -115,7 +144,8 @@ export function createAnalysisJobCoordinator({
         topicError,
         completedAt: Date.now(),
       };
-      const completedState = await writeState(runningJob.state);
+      const completedState = await persistState(runningJob.state);
+      if (!isCurrentJob(pageKey, runningJob)) return runningJob.state;
       if (!topicError && (topicsEnabled ? topicResult !== null : true)) {
         try {
           void Promise.resolve(onCompleted(completedState)).catch(() => {});
@@ -125,6 +155,7 @@ export function createAnalysisJobCoordinator({
       }
       return completedState;
     } catch (error) {
+      if (!isCurrentJob(pageKey, runningJob)) return runningJob.state;
       runningJob.state = {
         ...initialState,
         status: 'error',
@@ -132,22 +163,66 @@ export function createAnalysisJobCoordinator({
         error: error?.message || 'Emotion analysis failed.',
         completedAt: Date.now(),
       };
-      return writeState(runningJob.state);
+      return persistState(runningJob.state);
     }
   }
 
-  return {
+  async function cancel(pageKey) {
+    const runningJob = jobs.get(pageKey);
+    if (!runningJob) return false;
+
+    jobs.delete(pageKey);
+    runningJob.controller.abort(new DOMException(
+      "Analysis was replaced or cancelled.",
+      "AbortError",
+    ));
+    runningJob.state = {
+      ...runningJob.state,
+      status: 'cancelled',
+      stage: 'cancelled',
+      error: null,
+      completedAt: Date.now(),
+    };
+    runningJob.resolveReady({
+      ok: false,
+      error: 'Analysis was cancelled.',
+      state: runningJob.state,
+    });
+    await persistState(runningJob.state);
+    return true;
+  }
+
+  const coordinator = {
     start(input) {
       const pageKey = getPageKey(input?.platform, input?.page_url) || input?.pageKey;
       if (!pageKey || !Array.isArray(input?.reviews)) return Promise.resolve({ ok: false, error: 'Invalid analysis context.' });
+      const getStateReviewSignature = (state) => state?.reviewSetSignature || (
+        Array.isArray(state?.reviews)
+          ? getTopicReviewSetSignature(state.reviews.map((review) => (
+              typeof review === 'string'
+                ? review
+                : review?.text || review?.reviewText || review?.comment || review?.review || ''
+            )))
+          : null
+      );
+      const inputReviewSignature = getTopicReviewSetSignature(input.reviews.map((review) => (
+        typeof review === 'string'
+          ? review
+          : review?.text || review?.reviewText || review?.comment || review?.review || ''
+      )));
 
       if (jobs.has(pageKey)) {
-        return jobs.get(pageKey).ready.then((result) => ({ ...result, started: false }));
+        const runningJob = jobs.get(pageKey);
+        if (input.force || runningJob.state.reviewSetSignature !== inputReviewSignature) {
+          return cancel(pageKey).then(() => coordinator.start(input));
+        }
+        return runningJob.ready.then((result) => ({ ...result, started: false }));
       }
 
       const initialState = {
         ...input,
         pageKey,
+        reviewSetSignature: inputReviewSignature,
         status: 'analyzing',
         stage: 'svm',
         runId: input.runId || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -161,38 +236,48 @@ export function createAnalysisJobCoordinator({
       let resolveReady;
       const runningJob = {
         state: initialState,
+        controller: new AbortController(),
         ready: new Promise((resolve) => { resolveReady = resolve; }),
+        resolveReady: (result) => resolveReady(result),
       };
       jobs.set(pageKey, runningJob);
       const job = (async () => {
         try {
           const existingState = await readState(pageKey);
-          if (existingState?.status === 'completed' && !input.force) {
+          if (!isCurrentJob(pageKey, runningJob)) {
+            return { ok: false, error: 'Analysis was cancelled.', state: runningJob.state };
+          }
+          const sameReviewSet = getStateReviewSignature(existingState) === inputReviewSignature;
+          const hasCompletedTopics = Array.isArray(existingState?.topicResult?.results);
+          if (existingState?.status === 'completed' && sameReviewSet && !input.force &&
+            (!topicsEnabled || hasCompletedTopics)) {
             runningJob.state = existingState;
             const result = { ok: true, started: false, state: existingState };
             resolveReady(result);
             return result;
           }
 
-          const anotherRunningJob = [...jobs.keys()].find((runningPageKey) => runningPageKey !== pageKey);
-          if (anotherRunningJob) {
-            const result = { ok: false, error: 'An analysis is already running for another page.' };
-            resolveReady(result);
-            return result;
-          }
-
-          const stateToRun = existingState?.status === 'analyzing'
-            ? { ...existingState, pageKey }
-            : initialState;
+          const stateToRun = existingState?.status === 'analyzing' && sameReviewSet
+            ? { ...existingState, pageKey, reviewSetSignature: inputReviewSignature }
+            : sameReviewSet
+              ? {
+                  ...initialState,
+                  svmResult: input.force ? null : existingState?.svmResult || null,
+                  topicResult: existingState?.topicResult || null,
+                }
+              : initialState;
           runningJob.state = stateToRun;
           if (existingState?.status === 'analyzing') {
             resolveReady({ ok: true, started: false, state: stateToRun });
-            return { ok: true, started: false, state: await run(stateToRun, runningJob, false) };
+            return { ok: true, started: false, state: await run(pageKey, stateToRun, runningJob, false) };
           }
 
-          await writeState(stateToRun);
+          await persistState(stateToRun);
+          if (!isCurrentJob(pageKey, runningJob)) {
+            return { ok: false, error: 'Analysis was cancelled.', state: runningJob.state };
+          }
           resolveReady({ ok: true, started: true, state: initialState });
-          return { ok: true, started: true, state: await run(stateToRun, runningJob, false) };
+          return { ok: true, started: true, state: await run(pageKey, stateToRun, runningJob, false) };
         } catch (error) {
           const result = { ok: false, error: error?.message || 'Analysis could not be started.' };
           resolveReady(result);
@@ -200,19 +285,36 @@ export function createAnalysisJobCoordinator({
         }
       })();
       runningJob.promise = job;
-      return job.finally(() => jobs.delete(pageKey));
+      return job.finally(() => {
+        if (jobs.get(pageKey) === runningJob) jobs.delete(pageKey);
+      });
     },
     async resume() {
       const states = await readStates();
-      const pendingState = Object.values(states).find((state) => state?.status === 'analyzing');
-      if (!pendingState) return null;
-      const pageKey = pendingState.pageKey || getPageKey(pendingState.platform, pendingState.page_url);
-      if (!pageKey || jobs.size > 0) return null;
-      void this.start({ ...pendingState, pageKey }).catch(() => {});
-      return pageKey;
+      const pendingStates = Object.values(states)
+        .filter((state) => state?.status === 'analyzing')
+        .map((state) => ({
+          state,
+          pageKey: state.pageKey || getPageKey(state.platform, state.page_url),
+        }))
+        .filter(({ pageKey }) => Boolean(pageKey));
+
+      pendingStates.forEach(({ state, pageKey }) => {
+        if (!jobs.has(pageKey)) {
+          void coordinator.start({
+            ...state,
+            pageKey,
+            requestContext: 'worker-recovery',
+          }).catch(() => {});
+        }
+      });
+      return pendingStates[0]?.pageKey || null;
     },
+    cancel,
     getRunningPageKey() {
       return jobs.keys().next().value || null;
     },
   };
+
+  return coordinator;
 }

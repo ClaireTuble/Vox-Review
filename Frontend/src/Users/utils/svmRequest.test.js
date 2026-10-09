@@ -86,3 +86,20 @@ test('aborts a pending request at the deadline and clears loading with a timeout
   assert.equal(state.status, 'idle');
   assert.match(state.message, /timed out after 0.01 seconds/);
 });
+
+test('aborts the pending request when its analysis job is cancelled', async () => {
+  const jobController = new AbortController();
+  let requestSignal;
+  const pendingRequest = requestSvmBatch(['great'], {
+    platform: 'steam',
+    signal: jobController.signal,
+    fetchImpl: (_url, options) => new Promise((_resolve, reject) => {
+      requestSignal = options.signal;
+      options.signal.addEventListener('abort', () => reject(new Error('fetch aborted')), { once: true });
+    }),
+  });
+
+  jobController.abort();
+  await assert.rejects(pendingRequest, /fetch aborted/);
+  assert.equal(requestSignal.aborted, true);
+});

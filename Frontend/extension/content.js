@@ -86,11 +86,52 @@ if (platform === "unknown") {
 
 } else {
   // ── State tracking ─────────────────────────────────────────────────────────
-  let lastSentSignature = ""; // tracks last sent (url + filter + reviewCount)
+  let lastSentSignature = ""; // tracks the last page/filter/review set sent to the background
   let isScraping = false;
   let rescanQueued = false;
+  let queuedRescanForce = false;
   let queuedRescanRequestId = null;
   let debounceTimer = null;
+
+  const reviewMutationSelectors = {
+    shopee: {
+      content: ".product-ratings__list .YNedDV, [class*='comment-content'], [class*='review-content']",
+      cards: "[data-cmtid], .shopee-product-rating, .product-ratings__list .YNedDV",
+    },
+    lazada: {
+      content: ".item-content-main-content-reviews-item, [class*='main-content-reviews-item'], [class*='review-content'], [class*='user-comment']",
+      cards: ".mod-reviews .item, .pdp-mod-review .item, [class*='mod-review'] .item, #module_product_review .item, [class*='pdp-review'] .item, [class*='review-item']",
+    },
+    google: {
+      content: ".jftiEf .wiI7pd",
+      cards: ".jftiEf",
+    },
+    googleplay: {
+      content: ".h3YV2d, [class*='review-text']",
+      cards: "[data-review-id], .c1bOId, .RHo1pe, .EGFGHd",
+    },
+    steam: {
+      content: ".apphub_CardTextContent",
+      cards: '[role="list"] > div > div[role="button"]',
+    },
+  }[platform];
+
+  function nodeMatchesReviewSelector(node, selector) {
+    if (node.nodeType !== 1) return false;
+    return node.matches(selector) || !!node.querySelector(selector);
+  }
+
+  function isReviewMutationRelevant(mutation) {
+    const target = mutation.target.nodeType === 1
+      ? mutation.target
+      : mutation.target.parentElement;
+    if (target?.closest(reviewMutationSelectors.content)) return true;
+    const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes];
+    return changedNodes.some((node) => (
+      nodeMatchesReviewSelector(node, reviewMutationSelectors.content) ||
+      nodeMatchesReviewSelector(node, reviewMutationSelectors.cards)
+    ));
+  }
 
   // Observer stays alive for the whole page session — NEVER disconnected
   // after a successful scrape. Only disconnected on context invalidation.
@@ -105,8 +146,9 @@ if (platform === "unknown") {
     }
 
     if (isScraping) {
+      rescanQueued = true;
       if (force) {
-        rescanQueued = true;
+        queuedRescanForce = true;
         queuedRescanRequestId = rescanRequestId;
       }
       return;
@@ -135,7 +177,22 @@ if (platform === "unknown") {
       const productUrl = Array.isArray(raw) ? window.location.href
         : (raw.productUrl || window.location.href);
       console.log("[SCRAPE] reviews returned:", reviews.length);
-      // Decoupled Activity Dispatch: notify background as soon as product/place page is detected
+
+      // Build a lightweight signature of the current visible state.
+      // Only send a message to background when something actually changed.
+      const reviewSignature = reviews.map((review) => {
+        if (typeof review === "string") return review;
+        if (!review || typeof review !== "object") return String(review);
+        const text = review.text || review.reviewText || review.comment || review.review || review.body || review.reviewBody || "";
+        return `${review.id || review.reviewId || ""}:${text}`;
+      }).join("\u001f");
+      const signature = `${productUrl}|${ratingFilter}|${isProductPage}|${reviewSignature}`;
+
+      if (signature === lastSentSignature) {
+        return; // DOM fired but nothing meaningful changed — skip
+      }
+
+      lastSentSignature = signature;
       if (isProductPage && platform) {
         safeSendMessage({
           type: "pageDetected",
@@ -145,16 +202,6 @@ if (platform === "unknown") {
           productUrl: productUrl,
         });
       }
-
-      // Build a lightweight signature of the current visible state.
-      // Only send a message to background when something actually changed.
-      const signature = `${productUrl}|${ratingFilter}|${isProductPage}|${reviews.length}`;
-
-      if (signature === lastSentSignature) {
-        return; // DOM fired but nothing meaningful changed — skip
-      }
-
-      lastSentSignature = signature;
       if (["shopee", "lazada", "google", "googleplay", "steam"].includes(platform)) {
         console.info("[TOPIC TRACE] scrape output", {
           platform,
@@ -231,10 +278,12 @@ if (platform === "unknown") {
     } finally {
       isScraping = false;
       if (rescanQueued) {
+        const nextForce = queuedRescanForce;
         rescanQueued = false;
+        queuedRescanForce = false;
         const requestId = queuedRescanRequestId;
         queuedRescanRequestId = null;
-        setTimeout(() => scrapeAndSend(true, requestId), 0);
+        setTimeout(() => scrapeAndSend(nextForce, requestId), 0);
       }
     }
   }
@@ -255,16 +304,20 @@ if (platform === "unknown") {
 
     if (!isExtensionContextValid()) return;
 
-    domObserver = new MutationObserver(() => {
+    domObserver = new MutationObserver((mutations) => {
       if (!isExtensionContextValid()) {
         domObserver.disconnect();
         domObserver = null;
         return;
       }
-      onDomMutated();
+      if (mutations.some(isReviewMutationRelevant)) onDomMutated();
     });
 
-    domObserver.observe(document.body, { childList: true, subtree: true });
+    domObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
     console.log("VoxReview: Persistent observer started.");
   }
 

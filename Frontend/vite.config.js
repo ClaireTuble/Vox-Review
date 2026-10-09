@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import process from "node:process";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { DEFAULT_API_URL, DEFAULT_APP_URL } from "./extension/config.js";
 
 function extensionManifestPlugin(apiUrl, appUrl) {
   return {
@@ -17,7 +18,7 @@ function extensionManifestPlugin(apiUrl, appUrl) {
         return hostname === "localhost" || hostname === "127.0.0.1";
       });
       const apiHostPermission = apiUrl ? `${new URL(apiUrl).origin}/*` : null;
-      const appOrigin = new URL(appUrl || "http://localhost:5173").origin;
+      const appOrigin = new URL(appUrl || DEFAULT_APP_URL).origin;
       const appHostPermission = `${appOrigin}/*`;
       const hostPermissions = [
         ...new Set([
@@ -48,7 +49,9 @@ function extensionManifestPlugin(apiUrl, appUrl) {
 export default defineConfig(({ mode }) => {
   const isExtensionBuild = mode === "extension";
   const env = loadEnv(mode, process.cwd(), "VITE_");
-  const appOrigin = new URL(env.VITE_APP_URL || "http://localhost:5173").origin;
+  const apiUrl = env.VITE_API_URL || DEFAULT_API_URL;
+  const appUrl = env.VITE_APP_URL || DEFAULT_APP_URL;
+  const appOrigin = new URL(appUrl).origin;
 
   return {
     define: isExtensionBuild
@@ -57,7 +60,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       ...(isExtensionBuild
-        ? [extensionManifestPlugin(env.VITE_API_URL, env.VITE_APP_URL)]
+        ? [extensionManifestPlugin(apiUrl, appUrl)]
         : []),
     ],
     base: isExtensionBuild ? "./" : "/",

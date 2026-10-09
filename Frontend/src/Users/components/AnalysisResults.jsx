@@ -204,9 +204,12 @@ export default function AnalysisResults({
   };
 
   const data = emotionData || defaultData;
-  const activeEmotion = data.emotions.find((emotion) => emotion.id === selectedEmotion?.id) || data.emotions[0];
-  const selectedCategory = selectedEmotion
-    ? selectedEmotion.category ?? EMOTION_CATEGORY_BY_ID[selectedEmotion.id]
+  const selectedEmotionForData = data.emotions.find((emotion) => emotion === selectedEmotion) || null;
+  const activeEmotion = selectedEmotionForData
+    || data.emotions.find((emotion) => emotion.label === data.dominantEmotion?.label)
+    || data.emotions[0];
+  const selectedCategory = selectedEmotionForData
+    ? selectedEmotionForData.category ?? EMOTION_CATEGORY_BY_ID[selectedEmotionForData.id]
     : null;
   const topicReviewEntries = data.quotes.map((quote, index) => ({
     review: normalizedReviews[index] ?? quote,
@@ -254,7 +257,7 @@ export default function AnalysisResults({
   const sortedQuoteEntries = sortPriorityReviews(filteredQuoteEntries, quoteSortMode);
 
   const selectEmotion = (emotion) => {
-    const isAlreadySelected = selectedEmotion?.id === emotion.id;
+    const isAlreadySelected = selectedEmotionForData?.id === emotion.id;
     setSelectedEmotion(isAlreadySelected ? null : emotion);
     setSelectedQuoteFilter(isAlreadySelected ? 'all' : emotion.label.toLowerCase());
   };
@@ -422,7 +425,7 @@ export default function AnalysisResults({
             {data.emotions.map((item) => (
               <div
                 key={item.id}
-                className={`legend-item ${selectedEmotion?.id === item.id ? 'active' : ''}`}
+                className={`legend-item ${selectedEmotionForData?.id === item.id ? 'active' : ''}`}
                 onClick={() => selectEmotion(item)}
                 role="button"
                 tabIndex={0}
@@ -670,8 +673,6 @@ export default function AnalysisResults({
             onChange={(event) => setQuoteSortMode(event.target.value)}
           >
             <option value="priority">Priority</option>
-            <option value="newest">Newest</option>
-            <option value="oldest">Oldest</option>
           </select>
         </label>
 

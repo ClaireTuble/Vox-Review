@@ -12,12 +12,23 @@ const COMMON_REVIEW_WORDS = new Set([
   'or', 'our', 'pa', 'para', 'pero', 'po', 'quite', 'really', 'rin', 'sa', 'she', 'siya',
   'so', 'sya', 'that', 'the', 'their', 'them', 'then', 'there', 'they', 'this', 'to', 'too',
   'very', 'was', 'we', 'were', 'with', 'would', 'yung', 'you', 'your', 'din', 'easily',
-  'super', 'talaga', 'one', 'has', 'have', 'had', 'be', 'been', 'being', 'no',
+  'super', 'talaga', 'one', 'has', 'have', 'had', 'be', 'been', 'being', 'no', 'a',
+  'an', 'any', 'because', 'before', 'between', 'both', 'each', 'either', 'else', 'every',
+  'few', 'hers', 'herself', 'him', 'himself', 'his', 'itself', 'many', 'might', 'mine',
+  'most', 'must', 'my', 'myself', 'neither', 'once', 'other', 'ours', 'ourselves', 'own',
+  'same', 'should', 'since', 'some', 'such', 'than', 'these', 'those', 'through', 'under',
+  'until', 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'whose', 'why', 'will',
+  'yours', 'yourself', 'yourselves', 'keep', 'kept', 'keeping',
 ]);
 const GENERIC_REVIEW_WORDS = new Set([
   'app', 'apps', 'item', 'items', 'package', 'person', 'product', 'products', 'review',
-  'reviews', 'stuff', 'thing', 'things',
+  'reviews', 'stuff', 'thing', 'things', 'game', 'games', 'customer', 'team', 'teams',
+  'new', 'latest',
 ]);
+const GENERIC_STANDALONE_TOPIC_WORDS = new Set([
+  'support', 'service', 'request', 'replied', 'refund', 'update', 'latest', 'new',
+]);
+const INCOMPLETE_PHRASE_ENDINGS = new Set(['never', 'not', 'very', 'and', 'to', 'with']);
 const ORDINARY_REVIEW_VERBS = new Set([
   'assemble', 'assembled', 'assembles', 'assembling', 'arrive', 'arrived', 'arrives', 'arriving',
   'bought', 'buy', 'buying', 'buys', 'came', 'come', 'comes', 'coming', 'deliver', 'delivered',
@@ -27,7 +38,7 @@ const ORDINARY_REVIEW_VERBS = new Set([
   'looks', 'make', 'made', 'makes', 'making', 'order', 'ordered', 'ordering', 'orders', 'play',
   'played', 'playing', 'plays', 'receive', 'received', 'receives', 'receiving', 'send', 'sending',
   'see', 'seeing', 'sees', 'saw', 'sends', 'sent', 'ship', 'shipped', 'shipping', 'ships', 'use', 'used', 'uses', 'using', 'work',
-  'worked', 'working', 'works', 'binili', 'bumili', 'dumating', 'ginamit', 'gumamit', 'gumana',
+  'worked', 'working', 'works', 'keep', 'keeps', 'kept', 'keeping', 'binili', 'bumili', 'dumating', 'ginamit', 'gumamit', 'gumana',
   'gumagana', 'nagdownload', 'naglaro', 'naglalaro', 'nabili', 'natanggap', 'nilaro', 'tinanggap',
 ]);
 const REVIEW_URL_PATTERN = /https?:\/\/\S+|www\.\S+/gi;
@@ -60,6 +71,9 @@ const BBCODE_MARKUP_PATTERN = new RegExp(
   'gi',
 );
 const MARKUP_BOUNDARY = '\uE000';
+const TOPIC_KEYWORD_RELEVANCE_THRESHOLD = 0.75;
+const TOPIC_KEYWORD_MAX_SCORE_GAP = 0.025;
+const MAX_CANDIDATES_PER_TOPIC = 40;
 const HTML_ENTITY_DECODER = typeof document === 'undefined'
   ? null
   : document.createElement('textarea');
@@ -130,133 +144,308 @@ function unwrapReview(entry) {
   return Number.isInteger(entry?.topicResultIndex) ? entry.review : entry;
 }
 
-function topicLabelWords(label) {
-  return new Set((label.match(REVIEW_TOKEN_PATTERN) || []).flatMap((word) => (
-    word.toLocaleLowerCase().split('-')
-  )));
-}
+function getReviewKeywordCandidates(reviewText) {
+  const { source, markupBoundaries } = prepareKeywordSource(reviewText);
+  const tokens = [...source.matchAll(REVIEW_TOKEN_PATTERN)];
+  const candidates = new Map();
 
-function clauseAtPosition(clauses, position) {
-  return clauses.find((clause) => (
-    clause.index <= position && position < clause.index + clause[0].length
-  ));
-}
+  for (let start = 0; start < tokens.length; start += 1) {
+    for (let end = start; end < Math.min(tokens.length, start + 4); end += 1) {
+      if (end > start) {
+        const previous = tokens[end - 1];
+        const previousEnd = previous.index + previous[0].length;
+        const gap = source.slice(previousEnd, tokens[end].index);
+        if (!/^\s+$/.test(gap) || markupBoundaries.has(previousEnd)) break;
+      }
 
-function isSubjectBeforePossessiveVerb(source, endPosition) {
-  return /^\s+(?:[\p{L}-]+\s+){0,2}(?:has|have|had)\b/iu.test(source.slice(endPosition));
-}
+      let firstToken = start;
+      let lastToken = end;
+      const startsWithNegation = ['never', 'no', 'not'].includes(
+        tokens[firstToken][0].toLocaleLowerCase(),
+      );
+      const preservesNegativeIt = startsWithNegation &&
+        tokens[lastToken][0].toLocaleLowerCase() === 'it';
+      const isBoundaryWord = (token) => {
+        const normalized = token[0].toLocaleLowerCase();
+        return COMMON_REVIEW_WORDS.has(normalized);
+      };
+      while (firstToken < lastToken && (
+        isBoundaryWord(tokens[firstToken]) &&
+        !['never', 'no', 'not'].includes(tokens[firstToken][0].toLocaleLowerCase())
+      )) firstToken += 1;
+      while (lastToken > firstToken && (
+        isBoundaryWord(tokens[lastToken]) ||
+        GENERIC_REVIEW_WORDS.has(tokens[lastToken][0].toLocaleLowerCase())
+      ) && !(preservesNegativeIt && lastToken === end)) lastToken -= 1;
+      const candidateTokens = tokens.slice(firstToken, lastToken + 1).map((token) => token[0]);
+      const contentTokens = candidateTokens
+        .flatMap((token) => token.toLocaleLowerCase().split('-'))
+        .filter((token) => (
+          !COMMON_REVIEW_WORDS.has(token) &&
+          !GENERIC_REVIEW_WORDS.has(token) &&
+          !PHRASE_CONNECTORS.has(token) &&
+          !ORDINARY_REVIEW_VERBS.has(token) &&
+          !(candidateTokens.length === 1 && GENERIC_STANDALONE_TOPIC_WORDS.has(token))
+        ));
+      if (!contentTokens.length || contentTokens.some((token) => token.length < 2)) continue;
+      if (candidateTokens.length === 1 &&
+        (ORDINARY_REVIEW_VERBS.has(contentTokens[0]) ||
+          GENERIC_STANDALONE_TOPIC_WORDS.has(contentTokens[0]) ||
+          INCOMPLETE_PHRASE_ENDINGS.has(contentTokens[0]))) continue;
+      const containsGenericActionVerb = candidateTokens.some((token) => (
+        token.toLocaleLowerCase().split('-').some((part) => ORDINARY_REVIEW_VERBS.has(part))
+      ));
+      const isMeaningfulActionPhrase = (
+        candidateTokens[0].toLocaleLowerCase() === 'keeps' &&
+        candidateTokens.slice(1).some((token) => (
+          token.toLocaleLowerCase().split('-').some((part) => (
+            !COMMON_REVIEW_WORDS.has(part) &&
+            !GENERIC_REVIEW_WORDS.has(part) &&
+            !ORDINARY_REVIEW_VERBS.has(part)
+          ))
+        ))
+      ) || (
+        candidateTokens.at(-1).toLocaleLowerCase() === 'assemble' &&
+        candidateTokens.includes('to') &&
+        contentTokens.some((token) => token !== 'assemble')
+      );
+      if (containsGenericActionVerb && !isMeaningfulActionPhrase) continue;
+      if (INCOMPLETE_PHRASE_ENDINGS.has(candidateTokens.at(-1).toLocaleLowerCase())) continue;
+      const hasUnhelpfulFunctionWord = candidateTokens.some((token) => (
+        token.toLocaleLowerCase().split('-').some((part) => (
+          COMMON_REVIEW_WORDS.has(part) &&
+          !PHRASE_CONNECTORS.has(part) &&
+          !['no', 'not', 'never'].includes(part) &&
+          !(part === 'it' && preservesNegativeIt && token === candidateTokens.at(-1))
+        ))
+      ));
+      if (hasUnhelpfulFunctionWord) continue;
 
-function isReadablePhrase(tokens) {
-  const parts = tokens.flatMap((token) => token.toLocaleLowerCase().split('-'));
-  if (!parts.length || parts.some((part) => part.length < 2)) return false;
-
-  for (let index = 0; index < parts.length; index += 1) {
-    const part = parts[index];
-    const isInnerConnector = PHRASE_CONNECTORS.has(part) && index > 0 && index < parts.length - 1;
-    const isLeadingNegation = part === 'no' && index === 0 && parts.length > 1;
-    const isInfinitiveVerb = part === 'assemble' && parts[index - 1] === 'to' && index === parts.length - 1;
-    if (isInnerConnector || isLeadingNegation || isInfinitiveVerb) continue;
-    if (COMMON_REVIEW_WORDS.has(part) || ORDINARY_REVIEW_VERBS.has(part)) return false;
+      const term = source.slice(
+        tokens[firstToken].index,
+        tokens[lastToken].index + tokens[lastToken][0].length,
+      );
+      const key = term.toLocaleLowerCase();
+      candidates.set(key, term);
+    }
   }
 
-  const contentParts = parts.filter((part, index) => (
-    !PHRASE_CONNECTORS.has(part) && !(part === 'no' && index === 0)
-  ));
-  if (!contentParts.length || contentParts.length > 3) return false;
-  return !(contentParts.length === 1 && GENERIC_REVIEW_WORDS.has(contentParts[0]));
+  return candidates;
 }
 
-export function getMeaningfulKeywords(reviews, selectedTopicLabel = null, topicAnalysis = null) {
-  const frequencies = new Map();
+export function getReviewKeywordPhrases(reviewText) {
+  return [...getReviewKeywordCandidates(reviewText).values()];
+}
+
+export function getTopicKeywordCandidates(reviews, topicAnalysis) {
   const topicResults = Array.isArray(topicAnalysis?.results) ? topicAnalysis.results : [];
-  const targetTopicWords = selectedTopicLabel ? topicLabelWords(selectedTopicLabel) : new Set();
+  const candidatesByTopic = new Map(TOPIC_LABELS.map((label) => [label, new Map()]));
 
   reviews.forEach((entry, entryIndex) => {
-    const reviewText = getReviewText(unwrapReview(entry));
-    const { source, markupBoundaries } = prepareKeywordSource(reviewText);
-    const tokens = [...source.matchAll(REVIEW_TOKEN_PATTERN)];
-    const reviewTerms = new Map();
     const resultIndex = Number.isInteger(entry?.topicResultIndex) ? entry.topicResultIndex : entryIndex;
-    const assignedLabels = topicResults[resultIndex]?.topics?.map((topic) => topic.label) || [];
-    const competingTopicWords = new Set(assignedLabels
-      .filter((label) => label !== selectedTopicLabel)
-      .flatMap((label) => [...topicLabelWords(label)]));
-    const clauses = [...source.matchAll(/[^.!?;\n]+/g)];
-    const targetCueClauses = clauses.filter((clause) => (
-      [...topicLabelWords(clause[0])].some((word) => targetTopicWords.has(word))
-    ));
+    const result = topicResults[resultIndex];
+    if (result?.reviewIndex != null && result.reviewIndex !== resultIndex) return;
 
-    for (let start = 0; start < tokens.length; start += 1) {
-      const phraseTokens = [];
-      for (let end = start; end < Math.min(tokens.length, start + 4); end += 1) {
-        if (end > start) {
-          const previous = tokens[end - 1];
-          const previousEnd = previous.index + previous[0].length;
-          const gap = source.slice(previousEnd, tokens[end].index);
-          if (!/^\s+$/.test(gap) || markupBoundaries.has(previousEnd)) break;
-        }
-
-        const token = tokens[end][0];
-        phraseTokens.push(token);
-        if (!isReadablePhrase(phraseTokens)) continue;
-
-        const term = source.slice(tokens[start].index, tokens[end].index + token.length);
-        if (!source.toLocaleLowerCase().includes(term.toLocaleLowerCase())) continue;
-        if (isSubjectBeforePossessiveVerb(source, tokens[end].index + token.length)) continue;
-        const clause = clauseAtPosition(clauses, tokens[start].index);
-        const clauseWords = clause ? topicLabelWords(clause[0]) : new Set();
-        const hasTargetCue = [...clauseWords].some((word) => targetTopicWords.has(word));
-        const hasCompetingCue = [...clauseWords].some((word) => competingTopicWords.has(word));
-        if (targetCueClauses.length && !hasTargetCue) continue;
-        if (hasCompetingCue && !hasTargetCue) continue;
-        if (!hasTargetCue && phraseTokens.some((word) => competingTopicWords.has(word.toLocaleLowerCase()))) continue;
-
-        const key = phraseTokens.map((word) => word.toLocaleLowerCase()).join(' ');
-        const candidate = reviewTerms.get(key);
-        if (candidate) candidate.occurrences += 1;
-        else reviewTerms.set(key, { term, tokens: [...phraseTokens], occurrences: 1 });
-      }
-    }
-
-    reviewTerms.forEach((candidate, key) => {
-      const frequency = frequencies.get(key);
-      if (frequency) {
-        frequency.reviewCount += 1;
-        frequency.occurrences += candidate.occurrences;
-      } else {
-        frequencies.set(key, {
-          ...candidate,
-          reviewCount: 1,
+    const candidates = getReviewKeywordCandidates(getReviewText(unwrapReview(entry)));
+    new Set((result?.topics || []).map(({ label }) => label)).forEach((label) => {
+      const topicCandidates = candidatesByTopic.get(label);
+      if (!topicCandidates) return;
+      candidates.forEach((term, key) => {
+        const candidate = topicCandidates.get(key);
+        topicCandidates.set(key, {
+          term,
+          reviewCount: (candidate?.reviewCount || 0) + (candidate ? 0 : 1),
         });
-      }
+      });
     });
   });
 
-  const ranked = [...frequencies.entries()]
-    .map(([key, candidate]) => ({
-      key,
-      ...candidate,
-      score: candidate.reviewCount * 2 + Math.log1p(candidate.occurrences) * 0.25 +
-        (candidate.tokens.length - 1) * 1 +
-        (candidate.tokens.some((token) => PHRASE_CONNECTORS.has(token.toLocaleLowerCase())) ? 1 : 0),
-    }))
-    .sort((first, second) => second.score - first.score || first.key.localeCompare(second.key));
-  const selected = [];
-  for (const candidate of ranked) {
-    if (selected.length === 8) break;
-    const candidateTokens = candidate.tokens
-      .map((token) => token.toLocaleLowerCase())
-      .filter((token) => !PHRASE_CONNECTORS.has(token) && !COMMON_REVIEW_WORDS.has(token));
-    if (selected.some((chosen) => {
-      const chosenTokens = chosen.tokens
-        .map((token) => token.toLocaleLowerCase())
-        .filter((token) => !PHRASE_CONNECTORS.has(token) && !COMMON_REVIEW_WORDS.has(token));
-      return candidateTokens.some((token) => chosenTokens.includes(token));
-    })) continue;
-    selected.push(candidate);
+  const uniqueCandidates = new Map();
+  candidatesByTopic.forEach((topicCandidates) => {
+    [...topicCandidates.entries()]
+      .sort(([, first], [, second]) => (
+        second.reviewCount - first.reviewCount ||
+        second.term.split(/\s+/).length - first.term.split(/\s+/).length ||
+        first.term.localeCompare(second.term)
+      ))
+      .slice(0, MAX_CANDIDATES_PER_TOPIC)
+      .forEach(([key, candidate]) => uniqueCandidates.set(key, candidate.term));
+  });
+  return [...uniqueCandidates.values()];
+}
+
+function getTopicKeywordSelection(reviews, selectedTopicLabel, topicAnalysis) {
+  const diagnostics = {
+    reviewCount: reviews.length,
+    selectedTopicLabel,
+    candidateOccurrenceCount: 0,
+    uniqueCandidateCount: 0,
+    scoredCandidateOccurrenceCount: 0,
+    relevancePassingCandidateCount: 0,
+    minimumRelevanceThreshold: TOPIC_KEYWORD_RELEVANCE_THRESHOLD,
+    maximumCompetingScoreGap: TOPIC_KEYWORD_MAX_SCORE_GAP,
+    relevanceScoreSummary: null,
+    competingScoreGapSummary: null,
+    nonRedundantCandidateCount: 0,
+    displayedKeywordCount: 0,
+    rejectedCandidates: [],
+  };
+  if (!selectedTopicLabel || !topicAnalysis?.keywordScores) {
+    return { keywords: [], diagnostics };
   }
 
-  return selected.map(({ term }) => term);
+  const frequencies = new Map();
+  const scores = [];
+  const scoreGaps = [];
+
+  reviews.forEach((entry, reviewIndex) => {
+    const reviewTerms = getReviewKeywordCandidates(getReviewText(unwrapReview(entry)));
+    reviewTerms.forEach((term, key) => {
+      const topicScores = topicAnalysis.keywordScores[key];
+      const relevance = topicScores?.[selectedTopicLabel];
+      const alternatives = Object.entries(topicScores || {})
+        .filter(([label, score]) => label !== selectedTopicLabel && Number.isFinite(score))
+        .map(([, score]) => score);
+      const strongestCompetingScore = alternatives.length ? Math.max(...alternatives) : null;
+      const scoreGap = typeof relevance === 'number' && strongestCompetingScore != null
+        ? strongestCompetingScore - relevance
+        : null;
+      const reviewIndexValue = Number.isInteger(entry?.topicResultIndex)
+        ? entry.topicResultIndex
+        : reviewIndex;
+      const candidateTokenCount = (term.match(REVIEW_TOKEN_PATTERN) || []).length;
+      diagnostics.candidateOccurrenceCount += 1;
+      if (Number.isFinite(relevance)) {
+        diagnostics.scoredCandidateOccurrenceCount += 1;
+        scores.push(relevance);
+      }
+      if (scoreGap != null) scoreGaps.push(scoreGap);
+      const rejectionReason = !Number.isFinite(relevance)
+        ? 'topic_score_missing'
+        : relevance < TOPIC_KEYWORD_RELEVANCE_THRESHOLD
+          ? 'below_minimum_relevance'
+          : strongestCompetingScore == null
+            ? 'competing_topic_scores_missing'
+            : scoreGap > TOPIC_KEYWORD_MAX_SCORE_GAP
+              ? 'competing_topic_too_close'
+              : null;
+      if (rejectionReason) {
+        diagnostics.rejectedCandidates.push({
+          reviewIndex: reviewIndexValue,
+          selectedTopicLabel,
+          candidateTokenCount,
+          candidateCharacterLength: term.length,
+          relevanceScore: Number.isFinite(relevance) ? relevance : null,
+          strongestCompetingTopicScore: strongestCompetingScore,
+          scoreGap,
+          rejectionReason,
+        });
+        return;
+      }
+      const current = frequencies.get(key) || {
+        term,
+        relevance,
+        reviewCount: 0,
+        reviewIndexes: new Set(),
+        strongestCompetingScore,
+        scoreGap,
+      };
+      current.reviewCount += 1;
+      current.relevance = Math.max(current.relevance, relevance);
+      if (strongestCompetingScore > current.strongestCompetingScore) {
+        current.strongestCompetingScore = strongestCompetingScore;
+        current.scoreGap = scoreGap;
+      }
+      current.reviewIndexes.add(reviewIndex);
+      frequencies.set(key, current);
+    });
+  });
+
+  diagnostics.uniqueCandidateCount = new Set(
+    reviews.flatMap((entry) => [...getReviewKeywordCandidates(getReviewText(unwrapReview(entry))).keys()]),
+  ).size;
+  diagnostics.relevancePassingCandidateCount = frequencies.size;
+  if (scores.length) {
+    const sortedScores = [...scores].sort((first, second) => first - second);
+    diagnostics.relevanceScoreSummary = {
+      minimum: sortedScores[0],
+      median: sortedScores[Math.floor(sortedScores.length / 2)],
+      maximum: sortedScores.at(-1),
+    };
+  }
+  if (scoreGaps.length) {
+    const sortedGaps = [...scoreGaps].sort((first, second) => first - second);
+    diagnostics.competingScoreGapSummary = {
+      minimum: sortedGaps[0],
+      median: sortedGaps[Math.floor(sortedGaps.length / 2)],
+      maximum: sortedGaps.at(-1),
+    };
+  }
+
+  const relevantCandidates = [...frequencies.values()];
+  const nonRedundantCandidates = relevantCandidates.filter((candidate) => {
+    const candidateTokens = candidate.term.toLocaleLowerCase().match(REVIEW_TOKEN_PATTERN) || [];
+    const isRedundant = relevantCandidates.some((other) => {
+      if (other === candidate || other.term.length <= candidate.term.length) return false;
+      if (![...candidate.reviewIndexes].some((index) => other.reviewIndexes.has(index))) return false;
+
+      const otherTokens = other.term.toLocaleLowerCase().match(REVIEW_TOKEN_PATTERN) || [];
+      return candidateTokens.length < otherTokens.length &&
+        otherTokens.some((_, start) => candidateTokens.every((token, offset) => (
+          otherTokens[start + offset] === token
+        )));
+    });
+    if (isRedundant) {
+      const reviewIndex = [...candidate.reviewIndexes][0] ?? null;
+      diagnostics.rejectedCandidates.push({
+        reviewIndex,
+        selectedTopicLabel,
+        candidateTokenCount: candidateTokens.length,
+        candidateCharacterLength: candidate.term.length,
+        relevanceScore: candidate.relevance,
+        strongestCompetingTopicScore: candidate.strongestCompetingScore,
+        scoreGap: candidate.scoreGap,
+        rejectionReason: 'overlapped_by_longer_relevant_phrase',
+      });
+    }
+    return !isRedundant;
+  });
+
+  diagnostics.nonRedundantCandidateCount = nonRedundantCandidates.length;
+  const sortedCandidates = nonRedundantCandidates
+    .sort((first, second) => (
+      (second.relevance + Math.min(second.term.split(/\s+/).length - 1, 2) * 0.01) -
+      (first.relevance + Math.min(first.term.split(/\s+/).length - 1, 2) * 0.01)
+    ) ||
+      second.reviewCount - first.reviewCount ||
+      first.term.localeCompare(second.term));
+  const displayedCandidates = sortedCandidates.slice(0, 5);
+  diagnostics.displayedKeywordCount = displayedCandidates.length;
+  sortedCandidates.slice(5).forEach((candidate) => {
+    diagnostics.rejectedCandidates.push({
+      reviewIndex: [...candidate.reviewIndexes][0] ?? null,
+      selectedTopicLabel,
+      candidateTokenCount: (candidate.term.match(REVIEW_TOKEN_PATTERN) || []).length,
+      candidateCharacterLength: candidate.term.length,
+      relevanceScore: candidate.relevance,
+      strongestCompetingTopicScore: candidate.strongestCompetingScore,
+      scoreGap: candidate.scoreGap,
+      rejectionReason: 'display_limit',
+    });
+  });
+
+  return {
+    keywords: displayedCandidates.map(({ term }) => term),
+    diagnostics,
+  };
+}
+
+export function getTopicKeywordDiagnostics(reviews, selectedTopicLabel, topicAnalysis) {
+  return getTopicKeywordSelection(reviews, selectedTopicLabel, topicAnalysis).diagnostics;
+}
+
+export function getMeaningfulKeywords(reviews, selectedTopicLabel = null, topicAnalysis = null) {
+  return getTopicKeywordSelection(reviews, selectedTopicLabel, topicAnalysis).keywords;
 }
 
 export function aggregateTopicsForReviews(reviews, topicAnalysis, selectedCategory = null) {

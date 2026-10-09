@@ -9,8 +9,12 @@ export async function requestSvmBatch(reviews, {
   fetchImpl = globalThis.fetch,
   timeoutMs = SVM_REQUEST_TIMEOUT_MS,
   onFailure = () => {},
+  signal,
 } = {}) {
   const controller = new AbortController();
+  const forwardAbort = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener('abort', forwardAbort, { once: true });
   let timedOut = false;
   const timeoutId = setTimeout(() => {
     timedOut = true;
@@ -42,5 +46,6 @@ export async function requestSvmBatch(reviews, {
     throw requestError;
   } finally {
     clearTimeout(timeoutId);
+    signal?.removeEventListener('abort', forwardAbort);
   }
 }

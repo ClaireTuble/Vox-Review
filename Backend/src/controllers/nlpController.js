@@ -3,6 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PersistentJsonWorker } from "../utils/persistentJsonWorker.js";
 import { getTopicProcessTimeoutMs } from "../utils/topicWorkerTimeout.js";
+import {
+  getSafeTopicRequestMetadata,
+  sanitizeTopicWorkerStderr,
+} from "../utils/topicWorkerDiagnostics.js";
 
 const controllerDirectory = path.dirname(fileURLToPath(import.meta.url));
 const nlpDirectory = path.resolve(controllerDirectory, "../../../Frontend/nlp");
@@ -81,6 +85,8 @@ function logTopicWorkerResult(diagnostics, response = null) {
   diagnostics.assignmentCount = counts.assignmentCount;
   console.log("[TOPIC WORKER RESULT]", {
     requestId: diagnostics.requestId,
+    clientRequestId: diagnostics.clientRequestId,
+    requestContext: diagnostics.requestContext,
     elapsedMs: diagnostics.workerStartedAt
       ? Date.now() - diagnostics.workerStartedAt
       : null,
@@ -220,6 +226,7 @@ function ensureTopicWorker(requestId) {
   });
   topicWorker = worker;
   topicWorkerRequestIds.set(worker, requestId);
+  let stderrBuffer = "";
   console.log("[TOPIC WORKER SPAWN REQUESTED]", {
     requestId,
     workerPid: worker.pid ?? null,
@@ -298,10 +305,17 @@ function ensureTopicWorker(requestId) {
       const stderrText = chunk.toString();
       diagnostics.stderr += stderrText;
       diagnostics.stderr = diagnostics.stderr.slice(-8000);
-      console.warn("[TOPIC WORKER STDERR]", {
-        requestId: diagnostics.requestId,
-        elapsedMs: Date.now() - diagnostics.workerStartedAt,
-        excerpt: safeTopicDiagnosticText(stderrText, diagnostics.reviews),
+      stderrBuffer += stderrText;
+      const lines = stderrBuffer.split(/\r?\n/);
+      stderrBuffer = lines.pop() || "";
+      lines.filter(Boolean).forEach((line) => {
+        console.warn("[TOPIC WORKER STDERR]", {
+          requestId: diagnostics.requestId,
+          clientRequestId: diagnostics.clientRequestId,
+          requestContext: diagnostics.requestContext,
+          elapsedMs: Date.now() - diagnostics.workerStartedAt,
+          excerpt: sanitizeTopicWorkerStderr(line),
+        });
       });
     }
   });
@@ -322,6 +336,8 @@ function ensureTopicWorker(requestId) {
     if (diagnostics) diagnostics.workerExitCode = code;
     console.log("[TOPIC WORKER EXIT]", {
       requestId: workerRequestId,
+      clientRequestId: diagnostics?.clientRequestId ?? null,
+      requestContext: diagnostics?.requestContext ?? "unspecified",
       workerPid: worker.pid ?? null,
       workerExitCode: code,
       signal,
@@ -377,6 +393,8 @@ function processNextTopicRequest() {
   activeTopicDiagnostics = diagnostics;
   console.log("[TOPIC WORKER START]", {
     requestId,
+    clientRequestId: diagnostics.clientRequestId,
+    requestContext: diagnostics.requestContext,
     queueWaitMs: diagnostics.queueWaitMs,
     reviewCount: reviews.length,
   });
@@ -398,6 +416,8 @@ function processNextTopicRequest() {
     const error = new Error(`Topic process timed out after ${topicProcessTimeoutMs} ms`);
     console.error("[TOPIC WORKER TIMEOUT]", {
       requestId,
+      clientRequestId: diagnostics.clientRequestId,
+      requestContext: diagnostics.requestContext,
       reviewCount: reviews.length,
       timeoutMs: topicProcessTimeoutMs,
       elapsedMs: Date.now() - diagnostics.workerStartedAt,
@@ -477,10 +497,14 @@ function runTopicPrediction(reviews, platform, diagnostics, registerCancel) {
     };
     if (typeof registerCancel === "function") {
       registerCancel(() => {
+        if (queueItem.cancelled) return;
         queueItem.cancelled = true;
         const index = topicQueue.indexOf(queueItem);
         if (index !== -1) {
           topicQueue.splice(index, 1);
+          reject(Object.assign(new Error("Topic request cancelled before worker start"), {
+            code: "CLIENT_CANCELLED",
+          }));
         }
       });
     }
@@ -494,8 +518,10 @@ export async function predictTopics(req, res) {
   const requestStartedAt = Date.now();
   const reviews = req.body?.reviews;
   const reviewCount = Array.isArray(reviews) ? reviews.length : 0;
+  const requestMetadata = getSafeTopicRequestMetadata(req);
   const diagnostics = {
     requestId,
+    ...requestMetadata,
     reviewCount,
     platform: typeof (req.get?.("x-voxreview-platform") || req.body?.platform) === "string"
       ? (req.get?.("x-voxreview-platform") || req.body?.platform).slice(0, 40)
@@ -514,15 +540,23 @@ export async function predictTopics(req, res) {
   topicRequestDiagnostics.set(requestId, diagnostics);
   console.log("[TOPIC BACKEND START]", {
     requestId,
+    clientRequestId: diagnostics.clientRequestId,
+    requestContext: diagnostics.requestContext,
     reviewCount,
     timestamp: new Date(requestStartedAt).toISOString(),
   });
 
+  let clientDisconnected = false;
   const respond = (status, body, failureReason = null) => {
     console.log("[TOPIC BACKEND RESPONSE]", {
       requestId,
+      clientRequestId: diagnostics.clientRequestId,
+      requestContext: diagnostics.requestContext,
       finalHttpStatus: status,
       elapsedMs: Date.now() - requestStartedAt,
+      terminalOutcome: clientDisconnected
+        ? "client_disconnected"
+        : status >= 200 && status < 300 ? "success" : "failure",
       failureReason: failureReason
         ? safeTopicDiagnosticText(failureReason, Array.isArray(reviews) ? reviews : [])
         : null,
@@ -540,9 +574,17 @@ export async function predictTopics(req, res) {
     return respond(400, { success: false, error: failureReason }, failureReason);
   }
   let cancelCallback = null;
-  let clientDisconnected = false;
   const cancelQueuedRequest = () => {
+    if (clientDisconnected) return;
     clientDisconnected = true;
+    diagnostics.clientDisconnected = true;
+    console.warn("[TOPIC BACKEND CLIENT DISCONNECTED]", {
+      requestId,
+      clientRequestId: diagnostics.clientRequestId,
+      requestContext: diagnostics.requestContext,
+      workerStarted: diagnostics.workerStartedAt != null,
+      elapsedMs: Date.now() - requestStartedAt,
+    });
     if (cancelCallback) cancelCallback();
   };
   req.on("aborted", cancelQueuedRequest);
@@ -560,10 +602,12 @@ export async function predictTopics(req, res) {
     return respond(200, { success: true, ...predictionResponse });
   } catch (error) {
     const errorMessage = error?.message || String(error);
-    const stderrExcerpt = safeTopicDiagnosticText(diagnostics.stderr, reviews);
+    const stderrExcerpt = sanitizeTopicWorkerStderr(diagnostics.stderr);
     const safeErrorMessage = safeTopicDiagnosticText(errorMessage, reviews);
     console.error("[TOPIC WORKER ERROR]", {
       requestId,
+      clientRequestId: diagnostics.clientRequestId,
+      requestContext: diagnostics.requestContext,
       stderrExcerpt,
       workerExitCode: diagnostics.workerExitCode,
       errorMessage: safeErrorMessage,

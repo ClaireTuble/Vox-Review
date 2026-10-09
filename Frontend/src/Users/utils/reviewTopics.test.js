@@ -2,10 +2,22 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { aggregateTopicsForReviews, getMeaningfulKeywords, getReviewText } from './reviewTopics.js';
+import {
+  aggregateTopicsForReviews,
+  getMeaningfulKeywords,
+  getTopicKeywordDiagnostics,
+  getReviewKeywordPhrases,
+  getReviewText,
+  getTopicKeywordCandidates,
+} from './reviewTopics.js';
 
 const DELIVERY = 'Delivery / Transaction';
-const FEATURES = 'Features / Content';
+const ALL_TOPIC_LABELS = [
+  'Quality', 'Performance / Functionality', 'Features / Content',
+  'Service / Support', DELIVERY, 'Price / Value', 'Usability / Experience',
+  'Accuracy / Expectations', 'Availability / Accessibility', 'Environment / Location',
+  'Other / General',
+];
 
 const entries = [
   { review: { text: 'combat review' }, category: 1, topicResultIndex: 0 },
@@ -21,6 +33,20 @@ const analysis = {
     { reviewIndex: 2, topics: [{ label: DELIVERY, score: 0.85 }] },
   ],
 };
+
+function getCandidates(review, label = 'Quality') {
+  return getTopicKeywordCandidates(
+    [{ review, topicResultIndex: 0 }],
+    { results: [{ reviewIndex: 0, topics: [{ label, score: 0.8 }] }] },
+  );
+}
+
+function makeTopicScores(topic, score, otherScore = 0.2) {
+  return Object.fromEntries(ALL_TOPIC_LABELS.map((label) => [
+    label,
+    label === topic ? score : otherScore,
+  ]));
+}
 
 test('extracts text from the existing Shopee and Lazada review object fields', () => {
   assert.equal(getReviewText({ text: 'Shopee review body', review: 'duplicate alias' }), 'Shopee review body');
@@ -77,7 +103,7 @@ test('empty topic assignments preserve review coverage without inventing a categ
 
 test('topic keywords preserve meaningful source phrases and hyphenation', () => {
   const review = 'This table is quite practical. The dark wood grain tabletop looks high-quality, and the metal legs are very sturdy. Assembly is simple; one person can easily assemble it.';
-  const keywords = getMeaningfulKeywords([{ review: { text: review }, topicResultIndex: 0 }]);
+  const keywords = getCandidates({ text: review });
 
   for (const expected of ['table', 'practical', 'dark wood grain', 'high-quality', 'metal legs', 'sturdy']) {
     assert.ok(keywords.includes(expected), `missing keyword: ${expected}`);
@@ -94,7 +120,7 @@ test('topic keywords preserve meaningful source phrases and hyphenation', () => 
 
 test('topic keywords replace adjacent HTML and BBCode tags with word boundaries', () => {
   const review = '[h1]Hunting and gathering[hr]story everything like all Sky Breaker and Secrets of the Spires[list][\\*]able to explore Pandora[/list]another way to deal[/h1]';
-  const keywords = getMeaningfulKeywords([review]);
+  const keywords = getCandidates(review);
   const normalizedKeywords = keywords.map((keyword) => keyword.toLocaleLowerCase());
 
   assert.ok(normalizedKeywords.includes('hunting and gathering'));
@@ -106,9 +132,9 @@ test('topic keywords replace adjacent HTML and BBCode tags with word boundaries'
 });
 
 test('topic keywords decode HTML entities before extracting phrases', () => {
-  const keywords = getMeaningfulKeywords([
+  const keywords = getCandidates(
     'Hunting&nbsp;and&#32;gathering; quality &amp; workmanship.',
-  ]);
+  );
   const normalizedKeywords = keywords.map((keyword) => keyword.toLocaleLowerCase());
 
   assert.ok(normalizedKeywords.includes('hunting and gathering'));
@@ -116,26 +142,23 @@ test('topic keywords decode HTML entities before extracting phrases', () => {
 });
 
 test('topic keywords preserve bracketed text that is not recognized markup', () => {
-  const keywords = getMeaningfulKeywords(['[DLC] adds a new area to explore.']);
+  const keywords = getCandidates('[DLC] adds a new area to explore.');
 
   assert.ok(keywords.some((keyword) => keyword.toLocaleLowerCase().includes('dlc')));
 });
 
-test('topic keywords for plain reviews preserve their current ranking and wording', () => {
+test('topic keyword candidates retain source phrases for later semantic ranking', () => {
   const review = 'The dark wood grain tabletop looks high-quality, and the metal legs are very sturdy.';
 
-  assert.deepEqual(getMeaningfulKeywords([review]), [
-    'dark wood grain',
-    'metal legs',
-    'high-quality',
-    'sturdy',
-    'tabletop',
-  ]);
+  const candidates = getCandidates(review);
+  for (const expected of ['dark wood grain', 'metal legs', 'high-quality', 'sturdy', 'tabletop']) {
+    assert.ok(candidates.includes(expected), `missing candidate: ${expected}`);
+  }
 });
 
 test('topic keywords omit URLs and numbers', () => {
   const review = 'High-quality metal legs; details at https://example.com/review?item=123, quantity 123.';
-  const keywords = getMeaningfulKeywords([review]);
+  const keywords = getCandidates(review);
 
   assert.ok(keywords.includes('High-quality metal') || keywords.includes('High-quality') || keywords.includes('metal legs'));
   assert.ok(!keywords.some((keyword) => /https?|example|\d/.test(keyword)));
@@ -143,7 +166,7 @@ test('topic keywords omit URLs and numbers', () => {
 
 test('topic keywords are extracted from the whole review, not its first sentence', () => {
   const review = 'I bought and used the product. Dark wood grain looks practical and sturdy.';
-  const keywords = getMeaningfulKeywords([review]);
+  const keywords = getCandidates(review);
 
   assert.ok(keywords.some((keyword) => keyword.toLocaleLowerCase() === 'dark wood grain'));
   assert.ok(keywords.some((keyword) => keyword.toLocaleLowerCase().includes('practical')));
@@ -152,7 +175,7 @@ test('topic keywords are extracted from the whole review, not its first sentence
 
 test('topic keywords preserve Taglish and English evidence', () => {
   const review = 'Ang ganda ng customer service, pero delivery time: matagal talaga. Gumana rin ang app.';
-  const keywords = getMeaningfulKeywords([review]);
+  const keywords = getCandidates(review);
 
   assert.ok(keywords.includes('ganda'));
   assert.ok(keywords.includes('customer service'));
@@ -163,7 +186,7 @@ test('topic keywords preserve Taglish and English evidence', () => {
 
 test('topic keywords filter auxiliary and generic action verbs', () => {
   const review = 'The desk has have had a sturdy frame, is are was were secure, and got made used with care.';
-  const keywords = getMeaningfulKeywords([review]);
+  const keywords = getCandidates(review);
   const forbidden = new Set(['has', 'have', 'had', 'is', 'are', 'was', 'were', 'got', 'made', 'used']);
 
   assert.ok(keywords.some((keyword) => keyword.toLocaleLowerCase().includes('sturdy')));
@@ -184,6 +207,21 @@ test('one multi-topic review gets different keywords for Quality, Service, and D
   const topicAnalysis = {
     results: [{ reviewIndex: 0, topics: labels.map((label) => ({ label, score: 0.8 })) }],
   };
+  const expectedByTopic = {
+    Quality: ['fine workmanship', 'thick materials', 'no odor', 'elegant design', 'sturdy and secure'],
+    'Service / Support': ['customer service', 'patient'],
+    [DELIVERY]: ['delivery', 'door-to-door delivery', 'door-to-door'],
+  };
+  const candidates = getTopicKeywordCandidates(reviews, topicAnalysis);
+  topicAnalysis.keywordScores = Object.fromEntries(candidates.map((candidate) => [
+    candidate.toLocaleLowerCase(),
+    Object.fromEntries(ALL_TOPIC_LABELS.map((label) => [
+      label,
+      labels.includes(label) && expectedByTopic[label].includes(candidate.toLocaleLowerCase())
+        ? 0.85
+        : 0.2,
+    ])),
+  ]));
   const originalAssignments = structuredClone(topicAnalysis.results);
   const topics = aggregateTopicsForReviews(reviews, topicAnalysis);
   const quality = topics.find((topic) => topic.label === 'Quality');
@@ -198,13 +236,160 @@ test('one multi-topic review gets different keywords for Quality, Service, and D
   assert.ok(qualityKeywords.includes('thick materials'));
   assert.ok(qualityKeywords.includes('no odor'));
   assert.ok(qualityKeywords.some((keyword) => keyword.includes('elegant design')));
-  assert.ok(qualityKeywords.includes('easy to assemble'));
   assert.ok(qualityKeywords.includes('sturdy and secure'));
   assert.ok(!qualityKeywords.some((keyword) => /delivery|customer service|installation/.test(keyword)));
   assert.ok(serviceKeywords.includes('customer service'));
   assert.ok(!serviceKeywords.some((keyword) => /fine workmanship|thick materials|no odor/.test(keyword)));
-  assert.ok(deliveryKeywords.some((keyword) => /delivery|door-to-door/.test(keyword)));
+  assert.deepEqual(deliveryKeywords, ['door-to-door delivery']);
   assert.notDeepEqual(qualityKeywords, serviceKeywords);
   assert.notDeepEqual(qualityKeywords, deliveryKeywords);
   assert.deepEqual(topicAnalysis.results, originalAssignments);
+});
+
+test('topic keywords require candidate-level semantic relevance and remain source-grounded', () => {
+  const review = 'The customer support team never replied to my refund request.';
+  const entries = [{ review, topicResultIndex: 0 }];
+  const topicAnalysis = {
+    results: [{
+      reviewIndex: 0,
+      topics: [{ label: 'Service / Support', score: 0.8 }],
+    }],
+    keywordScores: {
+      'customer support': makeTopicScores('Service / Support', 0.88),
+      'never replied': makeTopicScores('Service / Support', 0.84),
+      'refund request': makeTopicScores('Service / Support', 0.82),
+      customer: makeTopicScores('Service / Support', 0.89),
+      team: makeTopicScores('Service / Support', 0.83),
+    },
+  };
+
+  const keywords = getMeaningfulKeywords(entries, 'Service / Support', topicAnalysis);
+  assert.deepEqual(keywords, ['customer support', 'never replied', 'refund request']);
+  assert.ok(keywords.every((keyword) => review.toLocaleLowerCase().includes(keyword)));
+});
+
+test('long review diagnostics report sanitized score rejection counts and metadata', () => {
+  const review = 'The logistics were excellent, with door-to-door delivery and installation included. Customer service was patient. The computer desk has a simple and elegant design, fine workmanship, thick materials, no odor, and is easy to assemble, sturdy and secure.';
+  const entries = [{ review, topicResultIndex: 0 }];
+  const labels = [
+    'Quality', 'Performance / Functionality', 'Features / Content',
+    'Service / Support', DELIVERY, 'Price / Value',
+    'Usability / Experience', 'Accuracy / Expectations',
+    'Availability / Accessibility', 'Environment / Location', 'Other / General',
+  ];
+  const topicAnalysis = {
+    results: [{
+      reviewIndex: 0,
+      topics: ['Quality', 'Service / Support', DELIVERY].map((label) => ({ label, score: 0.8 })),
+    }],
+  };
+  const candidates = getTopicKeywordCandidates(entries, topicAnalysis);
+  topicAnalysis.keywordScores = Object.fromEntries(candidates.map((candidate) => [
+    candidate.toLocaleLowerCase(),
+    Object.fromEntries(labels.map((label) => [label, label === 'Quality' ? 0.76 : 0.74])),
+  ]));
+  topicAnalysis.keywordScores['fine workmanship'].Quality = 0.82;
+  topicAnalysis.keywordScores['fine workmanship']['Service / Support'] = 0.79;
+  topicAnalysis.keywordScores['thick materials'].Quality = 0.74;
+  topicAnalysis.keywordScores['thick materials']['Service / Support'] = 0.72;
+  topicAnalysis.keywordScores['no odor'].Quality = 0.8;
+  topicAnalysis.keywordScores['no odor']['Service / Support'] = 0.9;
+
+  const diagnostics = getTopicKeywordDiagnostics(entries, 'Quality', topicAnalysis);
+  const reasonCounts = Object.groupBy(
+    diagnostics.rejectedCandidates,
+    (candidate) => candidate.rejectionReason,
+  );
+  const serialized = JSON.stringify(diagnostics);
+
+  assert.equal(diagnostics.candidateOccurrenceCount, candidates.length);
+  assert.equal(diagnostics.uniqueCandidateCount, candidates.length);
+  assert.equal(diagnostics.scoredCandidateOccurrenceCount, candidates.length);
+  assert.equal(diagnostics.relevancePassingCandidateCount, candidates.length - 2);
+  assert.ok(diagnostics.relevanceScoreSummary.minimum >= 0.74);
+  assert.ok(reasonCounts.below_minimum_relevance?.length >= 1);
+  assert.ok(reasonCounts.competing_topic_too_close?.length >= 1);
+  assert.ok(reasonCounts.overlapped_by_longer_relevant_phrase?.length >= 1);
+  assert.ok(diagnostics.rejectedCandidates.every((candidate) => (
+    Number.isInteger(candidate.reviewIndex) &&
+    candidate.selectedTopicLabel === 'Quality' &&
+    Number.isInteger(candidate.candidateTokenCount) &&
+    Number.isInteger(candidate.candidateCharacterLength) &&
+    typeof candidate.rejectionReason === 'string'
+  )));
+  assert.doesNotMatch(serialized, /logistics|fine workmanship|thick materials|no odor/);
+});
+
+test('topic keyword candidates preserve action phrases and omit generic function words', () => {
+  const review = 'The game keeps crashing after the latest update.';
+  const candidates = getCandidates(review, 'Performance / Functionality');
+  assert.ok(candidates.includes('keeps crashing'));
+  assert.ok(candidates.includes('crashing'));
+  assert.ok(candidates.includes('latest update'));
+  assert.ok(!candidates.includes('the'));
+  assert.ok(!candidates.includes('after'));
+  assert.ok(!candidates.includes('keeps'));
+});
+
+test('topic candidates include meaningful source phrases with natural function words', () => {
+  const review = 'Almost perfect. Server issues persist. Huge update keeps crashing. Support never replied. Not worth it.';
+  const phrases = getReviewKeywordPhrases(review).map((phrase) => phrase.toLocaleLowerCase());
+
+  for (const expected of [
+    'almost perfect',
+    'server issues',
+    'huge update',
+    'keeps crashing',
+    'never replied',
+    'not worth it',
+  ]) {
+    assert.ok(phrases.includes(expected), `missing phrase: ${expected}`);
+  }
+  assert.ok(!phrases.includes('the'));
+});
+
+test('topic keywords remove relevant standalone words when a longer phrase covers them', () => {
+  const review = 'This is not worth it.';
+  const topicAnalysis = {
+    keywordScores: {
+      'not worth it': makeTopicScores('Price / Value', 0.86),
+      'not worth': makeTopicScores('Price / Value', 0.85),
+      worth: makeTopicScores('Price / Value', 0.84),
+    },
+  };
+
+  assert.deepEqual(
+    getMeaningfulKeywords([review], 'Price / Value', topicAnalysis),
+    ['not worth it'],
+  );
+});
+
+test('topic keyword selection rejects scores below the relevance floor', () => {
+  const topicAnalysis = {
+    keywordScores: {
+      refund: makeTopicScores('Service / Support', 0.74),
+      'refund request': makeTopicScores('Service / Support', 0.75, 0.74),
+    },
+  };
+  assert.deepEqual(
+    getMeaningfulKeywords(
+      ['The refund request was ignored.'],
+      'Service / Support',
+      topicAnalysis,
+    ),
+    ['refund request'],
+  );
+});
+
+test('topic keywords reject high cosine scores that are not distinctive to the topic', () => {
+  const review = 'Customer service ignored my message.';
+  const topicAnalysis = {
+    keywordScores: {
+      'customer service': makeTopicScores('Service / Support', 0.84, 0.87),
+    },
+  };
+  assert.deepEqual(
+    getMeaningfulKeywords([review], 'Service / Support', topicAnalysis),
+    [],
+  );
 });
