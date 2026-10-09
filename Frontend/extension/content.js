@@ -45,15 +45,76 @@ async function safeSendMessage(message) {
 // ── Auth Session Sync ────────────────────────────────────────────────────────
 // Only the regular user session is meant for the extension.
 // Super admin storage is written separately and is never forwarded.
-// Forward central auth synchronization events from the web application.
-if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-  window.addEventListener("voxreview_auth_sync", (e) => {
-    const session = e.detail || null;
-    const validSession = session && session.user && session.token ? session : null;
-    safeSendMessage({
-      type: "userAuthSync",
-      session: validSession,
-    });
+const USER_AUTH_STORAGE_KEY = "user_auth_session";
+const EXTENSION_USER_AUTH_STORAGE_KEY = "voxreview_auth_session";
+const LOGGED_OUT_AUTH_USERS_STORAGE_KEY = "voxreview_logged_out_auth_users";
+const DEVELOPMENT_APP_ORIGINS = new Set([
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+]);
+
+if (DEVELOPMENT_APP_ORIGINS.has(window.location.origin)) {
+  window.addEventListener("voxreview_auth_sync", async (event) => {
+    if (event.target !== window) return;
+    const { action, userId } = event.detail || {};
+    if (typeof userId !== "string" || !userId) return;
+
+    try {
+      if (action === "signed_out") {
+        const stored = await chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY]);
+        if (stored?.[EXTENSION_USER_AUTH_STORAGE_KEY]?.user?.id === userId) {
+          await safeSendMessage({ type: "websiteLogoutSync", userId });
+        }
+        return;
+      }
+
+      if (action !== "session_updated") return;
+      const rawSession = window.localStorage.getItem(USER_AUTH_STORAGE_KEY);
+      const session = rawSession ? JSON.parse(rawSession) : null;
+      if (
+        session?.user?.id === userId &&
+        session.user.role === "user" &&
+        typeof session.token === "string" &&
+        typeof session.refresh_token === "string"
+      ) {
+        const logoutState = await chrome.storage.local.get([LOGGED_OUT_AUTH_USERS_STORAGE_KEY]);
+        const loggedOutUserIds = Array.isArray(logoutState?.[LOGGED_OUT_AUTH_USERS_STORAGE_KEY])
+          ? logoutState[LOGGED_OUT_AUTH_USERS_STORAGE_KEY]
+          : [];
+        if (loggedOutUserIds.includes(userId) && !event.detail?.clearLogoutMarker) {
+          window.dispatchEvent(new CustomEvent("voxreview_extension_logout", {
+            detail: { userId },
+          }));
+          return;
+        }
+
+        const stored = await chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY]);
+        const currentUserId = stored?.[EXTENSION_USER_AUTH_STORAGE_KEY]?.user?.id;
+        if (!currentUserId || currentUserId === userId) {
+          await chrome.storage.local.set({ [EXTENSION_USER_AUTH_STORAGE_KEY]: session });
+          if (event.detail?.clearLogoutMarker === true) {
+            await safeSendMessage({ type: "websiteLoginSync", userId });
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("VoxReview: Could not synchronize local website auth state.", {
+        code: error?.code || null,
+      });
+    }
+  });
+
+  chrome.runtime.onMessage.addListener((message, sender) => {
+    if (
+      sender.id === chrome.runtime.id &&
+      message?.type === "extensionLogoutSync" &&
+      typeof message.userId === "string" &&
+      message.userId
+    ) {
+      window.dispatchEvent(new CustomEvent("voxreview_extension_logout", {
+        detail: { userId: message.userId },
+      }));
+    }
   });
 
   window.addEventListener("voxreview_health_check", async (event) => {

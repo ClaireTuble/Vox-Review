@@ -240,6 +240,27 @@ export function filterPriorityReviews(entries, priorityLevel = 'all') {
   return entries.filter(({ priority }) => priority?.level === priorityLevel);
 }
 
+const EMOTION_LABEL_BY_CATEGORY = {
+  1: 'happy',
+  2: 'sad',
+  3: 'anger',
+  4: 'disgust',
+  5: 'fear',
+  6: 'sarcastic',
+};
+
+export function filterReviewEntriesByEmotion(entries, emotion = 'all') {
+  const normalizedEmotion = String(emotion || 'all').trim().toLowerCase();
+  if (normalizedEmotion === 'all') return [...entries];
+
+  return entries.filter(({ quote }) => {
+    const quoteEmotion = typeof quote?.emotion === 'string'
+      ? quote.emotion.toLowerCase()
+      : EMOTION_LABEL_BY_CATEGORY[quote?.category];
+    return quoteEmotion === normalizedEmotion;
+  });
+}
+
 function getReviewTimestamp(review) {
   const dateValue = typeof review === 'string'
     ? review

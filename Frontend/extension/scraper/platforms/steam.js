@@ -37,10 +37,15 @@ function isSteamProductPage() {
 }
 
 function getSteamProductMetadata() {
+  const productTitleElement = document.querySelector(".apphub_AppName");
+  const productTitleFromPage = (productTitleElement?.innerText || productTitleElement?.textContent || "")
+    .replace(/\s+/g, " ")
+    .trim();
   const titleEl = document.querySelector("meta[property='og:title']") || document.querySelector("title");
-  const productTitle = titleEl
+  const fallbackTitle = titleEl
     ? (titleEl.getAttribute("content") || titleEl.textContent || "").trim()
-    : "Steam Product";
+    : "";
+  const productTitle = productTitleFromPage || fallbackTitle || "Steam Product";
 
   const imgEl = document.querySelector("meta[property='og:image']");
   const productImage = imgEl ? (imgEl.getAttribute("content") || "") : null;
@@ -251,8 +256,8 @@ async function scrapeSteamReviews() {
     validReviewEntries: extraction.reviews.length,
     rejectedMetadataEntries: extraction.rejectedMetadataEntries,
     rejectedEntries: extraction.rejectedEntries,
-    sampleAcceptedReview: extraction.sampleAccepted,
-    sampleRejectedEntry: extraction.sampleRejected,
+    sampleAcceptedReviewLength: extraction.sampleAccepted?.length ?? 0,
+    sampleRejectedEntryLength: extraction.sampleRejected?.length ?? 0,
   });
 
   return {

@@ -2,6 +2,8 @@ import { HEALTH_TEST_URLS } from "./healthTestConfig.js";
 import { createAnalysisJobCoordinator } from "../src/services/activeAnalysisState.js";
 import { createActivityReporter } from "../src/services/activityReporter.js";
 import { requestSvmBatch } from "../src/Users/utils/svmRequest.js";
+import { supabaseAnonKey, supabaseUrl } from "../src/lib/supabase.js";
+import { revokePendingAuthSessions } from "./authSessionRevocation.js";
 import {
   createTopicAnalysisRequestCoordinator,
   createTopicRequestTimeout,
@@ -55,6 +57,107 @@ const BACKEND_URLS = [API_BASE_URL];
 const PLATFORM_AVAILABILITY_TIMEOUT_MS = 15_000;
 const HEALTH_CHECK_TIMEOUT_MS = 45_000;
 const activeHealthChecks = new Set();
+const EXTENSION_USER_AUTH_STORAGE_KEY = "voxreview_auth_session";
+const PENDING_AUTH_LOGOUTS_STORAGE_KEY = "voxreview_pending_auth_logouts";
+const LOGGED_OUT_AUTH_USERS_STORAGE_KEY = "voxreview_logged_out_auth_users";
+const AUTH_LOGOUT_RETRY_ALARM = "voxreview-auth-logout-retry";
+let pendingAuthLogoutTask = null;
+
+function isSupportedAppOrigin(origin) {
+  return origin === __VOXREVIEW_APP_ORIGIN__
+    || origin === "http://localhost:5173"
+    || origin === "http://127.0.0.1:5173";
+}
+
+function getSenderOrigin(sender) {
+  try {
+    return sender.tab?.url ? new URL(sender.tab.url).origin : null;
+  } catch {
+    return null;
+  }
+}
+
+async function markAuthUserLoggedOut(userId) {
+  const stored = await chrome.storage.local.get([LOGGED_OUT_AUTH_USERS_STORAGE_KEY]);
+  const userIds = Array.isArray(stored?.[LOGGED_OUT_AUTH_USERS_STORAGE_KEY])
+    ? stored[LOGGED_OUT_AUTH_USERS_STORAGE_KEY]
+    : [];
+  await chrome.storage.local.set({
+    [LOGGED_OUT_AUTH_USERS_STORAGE_KEY]: [...new Set([...userIds, userId])],
+  });
+}
+
+async function clearAuthUserLoggedOut(userId) {
+  const stored = await chrome.storage.local.get([LOGGED_OUT_AUTH_USERS_STORAGE_KEY]);
+  const userIds = Array.isArray(stored?.[LOGGED_OUT_AUTH_USERS_STORAGE_KEY])
+    ? stored[LOGGED_OUT_AUTH_USERS_STORAGE_KEY]
+    : [];
+  await chrome.storage.local.set({
+    [LOGGED_OUT_AUTH_USERS_STORAGE_KEY]: userIds.filter((storedUserId) => storedUserId !== userId),
+  });
+}
+
+async function queueAuthLogout(session) {
+  if (!session?.user?.id || !session.token) return;
+  const stored = await chrome.storage.local.get([PENDING_AUTH_LOGOUTS_STORAGE_KEY]);
+  const pending = Array.isArray(stored?.[PENDING_AUTH_LOGOUTS_STORAGE_KEY])
+    ? stored[PENDING_AUTH_LOGOUTS_STORAGE_KEY]
+    : [];
+  const next = pending.filter((entry) => entry.userId !== session.user.id);
+  next.push({
+    userId: session.user.id,
+    token: session.token,
+    refresh_token: session.refresh_token || null,
+  });
+  await chrome.storage.local.set({ [PENDING_AUTH_LOGOUTS_STORAGE_KEY]: next });
+}
+
+function processPendingAuthLogouts() {
+  if (pendingAuthLogoutTask) return pendingAuthLogoutTask;
+  pendingAuthLogoutTask = (async () => {
+    const stored = await chrome.storage.local.get([PENDING_AUTH_LOGOUTS_STORAGE_KEY]);
+    const pending = Array.isArray(stored?.[PENDING_AUTH_LOGOUTS_STORAGE_KEY])
+      ? stored[PENDING_AUTH_LOGOUTS_STORAGE_KEY]
+      : [];
+    if (!pending.length) return;
+
+    const result = await revokePendingAuthSessions({
+      sessions: pending,
+      supabaseUrl,
+      anonKey: supabaseAnonKey,
+    });
+    const settledUserIds = new Set(result.revokedUserIds);
+    const current = await chrome.storage.local.get([PENDING_AUTH_LOGOUTS_STORAGE_KEY]);
+    const latest = Array.isArray(current?.[PENDING_AUTH_LOGOUTS_STORAGE_KEY])
+      ? current[PENDING_AUTH_LOGOUTS_STORAGE_KEY]
+      : [];
+    const latestByUserId = new Map(latest.map((entry) => [entry.userId, entry]));
+    for (const entry of result.remaining) {
+      latestByUserId.set(entry.userId, entry);
+    }
+    for (const userId of settledUserIds) {
+      latestByUserId.delete(userId);
+    }
+    await chrome.storage.local.set({
+      [PENDING_AUTH_LOGOUTS_STORAGE_KEY]: [...latestByUserId.values()],
+    });
+  })().catch((error) => {
+    console.warn("VoxReview: Could not process pending provider sign-outs; retaining them for retry.", {
+      code: error?.code || null,
+    });
+  }).finally(() => {
+    pendingAuthLogoutTask = null;
+  });
+  return pendingAuthLogoutTask;
+}
+
+chrome.alarms?.create(AUTH_LOGOUT_RETRY_ALARM, { periodInMinutes: 1 });
+chrome.alarms?.onAlarm.addListener((alarm) => {
+  if (alarm.name === AUTH_LOGOUT_RETRY_ALARM) {
+    void processPendingAuthLogouts();
+  }
+});
+void processPendingAuthLogouts();
 
 // ── Health report helper (fire-and-forget) ───────────────────────────────────
 // Posts a health event to the backend. Never blocks scraping; failures are logged
@@ -437,8 +540,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         };
 
         chrome.storage.local.set({ voxreviewLastScrape: scrapeData }, () => {
-          console.log("Stored scrape data to chrome.storage.local:", scrapeData);
-          console.log("[BACKGROUND] storage updated:", { platform, reviewCount: finalReviews.length, tabId: scrapeData.tabId });
+          console.log("[BACKGROUND] scrape data stored:", {
+            platform,
+            reviewCount: finalReviews.length,
+            tabId: scrapeData.tabId,
+          });
         });
       });
 
@@ -507,55 +613,108 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
 
-  // ── userAuthSync ───────────────────────────────────────────────────────────
-  // Synchronizes the web application's authentication session to chrome.storage.local
-  // so the extension popup automatically recognizes authenticated vs guest users.
-  if (message?.type === "userAuthSync") {
-    let senderOrigin = null;
-    try {
-      senderOrigin = sender.tab?.url ? new URL(sender.tab.url).origin : null;
-    } catch {
-      senderOrigin = null;
-    }
-    if (senderOrigin !== __VOXREVIEW_APP_ORIGIN__) {
+  if (message?.type === "websiteLogoutSync") {
+    const senderOrigin = getSenderOrigin(sender);
+    const userId = message.userId;
+    if (
+      sender.id !== chrome.runtime.id ||
+      !isSupportedAppOrigin(senderOrigin) ||
+      typeof userId !== "string" ||
+      !userId
+    ) {
       sendResponse({ ok: false });
       return;
     }
 
-    const session = message.session || null;
-
-    if (!session || session.user?.role !== "user" || !session.user?.id || !session.token) {
-      chrome.storage.local.remove(["voxreview_auth_session"])
-        .then(() => sendResponse({ ok: true }))
-        .catch((error) => {
-          console.error("Failed to clear auth session:", error);
-          sendResponse({ ok: false });
+    chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY])
+      .then(async (result) => {
+        const session = result?.[EXTENSION_USER_AUTH_STORAGE_KEY];
+        if (session?.user?.id !== userId) return false;
+        await queueAuthLogout(session);
+        await markAuthUserLoggedOut(userId);
+        const current = await chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY]);
+        if (current?.[EXTENSION_USER_AUTH_STORAGE_KEY]?.user?.id === userId) {
+          await chrome.storage.local.remove([EXTENSION_USER_AUTH_STORAGE_KEY]);
+        }
+        return true;
+      })
+      .then((matchedSession) => {
+        if (matchedSession) void processPendingAuthLogouts();
+        sendResponse({ ok: true });
+      })
+      .catch((error) => {
+        console.warn("Could not queue website sign-out for provider revocation:", {
+          code: error?.code || null,
         });
-      return true;
+        sendResponse({ ok: false });
+      });
+    return true;
+  }
+
+  if (message?.type === "websiteLoginSync") {
+    const senderOrigin = getSenderOrigin(sender);
+    const userId = message.userId;
+    if (
+      sender.id !== chrome.runtime.id ||
+      !isSupportedAppOrigin(senderOrigin) ||
+      typeof userId !== "string" ||
+      !userId
+    ) {
+      sendResponse({ ok: false });
+      return;
     }
 
-    chrome.storage.local.set({
-      voxreview_auth_session: session,
-    }).then(() => sendResponse({ ok: true })).catch((error) => {
-      console.error("Failed to store auth session:", error);
-      sendResponse({ ok: false });
-    });
+    chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY])
+      .then(async (result) => {
+        if (result?.[EXTENSION_USER_AUTH_STORAGE_KEY]?.user?.id !== userId) return false;
+        await clearAuthUserLoggedOut(userId);
+        return true;
+      })
+      .then((matchedSession) => sendResponse({ ok: Boolean(matchedSession) }))
+      .catch((error) => {
+        console.warn("VoxReview: Could not clear the matching sign-out marker.", {
+          code: error?.code || null,
+        });
+        sendResponse({ ok: false });
+      });
     return true;
   }
 
   if (message?.type === "extensionLogoutSync") {
-    if (sender.id !== chrome.runtime.id || sender.tab) {
+    const userId = message.userId;
+    if (
+      sender.id !== chrome.runtime.id ||
+      sender.tab ||
+      typeof userId !== "string" ||
+      !userId
+    ) {
       sendResponse({ ok: false });
       return;
     }
 
-    chrome.tabs.query({ url: `${__VOXREVIEW_APP_ORIGIN__}/*` })
-      .then((tabs) => Promise.all(
+    markAuthUserLoggedOut(userId)
+      .then(() => {
+        void processPendingAuthLogouts();
+        return Promise.all([
+          chrome.tabs.query({ url: `${__VOXREVIEW_APP_ORIGIN__}/*` }),
+          chrome.tabs.query({ url: "http://localhost:5173/*" }),
+          chrome.tabs.query({ url: "http://127.0.0.1:5173/*" }),
+        ]);
+      })
+      .then((tabGroups) => [...new Map(
+        tabGroups.flat().filter((tab) => Number.isInteger(tab.id)).map((tab) => [tab.id, tab]),
+      ).values()])
+      .then((tabs) => Promise.allSettled(
         tabs
-          .filter((tab) => Number.isInteger(tab.id))
-          .map((tab) => chrome.tabs.sendMessage(tab.id, { type: "extensionLogoutSync" })),
+          .map((tab) => chrome.tabs.sendMessage(tab.id, {
+            type: "extensionLogoutSync",
+            userId,
+          })),
       ))
-      .then(() => sendResponse({ ok: true }))
+      .then((results) => sendResponse({
+        ok: true,
+        notifiedTabs: results.filter((result) => result.status === "fulfilled").length,
+      }))
       .catch((error) => {
         console.warn("Could not synchronize extension logout to the website:", error);
         sendResponse({ ok: false });

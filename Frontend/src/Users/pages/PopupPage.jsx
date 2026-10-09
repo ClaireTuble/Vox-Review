@@ -25,6 +25,7 @@ import LogoutConfirmationModalExtension from '../components/LogoutConfirmationMo
 import UnsavedChangesConfirmationModal from '../components/UnsavedChangesConfirmationModal.jsx';
 import {
   aggregateTopicsForReviews,
+  getReviewId,
   getReviewText,
   getTopicKeywordCandidates,
   getTopicKeywordDiagnostics,
@@ -218,7 +219,7 @@ function buildEmotionData(reviews, predictions, platform, topicResponse = null, 
     const category = predictions[index];
     const display = CATEGORY_DISPLAY[category];
     return {
-      id: index + 1,
+      id: getReviewId(review, index),
       topicResultIndex: index,
       category,
       emotion: display.label,
@@ -1425,11 +1426,32 @@ export default function PopupPage() {
 
           const extSession = result?.voxreview_auth_session;
           if (extSession?.user && extSession?.token) {
-            lastAuthUserIdRef.current = extSession.user.id || null;
-            authService.cacheSessionLocally(extSession);
-            setAuthenticatedUser(extSession.user);
+            const validation = await authService.validateExtensionSession(extSession);
+            const latestStorage = await chrome.storage.local.get(['voxreview_auth_session']);
+            const latestSession = latestStorage?.voxreview_auth_session;
+            if (
+              validation.status === 'invalid' ||
+              latestSession?.user?.id !== extSession.user.id
+            ) {
+              lastAuthUserIdRef.current = null;
+              authService.cacheSessionLocally(null);
+              setAuthenticatedUser(null);
+              return;
+            }
 
-            await refreshProfileOnce(extSession.user.id);
+            lastAuthUserIdRef.current = extSession.user.id || null;
+            const restoredUser = validation.status === 'valid'
+              ? validation.user
+              : extSession.user;
+            authService.cacheSessionLocally({
+              ...extSession,
+              user: restoredUser,
+            });
+            setAuthenticatedUser(restoredUser);
+
+            if (validation.status === 'valid') {
+              await refreshProfileOnce(extSession.user.id);
+            }
           } else {
             lastAuthUserIdRef.current = null;
             authService.cacheSessionLocally(null);

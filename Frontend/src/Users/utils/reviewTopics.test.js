@@ -7,6 +7,7 @@ import {
   getMeaningfulKeywords,
   getTopicKeywordDiagnostics,
   getReviewKeywordPhrases,
+  getReviewId,
   getReviewText,
   getTopicKeywordCandidates,
 } from './reviewTopics.js';
@@ -51,6 +52,12 @@ function makeTopicScores(topic, score, otherScore = 0.2) {
 test('extracts text from the existing Shopee and Lazada review object fields', () => {
   assert.equal(getReviewText({ text: 'Shopee review body', review: 'duplicate alias' }), 'Shopee review body');
   assert.equal(getReviewText({ text: 'Lazada review body', review: 'Lazada review body' }), 'Lazada review body');
+});
+
+test('review identity preserves the scraper ID and falls back to a positional ID', () => {
+  assert.equal(getReviewId({ id: 'steam-review-42' }, 0), 'steam-review-42');
+  assert.equal(getReviewId({ reviewId: 'review-7' }, 6), 'review-7');
+  assert.equal(getReviewId({ text: 'review without an ID' }, 2), 3);
 });
 
 test('accepts existing alternate review body aliases and ignores non-string fields', () => {

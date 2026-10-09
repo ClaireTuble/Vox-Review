@@ -60,6 +60,47 @@ function phraseAppearsInClause(phrase, clauses) {
   });
 }
 
+function mergeOverlappingSourcePhrases(reviewText, phrases) {
+  const normalizedText = reviewText.toLocaleLowerCase();
+  const spans = [];
+  const unmatchedPhrases = [];
+
+  phrases.forEach((phrase) => {
+    const normalizedPhrase = phrase.toLocaleLowerCase();
+    let index = normalizedText.indexOf(normalizedPhrase);
+    let found = false;
+    while (index >= 0) {
+      const before = reviewText[index - 1];
+      const after = reviewText[index + phrase.length];
+      const beginsAtWordBoundary = !before || !/[\p{L}\p{N}]/u.test(before);
+      const endsAtWordBoundary = !after || !/[\p{L}\p{N}]/u.test(after);
+      if (beginsAtWordBoundary && endsAtWordBoundary) {
+        spans.push({ start: index, end: index + phrase.length });
+        found = true;
+        break;
+      }
+      index = normalizedText.indexOf(normalizedPhrase, index + 1);
+    }
+    if (!found) unmatchedPhrases.push(phrase);
+  });
+
+  spans.sort((first, second) => first.start - second.start || second.end - first.end);
+  const mergedSpans = [];
+  spans.forEach((span) => {
+    const previous = mergedSpans.at(-1);
+    if (previous && span.start < previous.end) {
+      previous.end = Math.max(previous.end, span.end);
+    } else {
+      mergedSpans.push({ ...span });
+    }
+  });
+
+  return [
+    ...mergedSpans.map(({ start, end }) => reviewText.slice(start, end).trim()),
+    ...unmatchedPhrases,
+  ];
+}
+
 export function filterEmotionDriver(driver) {
   if (typeof driver !== 'string') return '';
 
@@ -94,13 +135,14 @@ export function getSvmEmotionKeywords(explanationResults, category, reviews = []
         .map((word) => word.toLocaleLowerCase()),
     );
     const hasSourceDriver = [...driverWords].some((word) => sourceWords.has(word));
-    const reviewPhrases = new Set(
-      getReviewKeywordPhrases(reviewText)
-        .filter((phrase) => (
+    const candidatePhrases = getReviewKeywordPhrases(reviewText)
+      .filter((phrase) => (
           hasSourceDriver &&
           hasEmotionPolarityEvidence(phrase, category) &&
           phraseAppearsInClause(phrase, reviewClauses)
-        )),
+      ));
+    const reviewPhrases = new Set(
+      mergeOverlappingSourcePhrases(reviewText, candidatePhrases),
     );
 
     reviewPhrases.forEach((phrase) => {

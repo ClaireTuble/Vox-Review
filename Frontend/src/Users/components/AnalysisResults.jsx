@@ -6,6 +6,7 @@ import {
 import { aggregateTopicsForReviews } from '../utils/reviewTopics.js';
 import {
   calculateReviewPriorities,
+  filterReviewEntriesByEmotion,
   filterPriorityReviews,
   sortPriorityReviews,
 } from '../utils/priorityEngine.js';
@@ -162,8 +163,10 @@ export default function AnalysisResults({
       ? scrapedReviews.reviews
       : [];
 
-  console.log('Popup reviews:', normalizedReviews);
-  console.log('Popup platform:', platform);
+  console.log('Popup review data loaded:', {
+    reviewCount: normalizedReviews.length,
+    platform,
+  });
 
   /* ── Emotion dataset (driver icons resolved via DRIVER_ICON_MAP) ── */
   const defaultData = {
@@ -256,9 +259,10 @@ export default function AnalysisResults({
     originalIndex,
   }));
   const priorityFilteredEntries = filterPriorityReviews(quoteEntries, selectedPriorityFilter);
-  const filteredQuoteEntries = selectedQuoteFilter === 'all'
-    ? priorityFilteredEntries
-    : priorityFilteredEntries.filter(({ quote }) => quote.emotion.toLowerCase() === selectedQuoteFilter.toLowerCase());
+  const filteredQuoteEntries = filterReviewEntriesByEmotion(
+    priorityFilteredEntries,
+    selectedQuoteFilter,
+  );
   const sortedQuoteEntries = sortPriorityReviews(filteredQuoteEntries);
 
   const selectEmotion = (emotion) => {

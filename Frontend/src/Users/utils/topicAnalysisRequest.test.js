@@ -91,6 +91,38 @@ test('a failed request with no cached success can be retried', async () => {
   assert.equal(calls, 2);
 });
 
+test('coordinator diagnostics include safe request identity, operation, status, and failure reason', async () => {
+  const originalWarn = console.warn;
+  let warning;
+  const coordinator = createTopicAnalysisRequestCoordinator({
+    request: async () => {
+      throw Object.assign(new Error('worker deadline exceeded'), {
+        code: 'TOPIC_WORKER_TIMEOUT',
+        httpStatus: 504,
+      });
+    },
+  });
+  console.warn = (...args) => { warning = args; };
+
+  try {
+    await assert.rejects(
+      coordinator.request(['Private review text.'], 'steam', {
+        pageKey: 'steam:app/123',
+        operation: 'classify',
+      }),
+      { code: 'TOPIC_WORKER_TIMEOUT' },
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warning[1].requestId.startsWith('topic-'), true);
+  assert.equal(warning[1].operation, 'classify');
+  assert.equal(warning[1].status, 504);
+  assert.equal(warning[1].failureReason, 'worker_timeout');
+  assert.equal(JSON.stringify(warning).includes('Private review text.'), false);
+});
+
 test('classification and keyword-score operations do not collide in request deduplication', async () => {
   const operations = [];
   const coordinator = createTopicAnalysisRequestCoordinator({
@@ -267,6 +299,21 @@ test('an explicit forced refresh is forwarded to the backend cache boundary', as
   assert.equal(requestHeaders['X-VoxReview-Force-Refresh'], 'true');
 });
 
+test('an empty topic assignment is a valid completed inference result', async () => {
+  const result = await requestTopicAnalysis(['A review with no assigned topic.'], 'steam', {
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        results: [{ reviewIndex: 0, topics: [] }],
+      }),
+    }),
+  });
+
+  assert.deepEqual(result.results[0].topics, []);
+});
+
 test('reports a failed HTTP status without logging request review text', async () => {
   const originalWarn = console.warn;
   let warning;
@@ -278,27 +325,82 @@ test('reports a failed HTTP status without logging request review text', async (
         'steam',
         {
           apiBaseUrl: 'https://vox-review-production.up.railway.app',
+          clientRequestId: 'steam-topic-503',
+          operation: 'classify',
           fetchImpl: async () => ({
             ok: false,
             status: 503,
             json: async () => ({
               success: false,
-              error: 'TOPIC_SERVICE_UNAVAILABLE',
+              code: 'TOPIC_WORKER_UNAVAILABLE',
               message: 'The service is unavailable.',
             }),
           }),
         },
       ),
-      (error) => error.httpStatus === 503 && error.code === 'TOPIC_SERVICE_UNAVAILABLE',
+      (error) => error.httpStatus === 503 && error.code === 'TOPIC_WORKER_UNAVAILABLE',
     );
   } finally {
     console.warn = originalWarn;
   }
 
   assert.equal(warning[1].httpStatus, 503);
+  assert.equal(warning[1].status, 503);
+  assert.equal(warning[1].requestId, 'steam-topic-503');
+  assert.equal(warning[1].operation, 'classify');
+  assert.equal(warning[1].failureReason, 'worker_unavailable');
   assert.equal(warning[1].details, 'http_error');
-  assert.equal(warning[1].code, 'TOPIC_SERVICE_UNAVAILABLE');
+  assert.equal(warning[1].code, 'TOPIC_WORKER_UNAVAILABLE');
   assert.equal(JSON.stringify(warning).includes('Private review text'), false);
+});
+
+test('reports worker timeouts and response-shape mismatches as distinct failures', async () => {
+  const originalWarn = console.warn;
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args);
+
+  try {
+    for (const [status, code] of [
+      [504, 'TOPIC_WORKER_TIMEOUT'],
+      [502, 'TOPIC_WORKER_INVALID_RESPONSE'],
+    ]) {
+      await assert.rejects(
+        requestTopicAnalysis(['A private Steam review.'], 'steam', {
+          clientRequestId: `topic-${status}`,
+          operation: 'classify',
+          fetchImpl: async () => ({
+            ok: false,
+            status,
+            json: async () => ({ success: false, code, error: 'Topic request failed.' }),
+          }),
+        }),
+        (error) => error.httpStatus === status && error.code === code,
+      );
+    }
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.deepEqual(warnings.map(([, diagnostic]) => ({
+    requestId: diagnostic.requestId,
+    operation: diagnostic.operation,
+    status: diagnostic.status,
+    failureReason: diagnostic.failureReason,
+  })), [
+    {
+      requestId: 'topic-504',
+      operation: 'classify',
+      status: 504,
+      failureReason: 'worker_timeout',
+    },
+    {
+      requestId: 'topic-502',
+      operation: 'classify',
+      status: 502,
+      failureReason: 'response_shape_mismatch',
+    },
+  ]);
+  assert.equal(JSON.stringify(warnings).includes('A private Steam review.'), false);
 });
 
 test('reports intentional request cancellation separately from timeout', async () => {

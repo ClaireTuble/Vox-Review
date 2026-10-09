@@ -117,7 +117,9 @@ export function createTopicAnalysisRequestCoordinator({
             requestContext,
             durationMs: Date.now() - startedAt,
             httpStatus: error?.httpStatus ?? null,
+            status: error?.httpStatus ?? null,
             code: safeErrorCode(error?.code),
+            failureReason: getTopicFailureReason(error, { signal }),
             outcome: 'failure',
           });
           throw error;
@@ -192,6 +194,26 @@ function safeErrorCode(value) {
   return /^[A-Za-z0-9_-]{1,100}$/.test(code) ? code : null;
 }
 
+function getTopicFailureReason(error, { response = null, signal = null } = {}) {
+  if (error?.name === 'TimeoutError' || signal?.reason?.name === 'TimeoutError') {
+    return 'request_timeout';
+  }
+  if (error?.name === 'AbortError' || signal?.aborted) return 'caller_cancelled';
+  if (error?.code === 'TOPIC_WORKER_TIMEOUT' || response?.status === 504) return 'worker_timeout';
+  if (
+    error?.code === 'TOPIC_WORKER_INVALID_RESPONSE' ||
+    error?.code === 'TOPIC_RESPONSE_SHAPE_MISMATCH' ||
+    response?.status === 502
+  ) return 'response_shape_mismatch';
+  if (error?.code === 'TOPIC_INFERENCE_FAILED') return 'inference_failure';
+  if (error?.code === 'TOPIC_WORKER_UNAVAILABLE') return 'worker_unavailable';
+  if (error?.code === 'TOPIC_REQUEST_CANCELLED') return 'shared_computation_cancelled';
+  if (error?.code === 'TOPIC_RESPONSE_INVALID_JSON') return 'invalid_json';
+  if (response && !response.ok) return 'http_error';
+  if (response) return 'invalid_response';
+  return 'network_error';
+}
+
 export async function requestTopicAnalysis(
   reviews,
   platform,
@@ -242,7 +264,10 @@ export async function requestTopicAnalysis(
     try {
       payload = await response.json();
     } catch (error) {
-      throw new Error('Topic analysis returned a non-JSON response.', { cause: error });
+      throw Object.assign(
+        new Error('Topic analysis returned a non-JSON response.', { cause: error }),
+        { code: 'TOPIC_RESPONSE_INVALID_JSON' },
+      );
     }
 
     const validResults = operation === 'keyword-scores'
@@ -253,7 +278,8 @@ export async function requestTopicAnalysis(
       const error = new Error(
         payload?.message || payload?.error || 'Topic analysis returned an invalid response.',
       );
-      error.code = safeErrorCode(payload?.error);
+      error.code = safeErrorCode(payload?.code || payload?.error) ||
+        (response.ok && payload?.success === true ? 'TOPIC_RESPONSE_SHAPE_MISMATCH' : null);
       error.httpStatus = response.status;
       throw error;
     }
@@ -283,8 +309,10 @@ export async function requestTopicAnalysis(
           : 'network_error';
     console.warn('VoxReview: Topic analysis request failed.', {
       endpoint: url,
+      requestId: clientRequestId,
       requestContext,
       clientRequestId,
+      operation,
       durationMs: Date.now() - requestStartedAt,
       abortSource: signal?.reason?.name === 'TimeoutError'
         ? 'request_timeout'
@@ -292,10 +320,11 @@ export async function requestTopicAnalysis(
           ? 'caller_cancelled'
           : null,
       httpStatus: error?.httpStatus ?? response?.status ?? null,
+      status: response?.status ?? null,
       code: safeErrorCode(error?.code || payload?.error),
+      failureReason: getTopicFailureReason(error, { response, signal }),
       details,
       reviewCount: Array.isArray(reviews) ? reviews.length : 0,
-      operation,
     });
     throw error;
   }

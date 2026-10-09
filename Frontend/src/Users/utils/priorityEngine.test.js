@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   attachReviewPriorities,
   calculateReviewPriorities,
+  filterReviewEntriesByEmotion,
   filterPriorityReviews,
   sortPriorityReviews,
 } from './priorityEngine.js';
@@ -396,6 +397,18 @@ test('priority-level filtering selects only that level and All Priorities restor
     ['Minor issue', 'Critical issue', 'Medium issue'],
   );
   assert.notEqual(filterPriorityReviews(entries, 'all'), entries);
+});
+
+test('selected Anger filter retains the matching review and its priority entry', () => {
+  const entries = [{
+    quote: { id: 'steam-review-42', emotion: 'Anger', text: 'The save feature does not work.' },
+    priority: { reviewIndex: 0, level: 'HIGH', severity: 'MAJOR' },
+    originalIndex: 0,
+  }];
+
+  assert.deepEqual(filterReviewEntriesByEmotion(entries, 'anger'), entries);
+  assert.equal(filterReviewEntriesByEmotion(entries, 'anger')[0].quote.id, 'steam-review-42');
+  assert.equal(filterReviewEntriesByEmotion(entries, 'anger')[0].priority.level, 'HIGH');
 });
 
 test('priority explanations are attached without mutating source reviews', () => {

@@ -2,9 +2,33 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getTopicWorkerFailureDetails,
   getSafeTopicRequestMetadata,
   sanitizeTopicWorkerStderr,
 } from "./topicWorkerDiagnostics.js";
+
+test("topic worker failures retain distinct timeout, response, inference, and process outcomes", () => {
+  assert.deepEqual(
+    getTopicWorkerFailureDetails({ code: "CLIENT_CANCELLED" }),
+    { status: 503, code: "TOPIC_REQUEST_CANCELLED", failureReason: "shared_computation_cancelled" },
+  );
+  assert.deepEqual(
+    getTopicWorkerFailureDetails({ code: "TOPIC_WORKER_TIMEOUT" }),
+    { status: 504, code: "TOPIC_WORKER_TIMEOUT", failureReason: "worker_timeout" },
+  );
+  assert.deepEqual(
+    getTopicWorkerFailureDetails({ code: "TOPIC_WORKER_INVALID_RESPONSE" }),
+    { status: 502, code: "TOPIC_WORKER_INVALID_RESPONSE", failureReason: "invalid_worker_response" },
+  );
+  assert.deepEqual(
+    getTopicWorkerFailureDetails({ code: "TOPIC_INFERENCE_FAILED" }),
+    { status: 503, code: "TOPIC_INFERENCE_FAILED", failureReason: "inference_failure" },
+  );
+  assert.deepEqual(
+    getTopicWorkerFailureDetails(new Error("worker spawn failed")),
+    { status: 503, code: "TOPIC_WORKER_UNAVAILABLE", failureReason: "worker_unavailable" },
+  );
+});
 
 test("structured worker stderr preserves safe event metadata and redacts unsafe values", () => {
   const stderr = JSON.stringify({

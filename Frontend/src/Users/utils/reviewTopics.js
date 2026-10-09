@@ -142,6 +142,12 @@ export function getReviewText(review) {
   return '';
 }
 
+export function getReviewId(review, fallbackIndex = 0) {
+  return review && typeof review === 'object'
+    ? review.id ?? review.reviewId ?? fallbackIndex + 1
+    : fallbackIndex + 1;
+}
+
 function unwrapReview(entry) {
   return Number.isInteger(entry?.topicResultIndex) ? entry.review : entry;
 }

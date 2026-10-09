@@ -119,3 +119,18 @@ test('emotion fallback keeps a meaningful source word when no phrase can be extr
     ['Lag'],
   );
 });
+
+test('overlapping anger evidence phrases merge into one source-grounded phrase', () => {
+  const review = 'bugs and completely broken moments';
+  const evidence = getSvmEmotionKeywords(
+    [
+      { category: 3, emotionDrivers: ['bugs', 'completely broken', 'broken moments'] },
+      { category: 3, emotionDrivers: ['bugs', 'completely broken', 'broken moments'] },
+    ],
+    3,
+    [review, review],
+  );
+
+  assert.deepEqual(evidence, ['bugs and completely broken moments']);
+  assert.ok(evidence.every((phrase) => review.includes(phrase)));
+});

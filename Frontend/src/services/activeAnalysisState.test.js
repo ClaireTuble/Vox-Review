@@ -11,6 +11,10 @@ import {
 } from './activeAnalysisState.js';
 import { getPageKey } from './pageAnalysisStorage.js';
 import { getTopicReviewSetSignature } from '../Users/utils/topicAnalysisRequest.js';
+import {
+  calculateReviewPriorities,
+  filterReviewEntriesByEmotion,
+} from '../Users/utils/priorityEngine.js';
 
 let storage;
 globalThis.chrome = {
@@ -412,6 +416,44 @@ test('Topic failures remain completed and SVM failures are persisted', async () 
   assert.equal(failed.state.status, 'error');
   assert.equal(failed.state.error, 'svm offline');
   assert.deepEqual(failedEvents, []);
+});
+
+test('Topic Analysis failure preserves the Anger review and its calculated priority', async () => {
+  const review = {
+    id: 'steam-review-42',
+    text: "The game's save feature doesn't work, so progress cannot be saved.",
+  };
+  const coordinator = createAnalysisJobCoordinator({
+    requestSvm: async () => ({ predictions: [3] }),
+    requestTopics: async () => {
+      throw Object.assign(new Error('topic request timed out'), { httpStatus: 504 });
+    },
+  });
+
+  const { state } = await coordinator.start({
+    ...input(),
+    platform: 'steam',
+    reviews: [review],
+  });
+  const [category] = state.svmResult.predictions;
+  const quote = {
+    ...state.reviews[0],
+    category,
+    emotion: 'Anger',
+  };
+  const [priority] = calculateReviewPriorities([quote]);
+  const visibleEntries = filterReviewEntriesByEmotion(
+    [{ quote, priority, originalIndex: 0 }],
+    'anger',
+  );
+
+  assert.equal(state.status, 'completed');
+  assert.match(state.topicError, /topic request timed out/i);
+  assert.equal(visibleEntries.length, 1);
+  assert.equal(visibleEntries[0].quote.id, 'steam-review-42');
+  assert.equal(visibleEntries[0].quote.text, review.text);
+  assert.equal(visibleEntries[0].priority.severity, 'MAJOR');
+  assert.equal(visibleEntries[0].priority.level, 'HIGH');
 });
 
 test('successful SVM and Topic completion emits one activity after final state is persisted', async () => {

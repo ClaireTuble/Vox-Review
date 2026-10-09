@@ -1,14 +1,29 @@
 import { createClient } from "@supabase/supabase-js";
 import { createAuditLog, extractClientIp, extractDeviceInfo } from "../utils/auditLogger.js";
 
-export async function getAdminUsers(req, res) {
+export function createGetAdminUsers({
+  createSupabaseClient = createClient,
+  writeAuditLog = createAuditLog,
+} = {}) {
+  return (req, res) => getAdminUsersWithDependencies(req, res, {
+    createSupabaseClient,
+    writeAuditLog,
+  });
+}
+
+export const getAdminUsers = createGetAdminUsers();
+
+async function getAdminUsersWithDependencies(req, res, {
+  createSupabaseClient = createClient,
+  writeAuditLog = createAuditLog,
+} = {}) {
   try {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
     const requestHeaders = process.env.SUPABASE_SERVICE_ROLE_KEY
       ? undefined
       : { Authorization: `Bearer ${req.accessToken}` };
 
-    const userScopedSupabase = createClient(
+    const userScopedSupabase = createSupabaseClient(
       process.env.SUPABASE_URL,
       supabaseKey,
       {
@@ -23,7 +38,7 @@ export async function getAdminUsers(req, res) {
     const ip = extractClientIp(req);
     const device = extractDeviceInfo(req);
 
-    createAuditLog({
+    writeAuditLog({
       action: "view_user_management",
       status: "Successful",
       event_type: "Access",

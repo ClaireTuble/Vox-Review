@@ -105,6 +105,42 @@ const SAFE_EXCEPTION_TYPES = new Set([
   "ValueError",
 ]);
 
+export function getTopicWorkerFailureDetails(error) {
+  if (error?.code === "CLIENT_CANCELLED") {
+    return {
+      status: 503,
+      code: "TOPIC_REQUEST_CANCELLED",
+      failureReason: "shared_computation_cancelled",
+    };
+  }
+  if (error?.code === "TOPIC_WORKER_TIMEOUT") {
+    return {
+      status: 504,
+      code: "TOPIC_WORKER_TIMEOUT",
+      failureReason: "worker_timeout",
+    };
+  }
+  if (error?.code === "TOPIC_WORKER_INVALID_RESPONSE") {
+    return {
+      status: 502,
+      code: "TOPIC_WORKER_INVALID_RESPONSE",
+      failureReason: "invalid_worker_response",
+    };
+  }
+  if (error?.code === "TOPIC_INFERENCE_FAILED") {
+    return {
+      status: 503,
+      code: "TOPIC_INFERENCE_FAILED",
+      failureReason: "inference_failure",
+    };
+  }
+  return {
+    status: 503,
+    code: "TOPIC_WORKER_UNAVAILABLE",
+    failureReason: "worker_unavailable",
+  };
+}
+
 function isSafeTopicWorkerValue(key, value) {
   if (typeof value === "number") return Number.isFinite(value);
   if (typeof value === "boolean") return true;

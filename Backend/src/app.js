@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import supabase from "./config/supabase.js";
 import healthRoutes from "./routes/healthRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import userActivityRoutes from "./routes/userActivityRoutes.js";
@@ -29,29 +28,6 @@ app.get("/", (req, res) => {
     message: "🚀 VoxReview Backend API is running!",
     version: "1.0.0",
   });
-});
-
-// Supabase Test Route
-app.get("/test-db", async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from("users")
-      .select("*")
-      .limit(1);
-
-    if (error) throw error;
-
-    res.json({
-      success: true,
-      message: "✅ Connected to Supabase!",
-      data,
-    });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: err.message,
-    });
-  }
 });
 
 export default app;

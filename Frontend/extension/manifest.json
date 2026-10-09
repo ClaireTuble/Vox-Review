@@ -12,7 +12,8 @@
     "tabs",
     "storage",
     "scripting",
-    "sidePanel"
+    "sidePanel",
+    "alarms"
   ],
   "side_panel": {
     "default_path": "popup.html"

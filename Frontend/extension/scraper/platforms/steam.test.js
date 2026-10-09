@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
+import { calculateReviewPriorities } from "../../../src/Users/utils/priorityEngine.js";
 
 const scraperSource = await readFile(new URL("./steam.js", import.meta.url), "utf8");
 
@@ -39,6 +40,54 @@ function createReviewCard(bodyText, metadataText = "") {
     },
   };
 }
+
+function getProductMetadata({ appName, ogTitle }) {
+  const title = { textContent: ogTitle, getAttribute: () => ogTitle };
+  const image = { getAttribute: () => "https://cdn.example/game.jpg" };
+  const document = {
+    querySelector(selector) {
+      if (selector === ".apphub_AppName") {
+        return appName ? { innerText: appName, textContent: appName } : null;
+      }
+      if (selector === "meta[property='og:title']") return title;
+      if (selector === "meta[property='og:image']") return image;
+      if (selector.includes("game_review_summary")) return null;
+      return null;
+    },
+  };
+  const productUrl = "https://store.steampowered.com/app/814380/";
+  const context = {
+    document,
+    window: { location: { href: productUrl } },
+    console: { log() {}, info() {}, warn() {} },
+  };
+  vm.createContext(context);
+  vm.runInContext(`${scraperSource}\nglobalThis.metadataForTest = getSteamProductMetadata;`, context);
+  return context.metadataForTest();
+}
+
+test("uses Steam's canonical title instead of a promotional page title", () => {
+  const result = getProductMetadata({
+    appName: "Sekiro™: Shadows Die Twice - GOTY Edition",
+    ogTitle: "Save 50% on Sekiro™: Shadows Die Twice - GOTY Edition on Steam",
+  });
+
+  assert.equal(result.productTitle, "Sekiro™: Shadows Die Twice - GOTY Edition");
+  assert.equal(result.platform, "steam");
+  assert.equal(result.category, "Steam Store");
+  assert.equal(result.productImage, "https://cdn.example/game.jpg");
+  assert.equal(result.appId, "814380");
+  assert.equal(result.productUrl, "https://store.steampowered.com/app/814380/");
+});
+
+test("preserves an ordinary Steam game title as displayed", () => {
+  const result = getProductMetadata({
+    appName: "Wuthering Waves",
+    ogTitle: "Wuthering Waves",
+  });
+
+  assert.equal(result.productTitle, "Wuthering Waves");
+});
 
 test("extracts only Steam's dedicated review body and reports excluded PC specs", () => {
   const metadata = "AMD Ryzen 5 7600X3D 6-Core Processor - RAM: 31 GB";
@@ -78,4 +127,71 @@ test("preserves Steam API helpful-vote counts when present", async () => {
 
   assert.equal(result.reviews[0].helpfulCount, 14);
   assert.equal(result.reviews[1].helpfulCount, null);
+});
+
+test("Steam API review text and helpful votes reach severity-first priorities without Topic Analysis", async () => {
+  const steamApiReviews = [
+    {
+      recommendationid: "minor-bug",
+      review: "A small bug makes the inventory tooltip flicker sometimes, but the game is still playable.",
+      votes_up: 3,
+      voted_up: true,
+    },
+    {
+      recommendationid: "minor-bug-neutral",
+      review: "There is a minor bug in one cosmetic animation; it does not affect gameplay.",
+      votes_up: 0,
+      voted_up: true,
+    },
+    {
+      recommendationid: "major-malfunction",
+      review: "The save feature is broken and progress does not save after a long session.",
+      votes_up: 0,
+      voted_up: false,
+    },
+    {
+      recommendationid: "critical-core-failure",
+      review: "I can't open other menus or exit the game after loading a level.",
+      votes_up: 0,
+      voted_up: false,
+    },
+  ];
+  const context = {
+    console: { log() {}, info() {}, warn() {} },
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({ reviews: steamApiReviews }),
+    }),
+  };
+  vm.createContext(context);
+  vm.runInContext(`${scraperSource}\nglobalThis.fetchForTest = fetchSteamReviews;`, context);
+
+  const scraped = await context.fetchForTest("123");
+  const svmCategories = [3, 1, 1, 1];
+  const priorityInputs = scraped.reviews.map((review, index) => ({
+    ...review,
+    category: svmCategories[index],
+  }));
+  const priorities = priorityInputs.map((review) => (
+    calculateReviewPriorities([review], null)[0]
+  ));
+
+  assert.deepEqual(scraped.reviews.map(({ text }) => text), steamApiReviews.map(({ review }) => review));
+  assert.deepEqual(scraped.reviews.map(({ helpfulCount }) => helpfulCount), [3, 0, 0, 0]);
+  assert.deepEqual(priorities.map(({ severity, level }) => [severity, level]), [
+    ["MINOR", "MEDIUM"],
+    ["MINOR", "LOW"],
+    ["MAJOR", "MEDIUM"],
+    ["CRITICAL", "HIGH"],
+  ]);
+  assert.deepEqual(priorities.map(({ signals }) => signals.find(({ type }) => type === "severity")?.id), [
+    "minor_malfunction",
+    "minor_malfunction",
+    "major_feature_failure",
+    "core_unavailable",
+  ]);
+  assert.equal(priorities[0].factors.emotion, 1);
+  assert.equal(priorities[0].factors.engagement, 1);
+  assert.equal(priorities.every(({ factors }) => factors.repetition === 0), true);
+  assert.equal(priorities[3].factors.repetition, 0);
 });

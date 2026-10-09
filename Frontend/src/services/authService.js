@@ -5,10 +5,61 @@ import {
   buildProfileUser,
   normalizeSupabaseUser,
 } from './userProfileSync.js';
+import {
+  isExpiredAccessToken,
+  isInvalidAuthSessionError,
+  isMatchingAuthUser,
+  signOutMatchingLocalSession,
+} from './authSessionSync.js';
 
 const USER_AUTH_STORAGE_KEY = 'user_auth_session';
 const SUPERADMIN_AUTH_STORAGE_KEY = 'superadmin_auth_session';
 const EXTENSION_USER_AUTH_STORAGE_KEY = 'voxreview_auth_session';
+const PENDING_AUTH_LOGOUTS_STORAGE_KEY = 'voxreview_pending_auth_logouts';
+let lastRegularUserId = null;
+
+function getStoredRegularUserId() {
+  try {
+    const storedSession = JSON.parse(localStorage.getItem(USER_AUTH_STORAGE_KEY) || 'null');
+    return storedSession?.user?.id || null;
+  } catch {
+    return null;
+  }
+}
+
+async function queueExtensionAuthRevocation(session) {
+  if (!session?.user?.id || !session.token || !globalThis.chrome?.storage?.local) return;
+  const stored = await globalThis.chrome.storage.local.get([PENDING_AUTH_LOGOUTS_STORAGE_KEY]);
+  const pending = Array.isArray(stored?.[PENDING_AUTH_LOGOUTS_STORAGE_KEY])
+    ? stored[PENDING_AUTH_LOGOUTS_STORAGE_KEY]
+    : [];
+  const next = pending.filter((entry) => entry.userId !== session.user.id);
+  next.push({
+    userId: session.user.id,
+    token: session.token,
+    refresh_token: session.refresh_token || null,
+  });
+  await globalThis.chrome.storage.local.set({ [PENDING_AUTH_LOGOUTS_STORAGE_KEY]: next });
+}
+
+async function removeExtensionAuthRevocation(userId) {
+  if (!userId || !globalThis.chrome?.storage?.local) return;
+  const stored = await globalThis.chrome.storage.local.get([PENDING_AUTH_LOGOUTS_STORAGE_KEY]);
+  const pending = Array.isArray(stored?.[PENDING_AUTH_LOGOUTS_STORAGE_KEY])
+    ? stored[PENDING_AUTH_LOGOUTS_STORAGE_KEY]
+    : [];
+  await globalThis.chrome.storage.local.set({
+    [PENDING_AUTH_LOGOUTS_STORAGE_KEY]: pending.filter((entry) => entry.userId !== userId),
+  });
+}
+
+async function clearStoredExtensionSession(userId) {
+  if (!userId || !globalThis.chrome?.storage?.local) return;
+  const stored = await globalThis.chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY]);
+  if (stored?.[EXTENSION_USER_AUTH_STORAGE_KEY]?.user?.id === userId) {
+    await globalThis.chrome.storage.local.remove([EXTENSION_USER_AUTH_STORAGE_KEY]);
+  }
+}
 
 function persistSuperAdminSession(session) {
   if (!session?.user) {
@@ -20,36 +71,54 @@ function persistSuperAdminSession(session) {
   return session;
 }
 
-function syncExtensionAuthSession(session) {
+function syncExtensionAuthSession(
+  session,
+  userId = session?.user?.id || lastRegularUserId,
+  clearLogoutMarker = false,
+) {
   const nextSession = session && session.user && session.token ? session : null;
 
-  if (globalThis.chrome?.storage?.local) {
+  if (isExtensionRuntime && globalThis.chrome?.storage?.local) {
     if (!nextSession) {
-      globalThis.chrome.storage.local.remove([EXTENSION_USER_AUTH_STORAGE_KEY]).catch(() => { });
+      void clearStoredExtensionSession(userId).catch((error) => {
+        console.warn('VoxReview: Could not clear the matching extension session.', {
+          code: error?.code || null,
+        });
+      });
     } else {
-      globalThis.chrome.storage.local.set({ [EXTENSION_USER_AUTH_STORAGE_KEY]: nextSession }).catch(() => { });
+      globalThis.chrome.storage.local
+        .set({ [EXTENSION_USER_AUTH_STORAGE_KEY]: nextSession })
+        .catch((error) => {
+          console.warn('VoxReview: Could not persist the extension session.', {
+            code: error?.code || null,
+          });
+        });
     }
-  } else if (globalThis.chrome?.runtime?.sendMessage) {
-    globalThis.chrome.runtime.sendMessage({
-      type: 'userAuthSync',
-      session: nextSession,
-    }).catch(() => { });
   }
 
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('voxreview_auth_sync', { detail: nextSession }));
+  if (!isExtensionRuntime && typeof window !== 'undefined' && userId) {
+    window.dispatchEvent(new CustomEvent('voxreview_auth_sync', {
+      detail: {
+        action: nextSession ? 'session_updated' : 'signed_out',
+        userId,
+        clearLogoutMarker,
+      },
+    }));
   }
 
   return nextSession;
 }
 
-function clearRegularUserSession() {
+function clearRegularUserSession(userId = lastRegularUserId || getStoredRegularUserId()) {
+  const storedUserId = getStoredRegularUserId();
+  if (userId && storedUserId && storedUserId !== userId) return null;
   localStorage.removeItem(USER_AUTH_STORAGE_KEY);
-  syncExtensionAuthSession(null);
+  syncExtensionAuthSession(null, userId);
+  lastRegularUserId = null;
   return null;
 }
 
-function persistRegularUserSession(session) {
+function persistRegularUserSession(session, { clearLogoutMarker = false } = {}) {
   if (!session || !session.user) {
     return clearRegularUserSession();
   }
@@ -62,23 +131,10 @@ function persistRegularUserSession(session) {
   };
 
   localStorage.setItem(USER_AUTH_STORAGE_KEY, JSON.stringify(normalizedSession));
-
-  const syncedSession = syncExtensionAuthSession(normalizedSession);
-
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('voxreview_auth_sync', { detail: syncedSession }));
-  }
+  lastRegularUserId = normalizedUser.id || null;
+  syncExtensionAuthSession(normalizedSession, normalizedUser.id, clearLogoutMarker);
 
   return normalizedSession;
-}
-
-function isExpiredAccessToken(token) {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return !payload.exp || payload.exp * 1000 <= Date.now();
-  } catch {
-    return true;
-  }
 }
 
 async function readRegularUserExtensionSession({ persistSession = true } = {}) {
@@ -165,16 +221,79 @@ async function readRegularUserExtensionSession({ persistSession = true } = {}) {
   return null;
 }
 
+async function validateExtensionSession(extensionSession) {
+  const userId = extensionSession?.user?.id;
+  if (!userId || (!extensionSession.token && !extensionSession.refresh_token)) {
+    return { status: 'invalid' };
+  }
+
+  try {
+    if (extensionSession.token) {
+      const { data, error } = await supabase.auth.getUser(extensionSession.token);
+      if (!error && data?.user?.id === userId) {
+        return { status: 'valid', user: normalizeSupabaseUser(data.user) };
+      }
+      if (error && !isInvalidAuthSessionError(error)) {
+        return { status: 'unavailable' };
+      }
+    }
+
+    if (!extensionSession.refresh_token) {
+      clearRegularUserSession(userId);
+      await clearStoredExtensionSession(userId);
+      return { status: 'invalid' };
+    }
+
+    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession({
+      refresh_token: extensionSession.refresh_token,
+    });
+    if (
+      !refreshError &&
+      refreshData?.session?.user?.id === userId &&
+      refreshData.session.access_token
+    ) {
+      const cachedSession = persistRegularUserSession(refreshData.session);
+      await globalThis.chrome?.storage?.local?.set({
+        [EXTENSION_USER_AUTH_STORAGE_KEY]: cachedSession,
+      });
+      return { status: 'valid', user: cachedSession.user };
+    }
+
+    if (
+      isInvalidAuthSessionError(refreshError) ||
+      (!refreshError && refreshData?.session?.user?.id !== userId)
+    ) {
+      clearRegularUserSession(userId);
+      await clearStoredExtensionSession(userId);
+      return { status: 'invalid' };
+    }
+    return { status: 'unavailable' };
+  } catch {
+    return { status: 'unavailable' };
+  }
+}
+
 const isExtensionRuntime = typeof window !== 'undefined' && window.location.protocol === 'chrome-extension:';
 
 if (!isExtensionRuntime && typeof window !== 'undefined') {
   window.addEventListener('voxreview_extension_logout', async (event) => {
-    if (event.target !== window || window.location.origin !== new URL(APP_BASE_URL).origin) return;
+    const targetUserId = event.detail?.userId;
+    if (
+      event.target !== window ||
+      window.location.origin !== new URL(APP_BASE_URL).origin ||
+      !targetUserId
+    ) return;
 
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        console.warn('VoxReview: Website sign-out sync failed:', error.message);
+      const result = await signOutMatchingLocalSession({
+        userId: targetUserId,
+        getSession: () => supabase.auth.getSession(),
+        signOut: (options) => supabase.auth.signOut(options),
+      });
+      if (!result.cleared && result.reason !== 'identity_mismatch') {
+        console.warn('VoxReview: Website sign-out sync could not clear the matching local session.', {
+          reason: result.reason,
+        });
       }
     } catch (error) {
       console.warn('VoxReview: Website sign-out sync failed:', error?.message || error);
@@ -271,12 +390,48 @@ export function normalizeAuthErrorMessage(error, flow = 'login') {
 supabase.auth.onAuthStateChange((event, session) => {
   if (isExtensionRuntime) return;
 
-  if (event === 'SIGNED_OUT' || (event === 'INITIAL_SESSION' && !session)) {
-    persistRegularUserSession(null);
+  if (event === 'SIGNED_OUT') {
+    clearRegularUserSession(lastRegularUserId || getStoredRegularUserId());
+  } else if (event === 'INITIAL_SESSION' && !session) {
+    localStorage.removeItem(USER_AUTH_STORAGE_KEY);
+    lastRegularUserId = null;
   } else if (session?.user && session.access_token) {
-    persistRegularUserSession(session);
+    persistRegularUserSession(session, { clearLogoutMarker: event === 'SIGNED_IN' });
+    if (event === 'INITIAL_SESSION') {
+      setTimeout(() => {
+        void validateRestoredRegularUserSession(session.user.id);
+      }, 0);
+    }
   }
 });
+
+if (!isExtensionRuntime && typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    const userId = lastRegularUserId || getStoredRegularUserId();
+    if (userId) void validateRestoredRegularUserSession(userId);
+  });
+}
+
+async function validateRestoredRegularUserSession(userId) {
+  try {
+    const { data: currentData, error: currentError } = await supabase.auth.getSession();
+    const currentSession = currentData?.session;
+    if (currentError || currentSession?.user?.id !== userId) return;
+
+    const { data: userData, error: userError } = await supabase.auth.getUser(currentSession.access_token);
+    if (!userError && userData?.user?.id === userId) return;
+
+    if (isInvalidAuthSessionError(userError)) {
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshData?.session?.user?.id === userId && !refreshError) return;
+      if (isInvalidAuthSessionError(refreshError)) {
+        await supabase.auth.signOut({ scope: 'local' });
+      }
+    }
+  } catch {
+    // Preserve the cached session during transient network failures; retry when connectivity returns.
+  }
+}
 
 /**
  * Open the existing Web Application authentication route in a new browser tab.
@@ -365,7 +520,7 @@ export const authService = {
       throw new Error(error.message || 'Authentication failed.');
     }
 
-    const session = persistRegularUserSession(data.session);
+    const session = persistRegularUserSession(data.session, { clearLogoutMarker: true });
     return { success: true, session };
   },
 
@@ -406,7 +561,7 @@ export const authService = {
     }
 
     if (data.session) {
-      const session = persistRegularUserSession(data.session);
+      const session = persistRegularUserSession(data.session, { clearLogoutMarker: true });
       return { success: true, session, user: data.user };
     }
 
@@ -534,21 +689,108 @@ export const authService = {
       return;
     }
 
-    if (isExtensionRuntime && globalThis.chrome?.runtime?.sendMessage) {
+    let logoutUserId = lastRegularUserId || getStoredRegularUserId();
+    if (isExtensionRuntime && globalThis.chrome?.storage?.local) {
       try {
-        await globalThis.chrome.runtime.sendMessage({ type: 'extensionLogoutSync' });
+        const stored = await globalThis.chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY]);
+        const extensionSession = stored?.[EXTENSION_USER_AUTH_STORAGE_KEY];
+        logoutUserId = extensionSession?.user?.id || logoutUserId;
+
+        if (extensionSession?.token) {
+          await queueExtensionAuthRevocation(extensionSession);
+        }
+
+        if (extensionSession?.token && extensionSession?.refresh_token) {
+          const { error: setSessionError } = await supabase.auth.setSession({
+            access_token: extensionSession.token,
+            refresh_token: extensionSession.refresh_token,
+          });
+
+          if (!setSessionError) {
+            const { error: signOutError } = await supabase.auth.signOut({ scope: 'global' });
+            if (signOutError) {
+              console.warn('VoxReview: Provider sign-out could not be confirmed.', {
+                status: signOutError.status || null,
+                code: signOutError.code || null,
+              });
+            } else {
+              await removeExtensionAuthRevocation(logoutUserId);
+            }
+          } else if (isInvalidAuthSessionError(setSessionError)) {
+            await removeExtensionAuthRevocation(logoutUserId);
+          } else {
+            console.warn('VoxReview: Could not restore the extension session for provider sign-out.', {
+              status: setSessionError.status || null,
+              code: setSessionError.code || null,
+            });
+          }
+        }
+
       } catch (error) {
-        console.warn('VoxReview: Could not send website sign-out sync:', error?.message || error);
+        console.warn('VoxReview: Extension provider sign-out failed.', {
+          status: error?.status || null,
+          code: error?.code || null,
+        });
+      }
+
+      if (logoutUserId && globalThis.chrome?.runtime?.sendMessage) {
+        try {
+          await globalThis.chrome.runtime.sendMessage({
+            type: 'extensionLogoutSync',
+            userId: logoutUserId,
+          });
+        } catch (error) {
+          console.warn('VoxReview: Could not notify website tabs of sign-out.', {
+            code: error?.code || null,
+          });
+        }
+      }
+    } else {
+      try {
+        const { data, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) {
+          console.warn('VoxReview: Could not verify the matching session for provider sign-out.', {
+            status: sessionError.status || null,
+            code: sessionError.code || null,
+          });
+        } else if (isMatchingAuthUser(data?.session, logoutUserId)) {
+          const { error } = await supabase.auth.signOut({ scope: 'global' });
+          if (error) {
+            console.warn('VoxReview: Provider sign-out could not be confirmed.', {
+              status: error.status || null,
+              code: error.code || null,
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('VoxReview: Provider sign-out failed.', {
+          status: error?.status || null,
+          code: error?.code || null,
+        });
       }
     }
 
-    try {
-      await supabase.auth.signOut();
-    } catch (err) {
-      console.warn('Supabase signOut failed:', err?.message || err);
+    if (logoutUserId) {
+      try {
+        const result = await signOutMatchingLocalSession({
+          userId: logoutUserId,
+          getSession: () => supabase.auth.getSession(),
+          signOut: (options) => supabase.auth.signOut(options),
+        });
+        if (!result.cleared && result.reason !== 'identity_mismatch') {
+          console.warn('VoxReview: Matching local auth session could not be cleared.', {
+            reason: result.reason,
+          });
+        }
+      } catch (error) {
+        console.warn('VoxReview: Matching local auth session sign-out failed.', {
+          code: error?.code || null,
+        });
+      }
     }
 
-    clearRegularUserSession();
+    clearRegularUserSession(logoutUserId);
+    if (isExtensionRuntime) await clearStoredExtensionSession(logoutUserId);
   },
 
   /**
@@ -994,6 +1236,8 @@ export const authService = {
       return null;
     }
   },
+
+  validateExtensionSession,
 
   restoreSession: async () => {
     try {

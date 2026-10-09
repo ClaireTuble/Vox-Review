@@ -6,7 +6,7 @@ const PLATFORM_LABELS = {
   lazada: { label: 'Lazada', cls: 'lazada' },
   google: { label: 'Google Reviews', cls: 'google' },
   googleplay: { label: 'Google Play', cls: 'googleplay' },
-  steam: { label: 'Steam', cls: 'steam' },
+  steam: { label: 'Steam Store', cls: 'steam' },
   agoda: { label: 'Agoda', cls: 'agoda' },
   default: { label: 'Current Source', cls: 'default' },
 };
@@ -25,6 +25,7 @@ export default function DetectedPageCard({
 }) {
   const normalizedPlatform = String(platform || '').toLowerCase();
   const plat = PLATFORM_LABELS[normalizedPlatform] || PLATFORM_LABELS.default;
+  const showCategory = String(category || '').trim().toLowerCase() !== plat.label.toLowerCase();
   const isCompleted = status === 'completed';
   
   console.log('DetectedPageCard props:', { platform, pageTitle, category, rating, reviewsCount, normalizedPlatform, platLabel: plat.label });
@@ -64,7 +65,7 @@ export default function DetectedPageCard({
                 <Globe size={11} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
                 {plat.label}
               </span>
-              <span className="page-category-tag" title={category}>{category}</span>
+              {showCategory && <span className="page-category-tag" title={category}>{category}</span>}
             </div>
 
             <h2 className="page-title-text" title={pageTitle}>
@@ -115,7 +116,7 @@ export default function DetectedPageCard({
               <Globe size={11} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
               {plat.label}
             </span>
-            <span className="page-category-tag" title={category}>{category}</span>
+            {showCategory && <span className="page-category-tag" title={category}>{category}</span>}
           </div>
 
           {/* Product Title */}

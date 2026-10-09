@@ -11,6 +11,7 @@ import {
   runTopicKeywordScoreBatches,
 } from "../utils/topicAnalysisResultCache.js";
 import {
+  getTopicWorkerFailureDetails,
   getSafeTopicRequestMetadata,
   sanitizeTopicWorkerStderr,
 } from "../utils/topicWorkerDiagnostics.js";
@@ -315,7 +316,10 @@ function ensureTopicWorker(requestId) {
             errorMessage: safeTopicDiagnosticText(error?.message || error, activeTopicDiagnostics.reviews),
           });
         }
-        stopTopicWorker(new Error(`Unable to parse topic worker response: ${error.message}`));
+        stopTopicWorker(Object.assign(
+          new Error("Unable to parse topic worker response"),
+          { code: "TOPIC_WORKER_INVALID_RESPONSE" },
+        ));
       }
     });
   });
@@ -382,13 +386,22 @@ function ensureTopicWorker(requestId) {
 
 function validateTopicResponse(response, reviews) {
   const results = response?.results;
-  if (!response?.success || !Array.isArray(results) || results.length !== reviews.length || results.some((result, index) => (
+  if (!response?.success) {
+    throw Object.assign(
+      new Error("Topic classifier reported an inference failure"),
+      { code: "TOPIC_INFERENCE_FAILED" },
+    );
+  }
+  if (!Array.isArray(results) || results.length !== reviews.length || results.some((result, index) => (
     result?.reviewIndex !== index ||
     !Array.isArray(result?.topics) || result.topics.some((topic) => (
       !validTopicLabels.has(topic?.label) || typeof topic?.score !== "number"
     ))
   ))) {
-    throw new Error(response?.error || "Topic classifier returned an invalid payload");
+    throw Object.assign(
+      new Error("Topic classifier returned an invalid response"),
+      { code: "TOPIC_WORKER_INVALID_RESPONSE" },
+    );
   }
   return {
     model: typeof response.model === "string" ? response.model : null,
@@ -399,8 +412,13 @@ function validateTopicResponse(response, reviews) {
 
 function validateTopicKeywordScoreResponse(response, reviews) {
   const results = response?.results;
+  if (!response?.success) {
+    throw Object.assign(
+      new Error("Topic classifier reported a keyword-scoring inference failure"),
+      { code: "TOPIC_INFERENCE_FAILED" },
+    );
+  }
   if (
-    !response?.success ||
     !Array.isArray(results) ||
     results.length !== reviews.length ||
     results.some((result, index) => (
@@ -415,7 +433,10 @@ function validateTopicKeywordScoreResponse(response, reviews) {
       ))
     ))
   ) {
-    throw new Error(response?.error || "Topic classifier returned invalid keyword scores");
+    throw Object.assign(
+      new Error("Topic classifier returned invalid keyword scores"),
+      { code: "TOPIC_WORKER_INVALID_RESPONSE" },
+    );
   }
   return {
     model: typeof response.model === "string" ? response.model : null,
@@ -479,7 +500,10 @@ function processNextTopicRequest() {
 
   timeout = setTimeout(() => {
     const worker = topicWorker;
-    const error = new Error(`Topic process timed out after ${topicProcessTimeoutMs} ms`);
+    const error = Object.assign(
+      new Error(`Topic process timed out after ${topicProcessTimeoutMs} ms`),
+      { code: "TOPIC_WORKER_TIMEOUT" },
+    );
     console.error("[TOPIC WORKER TIMEOUT]", {
       requestId,
       clientRequestId: diagnostics.clientRequestId,
@@ -693,15 +717,16 @@ export async function predictTopics(req, res) {
         : null,
       cacheHit: Boolean(diagnostics.cacheHit),
       finalHttpStatus: status,
+      status,
       elapsedMs: Date.now() - requestStartedAt,
       computationOutcome: diagnostics.computationOutcome || "not_started",
       clientDisconnected,
-      terminalOutcome: clientDisconnected
-        ? "client_disconnected"
-        : status >= 200 && status < 300 ? "success" : "failure",
       failureReason: failureReason
         ? safeTopicDiagnosticText(failureReason, Array.isArray(reviews) ? reviews : [])
         : null,
+      terminalOutcome: clientDisconnected
+        ? "client_disconnected"
+        : status >= 200 && status < 300 ? "success" : "failure",
     });
     topicRequestDiagnostics.delete(requestId);
     return res.status(status).json(body);
@@ -757,9 +782,24 @@ export async function predictTopics(req, res) {
       } catch (error) {
         diagnostics.computationCompletedAt = Date.now();
         diagnostics.computationOutcome = error?.code === "CLIENT_CANCELLED" ? "cancelled" : "failure";
-        const errorMessage = error?.message || String(error);
-        const safeErrorMessage = safeTopicDiagnosticText(errorMessage, reviews);
-        return respond(503, { success: false, error: "Review topic model unavailable" }, safeErrorMessage);
+        const failure = getTopicWorkerFailureDetails(error);
+        console.error("[TOPIC WORKER ERROR]", {
+          requestId,
+          clientRequestId: diagnostics.clientRequestId,
+          operation,
+          status: failure.status,
+          failureReason: failure.failureReason,
+          errorCode: failure.code,
+        });
+        return respond(failure.status, {
+          success: false,
+          error: failure.code === "TOPIC_WORKER_TIMEOUT"
+            ? "Review topic model timed out. Please retry."
+            : failure.code === "TOPIC_WORKER_INVALID_RESPONSE"
+              ? "Review topic model returned an invalid response."
+              : "Review topic model unavailable",
+          code: failure.code,
+        }, failure.failureReason);
       }
     }
   }
@@ -775,6 +815,8 @@ export async function predictTopics(req, res) {
       pageIdentity: diagnostics.pageIdentity,
       reviewSetSignature: diagnostics.reviewSetSignature,
       operation,
+      status: null,
+      failureReason: "client_disconnected",
       queueWaitMs: diagnostics.queueWaitMs ?? null,
       workerStarted: diagnostics.workerStartedAt != null,
       outcome: "client_disconnected",
@@ -833,22 +875,38 @@ export async function predictTopics(req, res) {
   } catch (error) {
     diagnostics.computationCompletedAt = Date.now();
     diagnostics.computationOutcome = error?.code === "CLIENT_CANCELLED" ? "cancelled" : "failure";
-    const errorMessage = error?.message || String(error);
+    if (clientDisconnected || res.destroyed || res.writableEnded) {
+      topicRequestDiagnostics.delete(requestId);
+      return;
+    }
     const stderrExcerpt = sanitizeTopicWorkerStderr(diagnostics.stderr);
-    const safeErrorMessage = safeTopicDiagnosticText(errorMessage, reviews);
+    const failure = getTopicWorkerFailureDetails(error);
     console.error("[TOPIC WORKER ERROR]", {
       requestId,
       clientRequestId: diagnostics.clientRequestId,
       requestContext: diagnostics.requestContext,
+      operation,
+      status: failure.status,
+      failureReason: failure.failureReason,
+      errorCode: failure.code,
       stderrExcerpt,
       workerExitCode: diagnostics.workerExitCode,
-      errorMessage: safeErrorMessage,
+      errorType: failure.code === "TOPIC_WORKER_TIMEOUT"
+        ? "TimeoutError"
+        : error?.name === "TypeError" ? "TypeError" : "Error",
     });
-    console.error("VoxReview topic prediction error:", safeErrorMessage);
     return respond(
-      503,
-      { success: false, error: "Review topic model unavailable" },
-      safeErrorMessage,
+      failure.status,
+      {
+        success: false,
+        error: failure.code === "TOPIC_WORKER_TIMEOUT"
+          ? "Review topic model timed out. Please retry."
+          : failure.code === "TOPIC_WORKER_INVALID_RESPONSE"
+            ? "Review topic model returned an invalid response."
+            : "Review topic model unavailable",
+        code: failure.code,
+      },
+      failure.failureReason,
     );
   }
 }
