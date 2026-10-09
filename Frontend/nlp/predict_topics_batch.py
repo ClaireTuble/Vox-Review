@@ -12,7 +12,13 @@ import torch.nn.functional as functional
 from transformers import AutoModel, AutoTokenizer
 
 from topic_applicability import apply_platform_applicability
-from topic_taxonomy import TOPIC_E5_DESCRIPTIONS, TOPIC_LABELS, TOPIC_MODEL_NAME
+from topic_refinement import refine_topic_scores
+from topic_taxonomy import (
+    TOPIC_CONFIDENCE_THRESHOLD,
+    TOPIC_E5_DESCRIPTIONS,
+    TOPIC_LABELS,
+    TOPIC_MODEL_NAME,
+)
 
 TOPIC_BATCH_SIZE = int(os.getenv("TOPIC_BATCH_SIZE", "16"))
 MAX_LENGTH = 512
@@ -92,11 +98,23 @@ def get_topic_embeddings():
         log_model_event("model_cache_reused", cached=True, loadDurationMs=0)
 
     if _topic_embeddings is None:
+        embedding_started = perf_counter()
+        log_model_event(
+            "topic_embeddings_start",
+            descriptionCount=len(TOPIC_E5_DESCRIPTIONS),
+        )
         descriptions = [topic["description"] for topic in TOPIC_E5_DESCRIPTIONS]
         embeddings = encode_texts(descriptions, TOPIC_PREFIX, _tokenizer, _model)
         if embeddings.shape[0] != len(TOPIC_LABELS):
             raise ValueError("E5 topic embeddings do not match the 11-topic taxonomy")
         _topic_embeddings = embeddings
+        log_model_event(
+            "topic_embeddings_complete",
+            embeddingDurationMs=round((perf_counter() - embedding_started) * 1000, 3),
+            embeddingCount=embeddings.shape[0],
+        )
+    else:
+        log_model_event("topic_embeddings_cache_reused", cached=True)
 
     return _tokenizer, _model, _topic_embeddings
 
@@ -132,20 +150,44 @@ def classify_reviews(reviews: list[str], platform: str | None = None) -> dict:
 
     tokenizer, model, topic_embeddings = get_topic_embeddings()
     classifier_input = [sanitize_unpaired_surrogates(review) for review in reviews]
+    inference_started = perf_counter()
+    log_model_event(
+        "review_inference_start",
+        reviewCount=len(reviews),
+        torchNumThreads=torch.get_num_threads(),
+    )
     with torch.inference_mode():
         review_embeddings = encode_texts(classifier_input, REVIEW_PREFIX, tokenizer, model)
         similarities = review_embeddings @ topic_embeddings.T
+    log_model_event(
+        "review_inference_complete",
+        inferenceDurationMs=round((perf_counter() - inference_started) * 1000, 3),
+        reviewCount=len(reviews),
+    )
 
+    refinement_started = perf_counter()
     results = []
     for review_index, scores in enumerate(similarities):
-        selected_indices = set(select_top_two(scores))
+        raw_scores = {
+            label: float(scores[index])
+            for index, label in enumerate(TOPIC_LABELS)
+        }
+        refined_scores = refine_topic_scores(
+            classifier_input[review_index],
+            raw_scores,
+            TOPIC_CONFIDENCE_THRESHOLD,
+        )
+        selection_scores = torch.tensor(
+            [refined_scores[label] for label in TOPIC_LABELS],
+            dtype=scores.dtype,
+        )
+        selected_indices = select_top_two(selection_scores)
         assignments = [
             {
-                "label": topic["label"],
-                "score": round(float(scores[index]), 4),
+                "label": TOPIC_LABELS[index],
+                "score": round(float(selection_scores[index]), 4),
             }
-            for index, topic in enumerate(TOPIC_E5_DESCRIPTIONS)
-            if index in selected_indices
+            for index in selected_indices
         ]
         assignments = apply_platform_applicability(
             assignments,
@@ -162,6 +204,11 @@ def classify_reviews(reviews: list[str], platform: str | None = None) -> dict:
             "topicScores": topic_scores,
         })
 
+    log_model_event(
+        "topic_refinement_complete",
+        refinementDurationMs=round((perf_counter() - refinement_started) * 1000, 3),
+        resultCount=len(results),
+    )
     return {
         "provider": provider,
         "model": model_name,

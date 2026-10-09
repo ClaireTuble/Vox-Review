@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PersistentJsonWorker } from "../utils/persistentJsonWorker.js";
+import { getTopicProcessTimeoutMs } from "../utils/topicWorkerTimeout.js";
 
 const controllerDirectory = path.dirname(fileURLToPath(import.meta.url));
 const nlpDirectory = path.resolve(controllerDirectory, "../../../Frontend/nlp");
@@ -9,8 +10,6 @@ const svmWorkerScript = path.join(nlpDirectory, "svm_worker.py");
 const topicWorkerScript = path.join(nlpDirectory, "topic_worker.py");
 const pythonExecutable = process.env.PYTHON_EXECUTABLE || "python";
 const svmWorkerTimeoutMs = Number(process.env.SVM_WORKER_TIMEOUT_MS || 60000);
-const topicProcessTimeoutBaseMs = Number(process.env.TOPIC_PROCESS_TIMEOUT_BASE_MS || 60000);
-const topicProcessTimeoutPerReviewMs = Number(process.env.TOPIC_PROCESS_TIMEOUT_PER_REVIEW_MS || 12000);
 const validCategories = new Set([1, 2, 3, 4, 5, 6]);
 const validTopicLabels = new Set([
   "Quality", "Performance / Functionality", "Features / Content", "Service / Support",
@@ -464,7 +463,7 @@ function processNextTopicRequest() {
 function runTopicPrediction(reviews, platform, diagnostics, registerCancel) {
   return new Promise((resolve, reject) => {
     const { requestId } = diagnostics;
-    const topicProcessTimeoutMs = topicProcessTimeoutBaseMs + reviews.length * topicProcessTimeoutPerReviewMs;
+    const topicProcessTimeoutMs = getTopicProcessTimeoutMs(reviews.length);
     const queueItem = {
       requestId,
       reviews,

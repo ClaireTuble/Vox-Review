@@ -184,13 +184,43 @@ class TopicProviderTests(unittest.TestCase):
 
         self.assertEqual(
             [topic["label"] for topic in baseline["results"][0]["topics"]],
-            ["Delivery / Transaction", "Environment / Location"],
+            ["Environment / Location", "Delivery / Transaction"],
         )
         self.assertEqual(guarded["results"][0]["topics"], [])
         self.assertEqual(
             guarded["results"][0]["topicScores"],
             baseline["results"][0]["topicScores"],
         )
+
+    def test_strong_performance_evidence_reranks_competing_e5_candidates(self):
+        review = "The game keeps crashing after the latest update."
+        self.embeddings.review_vectors[review] = self.embeddings.vector({
+            0: 0.7653,
+            1: 0.7540,
+            2: 0.7542,
+            3: 0.7772,
+        })
+
+        result = predict_topics_batch.classify_reviews([review])["results"][0]
+
+        self.assertEqual(
+            [topic["label"] for topic in result["topics"]],
+            ["Performance / Functionality", "Service / Support"],
+        )
+        self.assertGreater(
+            result["topics"][0]["score"],
+            next(
+                score["score"]
+                for score in result["topicScores"]
+                if score["label"] == "Performance / Functionality"
+            ),
+        )
+        raw_scores = {score["label"]: score["score"] for score in result["topicScores"]}
+        self.assertGreater(
+            raw_scores["Service / Support"],
+            raw_scores["Performance / Functionality"],
+        )
+        self.assertEqual(len(result["topicScores"]), len(TOPIC_LABELS))
 
     def test_rejects_empty_or_non_string_reviews(self):
         for reviews in ([""], ["  "], [None], "not a list"):
