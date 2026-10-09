@@ -18,10 +18,11 @@ export const PRIORITY_CONFIG = {
     { id: 'login_failure', severity: 'CRITICAL', reason: 'unable to access an account', pattern: /\b(?:can't|cannot|unable\s+to|failed\s+to|won't|will\s+not|doesn't|does\s+not)\s+(?:log\s*in|sign\s*in|access\s+(?:my\s+)?account)\b|\b(?:hindi|di)\s+(?:ako\s+)?makapasok\b.{0,35}\b(?:account|akun|profile)\b/i },
     { id: 'payment_failure', severity: 'CRITICAL', reason: 'payment failure', pattern: /\bpayment\s+(?:failed|failure|was\s+declined|not\s+processed)\b|\b(?:can't|cannot|unable\s+to)\s+(?:pay|complete\s+(?:the\s+)?payment)\b/i },
     { id: 'repeated_app_crash', severity: 'CRITICAL', reason: 'repeated app crashes', pattern: /\b(?:app|application|game|system|site|website)\b.{0,55}\b(?:keeps?|constantly|repeatedly|every\s+time|always)\b.{0,35}\bcrash(?:es|ed|ing)?\b|\b(?:app|application|game|system|site|website)\b.{0,55}\bcrash(?:es|ed|ing)?\b.{0,35}\b(?:every\s+time|constantly|repeatedly|always)\b|\brepeated\s+(?:app|application|game)\s+crashes?\b/i },
-    { id: 'core_unavailable', severity: 'CRITICAL', reason: 'core functionality completely unavailable', pattern: /\b(?:core|main|basic)\s+(?:feature|functionality)\s+(?:is\s+)?(?:broken|not\s+working|unavailable)\b|\b(?:app|application|service|website|site|system)\s+(?:is\s+)?(?:completely\s+)?(?:down|unavailable)\b|\b(?:can't|cannot|unable\s+to)\s+use\s+(?:the\s+)?(?:app|service|website|site)\s+at\s+all\b/i },
+    { id: 'core_unavailable', severity: 'CRITICAL', reason: 'core functionality completely unavailable', pattern: /\b(?:core|main|basic)\s+(?:feature|functionality)\s+(?:is\s+)?(?:broken|not\s+working|unavailable)\b|\b(?:app|application|service|website|site|system)\s+(?:is\s+)?(?:completely\s+)?(?:down|unavailable)\b|\b(?:can't|cant|cannot|unable\s+to)\s+(?:open|access)\s+(?:other\s+)?menus?\b|\b(?:can't|cant|cannot|unable\s+to)\s+(?:even\s+)?(?:get\s+out|exit|leave)\b|\b(?:can't|cannot|unable\s+to)\s+use\s+(?:the\s+)?(?:app|service|website|site)\s+at\s+all\b/i },
   ],
   majorIssuePatterns: [
     { id: 'severe_persistent_performance', severity: 'MAJOR', reason: 'persistent severe performance problem', pattern: /\b(?:constantly|continually|always|every\s+time|keeps?)\b.{0,60}\b(?:fps|frame\s*rate|lag|stutter|slow)\b|\b(?:fps|frame\s*rate)\b.{0,60}\b(?:drops?|dropping|stutter(?:s|ing)?|almost\s+impossible\s+to\s+play|unplayable)\b/i },
+    { id: 'major_feature_failure', severity: 'MAJOR', reason: 'major functionality malfunction', pattern: /\b(?:app|application|game|feature|functionality|checkout|login|save|search)\b.{0,40}\b(?:broken|malfunction(?:s|ing)?|doesn't\s+work|does\s+not\s+work|isn't\s+working|is\s+not\s+working|not\s+working(?!\s+well)|unavailable)\b|\b(?:broken|malfunction(?:s|ing)?|doesn't\s+work|does\s+not\s+work|isn't\s+working|is\s+not\s+working|not\s+working(?!\s+well)|unavailable)\b.{0,40}\b(?:app|application|game|feature|functionality)\b|\b(?:app|application|game|feature|functionality)\b.{0,40}\b(?:keeps?|constantly|repeatedly|every\s+time)\b.{0,30}\b(?:fail(?:s|ed|ing)?|freeze(?:s|d|ing)?|stop(?:s|ped)?\s+working|not\s+work(?:ing)?)\b|\b(?:screen|display)\b.{0,35}\b(?:black|blank)\b.{0,35}\b(?:nothing\s+happens|nothing\s+works|unresponsive|doesn't\s+respond|does\s+not\s+respond)\b|\b(?:have|had)\s+to\s+restart\s+(?:the\s+)?(?:app|game)\b|\bsame\s+thing\s+happens\s+on\s+(?:other|multiple|different)\s+menus?\b/i },
     { id: 'major_malfunction', severity: 'MAJOR', reason: 'major functionality malfunction', pattern: /\b(?:major|core|main)\s+(?:feature|functionality|function)\b.{0,35}\b(?:broken|malfunction(?:s|ing)?|not\s+working)\b|\b(?:broken|malfunction(?:s|ing)?)\b.{0,35}\b(?:app|application|game|feature|functionality)\b/i },
     { id: 'serious_service_failure', severity: 'MAJOR', reason: 'serious service or delivery failure', pattern: /\b(?:service|delivery|order)\b.{0,45}\b(?:failed|failure|severely\s+delayed|never\s+arrived|wrong\s+(?:item|order))\b|\b(?:wrong\s+(?:item|order)|severely\s+delayed)\b.{0,45}\b(?:delivery|order|transaction)\b/i },
     { id: 'major_incorrect_result', severity: 'MAJOR', reason: 'major incorrect transaction or result', pattern: /\b(?:incorrect|wrong|inaccurate)\s+(?:transaction|result|calculation|charge|order)\b|\b(?:transaction|result|calculation)\b.{0,35}\b(?:incorrect|wrong|inaccurate)\b/i },
@@ -29,7 +30,7 @@ export const PRIORITY_CONFIG = {
   ],
   minorIssuePatterns: [
     { id: 'minor_performance', severity: 'MINOR', reason: 'slight or occasional slowness', pattern: /\b(?:occasionally|sometimes|once\s+in\s+a\s+while|a\s+little|slightly)\b.{0,35}\b(?:slow|laggy|lag|sluggish)\b|\b(?:slow|laggy|sluggish)\b.{0,30}\b(?:occasionally|sometimes|once\s+in\s+a\s+while)\b|\b(?:app|game|site|service)\b.{0,30}\b(?:slow|laggy|sluggish)\b|\b(?:slow|laggy|sluggish)\b.{0,30}\b(?:app|game|site|service)\b|\bmabagal\b.{0,25}\b(?:minsan|lang)\b|\bminsan\b.{0,25}\bmabagal\b/i },
-    { id: 'minor_malfunction', severity: 'MINOR', reason: 'minor malfunction', pattern: /\b(?:bug|glitch|minor\s+malfunction|small\s+bug|not\s+working\s+well)\b/i },
+    { id: 'minor_malfunction', severity: 'MINOR', reason: 'minor malfunction', pattern: /\b(?:bug(?:gy)?|glitch(?:y)?|minor\s+malfunction|small\s+bug|not\s+working\s+well)\b/i },
     { id: 'usability_problem', severity: 'MINOR', reason: 'usability problem', pattern: /\b(?:interface|menu|navigation|controls?)\b.{0,35}\b(?:confusing|hard\s+to\s+use|difficult\s+to\s+use)\b|\b(?:confusing|hard\s+to\s+use|difficult\s+to\s+use)\b.{0,35}\b(?:interface|menu|navigation|controls?)\b/i },
     { id: 'small_quality_issue', severity: 'MINOR', reason: 'small quality or convenience issue', pattern: /\b(?:could\s+be\s+cleaner|not\s+(?:very\s+)?clean|unclean|rude|late\s+delivery|arrived\s+late|poor\s+quality|defective|inconvenient|minor\s+issue)\b/i },
   ],
@@ -232,6 +233,11 @@ export function calculateReviewPriorities(reviews, topicAnalysis = null) {
 export function attachReviewPriorities(reviews, topicAnalysis = null) {
   const priorities = calculateReviewPriorities(reviews, topicAnalysis);
   return reviews.map((review, index) => ({ ...review, priority: priorities[index] }));
+}
+
+export function filterPriorityReviews(entries, priorityLevel = 'all') {
+  if (priorityLevel === 'all') return [...entries];
+  return entries.filter(({ priority }) => priority?.level === priorityLevel);
 }
 
 function getReviewTimestamp(review) {

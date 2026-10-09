@@ -60,6 +60,30 @@ test('accepts existing alternate review body aliases and ignores non-string fiel
   assert.equal(getReviewText({ text: '  ', review: null }), '');
 });
 
+test('mixed-sentiment topic keywords retain source spacing, negation, and contractions', () => {
+  const review = "Nice place but not good for vacation /outing coz it doesn't have any cottage";
+  const candidates = getCandidates(review, 'Environment / Location');
+  const keywordScores = Object.fromEntries(candidates.map((phrase) => [
+    phrase.toLocaleLowerCase(),
+    makeTopicScores('Environment / Location', 0.9),
+  ]));
+  const selected = getMeaningfulKeywords(
+    [{ review, topicResultIndex: 0 }],
+    'Environment / Location',
+    {
+      results: [{ reviewIndex: 0, topics: [{ label: 'Environment / Location', score: 0.9 }] }],
+      keywordScores,
+    },
+  );
+
+  assert.ok(candidates.includes('not good'));
+  assert.ok(!candidates.includes('doesn'));
+  assert.ok(selected.includes('not good'));
+  assert.ok(selected.includes('Nice place'));
+  assert.ok(selected.every((phrase) => review.includes(phrase)));
+  assert.ok(!selected.some((phrase) => /placecottage|gooddoesn|doesnvacation/i.test(phrase)));
+});
+
 test('counts unique review indexes once and shows only evidence assigned that topic', () => {
   const topic = aggregateTopicsForReviews(entries, analysis).find((item) => item.label === DELIVERY);
 

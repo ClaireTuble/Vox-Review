@@ -26,7 +26,7 @@ test('emotion drivers with no meaningful words return empty keywords for the exi
   );
 });
 
-test('emotion keywords prefer source-grounded phrases over isolated SVM driver words', () => {
+test('emotion keywords preserve source-grounded phrases with matching sentiment', () => {
   const reviews = [
     'This feels almost perfect, apart from the server issues.',
     'The huge update keeps crashing.',
@@ -39,12 +39,55 @@ test('emotion keywords prefer source-grounded phrases over isolated SVM driver w
   ];
   const keywords = getSvmEmotionKeywords(results, 3, reviews);
 
-  assert.ok(keywords.includes('almost perfect'));
+  assert.ok(!keywords.includes('almost perfect'));
   assert.ok(keywords.includes('server issues'));
   assert.ok(keywords.includes('keeps crashing'));
   assert.ok(keywords.some((keyword) => keyword.includes('never replied')));
   assert.ok(keywords.includes('not worth it'));
   assert.ok(!keywords.some((keyword) => ['perfect', 'crashing', 'replied', 'worth'].includes(keyword)));
+});
+
+test('mixed-sentiment review keeps positive and negative evidence separate for predicted emotion', () => {
+  const review = "Nice place but not good for vacation /outing coz it doesn't have any cottage";
+  const results = [
+    { category: 1, emotionDrivers: ['nice place', 'good'] },
+    { category: 2, emotionDrivers: ['nice place', 'good', 'cottage'] },
+  ];
+
+  const positiveEvidence = getSvmEmotionKeywords(results, 1, [review, review]);
+  const sadEvidence = getSvmEmotionKeywords(results, 2, [review, review]);
+
+  assert.ok(positiveEvidence.includes('Nice place'));
+  assert.ok(!positiveEvidence.includes('not good'));
+  assert.ok(sadEvidence.includes('not good'));
+  assert.ok(!sadEvidence.includes('Nice place'));
+  assert.ok(!sadEvidence.includes('good'));
+  assert.ok(sadEvidence.every((phrase) => review.includes(phrase)));
+});
+
+test('Sad evidence uses source polarity when SVM drivers point at a neutral phrase', () => {
+  const review = "Nice place but not good for vacation /outing coz it doesn't have any cottage";
+
+  const sadEvidence = getSvmEmotionKeywords(
+    [{ category: 2, emotionDrivers: ['cottage'] }],
+    2,
+    [review],
+  );
+
+  assert.ok(sadEvidence.includes('not good'));
+  assert.ok(!sadEvidence.includes('Nice place'));
+  assert.ok(sadEvidence.every((phrase) => review.includes(phrase)));
+});
+
+test('emotion evidence is empty when the source has no phrase-level polarity evidence', () => {
+  assert.deepEqual(
+    getSvmEmotionKeywords(
+      [{ category: 2, emotionDrivers: ['left'] }],
+      2,
+      ['The table is on the left.'],
+    ),
+    [],
+  );
 });
 
 test('emotion keywords filter generic stop words and do not invent fallback terms', () => {
@@ -73,6 +116,6 @@ test('emotion fallback keeps a meaningful source word when no phrase can be extr
       3,
       ['Lag.'],
     ),
-    ['lag'],
+    ['Lag'],
   );
 });

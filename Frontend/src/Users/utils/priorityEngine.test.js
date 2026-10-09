@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   attachReviewPriorities,
   calculateReviewPriorities,
+  filterPriorityReviews,
   sortPriorityReviews,
 } from './priorityEngine.js';
 
@@ -32,6 +33,16 @@ test('feature preference is NONE and LOW', () => {
   assert.equal(priority.level, 'LOW');
 });
 
+test('missing cottage in a mixed-sentiment review is not classified as a core failure', () => {
+  const text = "Nice place but not good for vacation /outing coz it doesn't have any cottage";
+  const [priority] = calculateReviewPriorities([{ text, category: 2, emotion: 'Sad' }]);
+
+  assert.equal(priority.severity, 'NONE');
+  assert.equal(priority.level, 'LOW');
+  assert.equal(priority.factors.emotion, 0);
+  assert.equal(priority.signals.some((signal) => signal.type === 'severity'), false);
+});
+
 test('repeated app crash during login is CRITICAL severity', () => {
   const [priority] = calculateReviewPriorities([
     { text: 'The app crashes every time I try to log in.', category: 3 },
@@ -49,6 +60,63 @@ test('duplicate charge is CRITICAL severity with HIGH base priority', () => {
 
   assert.equal(priority.severity, 'CRITICAL');
   assert.equal(priority.level, 'HIGH');
+});
+
+test('a minor actionable bug with SVM Anger receives only the existing one-level adjustment', () => {
+  const [priority] = calculateReviewPriorities([
+    { text: 'The app has a small bug that sometimes freezes the menu briefly.', category: 3 },
+  ]);
+
+  assert.equal(priority.severity, 'MINOR');
+  assert.equal(priority.level, 'MEDIUM');
+  assert.equal(priority.factors.emotion, 1);
+});
+
+test('a feature failure expressed as not working is recognized as a major malfunction', () => {
+  const [priority] = calculateReviewPriorities([
+    { text: "The app's save feature doesn't work, so progress cannot be saved." },
+  ]);
+
+  assert.equal(priority.severity, 'MAJOR');
+  assert.equal(priority.level, 'MEDIUM');
+});
+
+test('a single critical issue receives HIGH base priority without repetition support', () => {
+  const [priority] = calculateReviewPriorities([
+    { text: 'I was charged twice for the same purchase.' },
+  ]);
+
+  assert.equal(priority.severity, 'CRITICAL');
+  assert.equal(priority.level, 'HIGH');
+  assert.equal(priority.factors.repetition, 0);
+});
+
+test('mixed game-menu failures are critical even when the review is predicted Happy', () => {
+  const text = "hello, I'm new to this game and I'm hyped up when playing while doing work, but there are problems, I downloaded the 1.5GB resource option to maintain my storage, but whenever I open the mystical house I can't open other menus and I cant even get out so I have to restart the game, also when I'm claiming a daily login rewards the screen is just black and nothing happens even after an hour has passed, same thing happens on other menus, it takes much time to load even with excellent network.";
+  const [priority] = calculateReviewPriorities([{ text, category: 1, emotion: 'Happy' }]);
+
+  assert.equal(priority.signals.find((signal) => signal.type === 'severity')?.id, 'core_unavailable');
+  assert.equal(priority.severity, 'CRITICAL');
+  assert.equal(priority.level, 'HIGH');
+  assert.equal(priority.factors.emotion, 0);
+  assert.equal(priority.factors.repetition, 0);
+});
+
+test('specific game-menu failure phrases map to critical or major issue patterns', () => {
+  const cases = [
+    ["I can't open other menus.", 'CRITICAL', 'core_unavailable'],
+    ['I cant even get out and have to restart the game.', 'CRITICAL', 'core_unavailable'],
+    ['I have to restart the game.', 'MAJOR', 'major_feature_failure'],
+    ['The screen is just black and nothing happens.', 'MAJOR', 'major_feature_failure'],
+    ['The same thing happens on other menus.', 'MAJOR', 'major_feature_failure'],
+  ];
+
+  for (const [text, severity, ruleId] of cases) {
+    const [priority] = calculateReviewPriorities([{ text, category: 1 }]);
+
+    assert.equal(priority.severity, severity, text);
+    assert.equal(priority.signals.find((signal) => signal.type === 'severity')?.id, ruleId, text);
+  }
 });
 
 test('occasional slight slowness is MINOR and LOW', () => {
@@ -310,6 +378,24 @@ test('priority sorting returns a sorted copy and preserves source review order',
   assert.equal(sorted[0].quote.text, 'Critical issue');
   assert.equal(entries[0].quote.text, 'Minor issue');
   assert.notEqual(sorted, entries);
+});
+
+test('priority-level filtering selects only that level and All Priorities restores every entry', () => {
+  const entries = [
+    { quote: { text: 'Minor issue' }, priority: { level: 'LOW', score: 10 } },
+    { quote: { text: 'Critical issue' }, priority: { level: 'CRITICAL', score: 300 } },
+    { quote: { text: 'Medium issue' }, priority: { level: 'MEDIUM', score: 110 } },
+  ];
+
+  assert.deepEqual(
+    filterPriorityReviews(entries, 'MEDIUM').map(({ quote }) => quote.text),
+    ['Medium issue'],
+  );
+  assert.deepEqual(
+    filterPriorityReviews(entries, 'all').map(({ quote }) => quote.text),
+    ['Minor issue', 'Critical issue', 'Medium issue'],
+  );
+  assert.notEqual(filterPriorityReviews(entries, 'all'), entries);
 });
 
 test('priority explanations are attached without mutating source reviews', () => {

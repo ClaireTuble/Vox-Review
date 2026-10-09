@@ -19,6 +19,8 @@ const COMMON_REVIEW_WORDS = new Set([
   'same', 'should', 'since', 'some', 'such', 'than', 'these', 'those', 'through', 'under',
   'until', 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'whose', 'why', 'will',
   'yours', 'yourself', 'yourselves', 'keep', 'kept', 'keeping',
+  "aren't", "can't", "couldn't", "didn't", "doesn't", "don't", "hadn't", "hasn't",
+  "haven't", "isn't", "mustn't", "shouldn't", "wasn't", "weren't", "won't", "wouldn't",
 ]);
 const GENERIC_REVIEW_WORDS = new Set([
   'app', 'apps', 'item', 'items', 'package', 'person', 'product', 'products', 'review',
@@ -42,7 +44,7 @@ const ORDINARY_REVIEW_VERBS = new Set([
   'gumagana', 'nagdownload', 'naglaro', 'naglalaro', 'nabili', 'natanggap', 'nilaro', 'tinanggap',
 ]);
 const REVIEW_URL_PATTERN = /https?:\/\/\S+|www\.\S+/gi;
-const REVIEW_TOKEN_PATTERN = /[\p{L}]+(?:-[\p{L}]+)*/gu;
+const REVIEW_TOKEN_PATTERN = /[\p{L}]+(?:[-'’][\p{L}]+)*/gu;
 const PHRASE_CONNECTORS = new Set(['and', 'to']);
 const HTML_ENTITY_VALUES = {
   amp: '&',

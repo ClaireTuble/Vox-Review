@@ -4,7 +4,11 @@ import {
   MessageSquare, Tag
 } from 'lucide-react';
 import { aggregateTopicsForReviews } from '../utils/reviewTopics.js';
-import { calculateReviewPriorities, sortPriorityReviews } from '../utils/priorityEngine.js';
+import {
+  calculateReviewPriorities,
+  filterPriorityReviews,
+  sortPriorityReviews,
+} from '../utils/priorityEngine.js';
 import '../css/AnalysisResults.css';
 import '../css/ExtensionConfirmationModal.css';
 
@@ -99,7 +103,7 @@ export default function AnalysisResults({
   const [selectedEmotion, setSelectedEmotion] = useState(null);
   const [selectedTopic, setSelectedTopic] = useState(null);
   const [selectedQuoteFilter, setSelectedQuoteFilter] = useState('all');
-  const [quoteSortMode, setQuoteSortMode] = useState('priority');
+  const [selectedPriorityFilter, setSelectedPriorityFilter] = useState('all');
   const [userToast, setUserToast] = useState('');
   const [expandedReviews, setExpandedReviews] = useState({});
   const [expandableReviews, setExpandableReviews] = useState({});
@@ -251,10 +255,11 @@ export default function AnalysisResults({
     sourceReview: normalizedReviews[originalIndex] ?? quote,
     originalIndex,
   }));
+  const priorityFilteredEntries = filterPriorityReviews(quoteEntries, selectedPriorityFilter);
   const filteredQuoteEntries = selectedQuoteFilter === 'all'
-    ? quoteEntries
-    : quoteEntries.filter(({ quote }) => quote.emotion.toLowerCase() === selectedQuoteFilter.toLowerCase());
-  const sortedQuoteEntries = sortPriorityReviews(filteredQuoteEntries, quoteSortMode);
+    ? priorityFilteredEntries
+    : priorityFilteredEntries.filter(({ quote }) => quote.emotion.toLowerCase() === selectedQuoteFilter.toLowerCase());
+  const sortedQuoteEntries = sortPriorityReviews(filteredQuoteEntries);
 
   const selectEmotion = (emotion) => {
     const isAlreadySelected = selectedEmotionForData?.id === emotion.id;
@@ -458,7 +463,7 @@ export default function AnalysisResults({
               </div>
             </div>
             <div className="intel-keywords-section">
-              <span className="intel-label">Common Keywords</span>
+              <span className="intel-label">Emotion Evidence Phrases</span>
               <div className="keywords-tags-row">
                 {activeKeywords.length > 0
                   ? activeKeywords.map((kw, i) => (
@@ -467,8 +472,8 @@ export default function AnalysisResults({
                   : (
                     <span className="keyword-empty-message">
                       {activeEmotion.count === 0
-                        ? `No reviews were classified into ${activeEmotion.label}, so no common keywords are available for this emotion.`
-                        : 'No meaningful emotion keywords found.'}
+                        ? `No reviews were classified into ${activeEmotion.label}, so no emotion evidence phrases are available.`
+                        : 'No clear phrase-level evidence is available for this emotion.'}
                     </span>
                   )}
               </div>
@@ -666,13 +671,17 @@ export default function AnalysisResults({
         </div>
 
         <label className="review-sort-control">
-          <span>Sort by:</span>
+          <span>Priority:</span>
           <select
-            aria-label="Sort reviews"
-            value={quoteSortMode}
-            onChange={(event) => setQuoteSortMode(event.target.value)}
+            aria-label="Filter reviews by priority"
+            value={selectedPriorityFilter}
+            onChange={(event) => setSelectedPriorityFilter(event.target.value)}
           >
-            <option value="priority">Priority</option>
+            <option value="all">All Priorities</option>
+            <option value="CRITICAL">Critical</option>
+            <option value="HIGH">High</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="LOW">Low</option>
           </select>
         </label>
 
