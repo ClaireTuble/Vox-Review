@@ -1,4 +1,7 @@
-import { createClient } from "@supabase/supabase-js";
+import {
+  createServiceRoleClient,
+  respondIfServiceRoleUnavailable,
+} from "../utils/serviceRoleSupabase.js";
 
 export function getAnalysisActivitySummary(activities, since) {
   const activityByDay = new Map();
@@ -136,10 +139,7 @@ export function calculateDashboardStats({
 
 export async function getAdminDashboardStats(req, res) {
   try {
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminSupabase = createServiceRoleClient();
 
     const superAdminAuthIds = new Set();
     const authUserIds = new Set();
@@ -310,6 +310,7 @@ export async function getAdminDashboardStats(req, res) {
       recentActivities,
     });
   } catch (error) {
+    if (respondIfServiceRoleUnavailable(res, error)) return;
     console.error("Admin dashboard stats error:", error);
     return res.status(500).json({ success: false, error: "Unable to load dashboard stats." });
   }

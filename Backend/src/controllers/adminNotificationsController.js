@@ -1,4 +1,7 @@
-import { createClient } from "@supabase/supabase-js";
+import {
+  createServiceRoleClient,
+  respondIfServiceRoleUnavailable,
+} from "../utils/serviceRoleSupabase.js";
 
 function formatNotificationTimestamp(value) {
   const date = new Date(value || Date.now());
@@ -31,10 +34,7 @@ function normalizeNotification(row) {
 
 export async function getAdminNotifications(req, res) {
   try {
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminSupabase = createServiceRoleClient();
 
     const { data, error } = await adminSupabase
       .from("notifications")
@@ -51,6 +51,7 @@ export async function getAdminNotifications(req, res) {
       notifications: (data || []).map(normalizeNotification),
     });
   } catch (error) {
+    if (respondIfServiceRoleUnavailable(res, error)) return;
     return res.status(500).json({
       success: false,
       error: error.message || "Unable to load notifications.",
@@ -63,10 +64,7 @@ export async function toggleAdminNotificationRead(req, res) {
     const { id } = req.params;
     const nextRead = Boolean(req.body?.read ?? true);
 
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminSupabase = createServiceRoleClient();
 
     const { data, error } = await adminSupabase
       .from("notifications")
@@ -84,6 +82,7 @@ export async function toggleAdminNotificationRead(req, res) {
       notification: normalizeNotification(data),
     });
   } catch (error) {
+    if (respondIfServiceRoleUnavailable(res, error)) return;
     return res.status(500).json({
       success: false,
       error: error.message || "Unable to update notification.",
@@ -93,10 +92,7 @@ export async function toggleAdminNotificationRead(req, res) {
 
 export async function markAllAdminNotificationsRead(req, res) {
   try {
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminSupabase = createServiceRoleClient();
 
     const { data, error } = await adminSupabase
       .from("notifications")
@@ -113,6 +109,7 @@ export async function markAllAdminNotificationsRead(req, res) {
       notifications: (data || []).map(normalizeNotification),
     });
   } catch (error) {
+    if (respondIfServiceRoleUnavailable(res, error)) return;
     return res.status(500).json({
       success: false,
       error: error.message || "Unable to mark notifications as read.",
@@ -122,10 +119,7 @@ export async function markAllAdminNotificationsRead(req, res) {
 
 export async function clearReadAdminNotifications(req, res) {
   try {
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminSupabase = createServiceRoleClient();
 
     const { error } = await adminSupabase
       .from("notifications")
@@ -138,6 +132,7 @@ export async function clearReadAdminNotifications(req, res) {
 
     return res.status(200).json({ success: true });
   } catch (error) {
+    if (respondIfServiceRoleUnavailable(res, error)) return;
     return res.status(500).json({
       success: false,
       error: error.message || "Unable to clear read notifications.",
@@ -147,10 +142,7 @@ export async function clearReadAdminNotifications(req, res) {
 
 export async function clearAllAdminNotifications(req, res) {
   try {
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminSupabase = createServiceRoleClient();
 
     const { error } = await adminSupabase
       .from("notifications")
@@ -163,10 +155,10 @@ export async function clearAllAdminNotifications(req, res) {
 
     return res.status(200).json({ success: true });
   } catch (error) {
+    if (respondIfServiceRoleUnavailable(res, error)) return;
     return res.status(500).json({
       success: false,
       error: error.message || "Unable to clear all notifications.",
     });
   }
 }
-

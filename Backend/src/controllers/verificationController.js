@@ -1,4 +1,5 @@
 import { verificationService } from "../services/verificationService.js";
+import { respondIfServiceRoleUnavailable } from "../utils/serviceRoleSupabase.js";
 
 /**
  * Unauthenticated endpoint: Request 6-digit signup email verification code.
@@ -22,7 +23,7 @@ export async function requestSignupVerification(req, res) {
     });
   } catch (err) {
     console.error("[VerificationController] Request signup verification error:", err.message);
-    return res.status(400).json({
+    return res.status(err.statusCode || 400).json({
       success: false,
       error: err.message || "Failed to send signup verification code.",
     });
@@ -46,7 +47,7 @@ export async function verifySignupCode(req, res) {
     });
   } catch (err) {
     console.error("[VerificationController] Verify signup code error:", err.message);
-    return res.status(400).json({
+    return res.status(err.statusCode || 400).json({
       success: false,
       error: err.message || "Verification failed.",
     });
@@ -80,7 +81,7 @@ export async function requestVerificationCode(req, res) {
     });
   } catch (err) {
     console.error("[VerificationController] Request error:", err.message);
-    return res.status(400).json({
+    return res.status(err.statusCode || 400).json({
       success: false,
       error: err.message || "Failed to send verification code.",
     });
@@ -119,7 +120,7 @@ export async function verifyVerificationCode(req, res) {
     });
   } catch (err) {
     console.error("[VerificationController] Verify error:", err.message);
-    return res.status(400).json({
+    return res.status(err.statusCode || 400).json({
       success: false,
       error: err.message || "Verification failed.",
     });
@@ -130,7 +131,8 @@ export async function requestForgotPassword(req, res) {
   try {
     const result = await verificationService.requestForgotPasswordCode(req.body?.email);
     return res.status(200).json(result);
-  } catch (_err) {
+  } catch (err) {
+    if (respondIfServiceRoleUnavailable(res, err)) return;
     return res.status(200).json({ success: true, message: "If an account exists, a verification code has been sent." });
   }
 }
@@ -140,7 +142,7 @@ export async function verifyForgotPassword(req, res) {
     const result = await verificationService.verifyForgotPasswordCode({ email: req.body?.email, code: req.body?.code });
     return res.status(200).json(result);
   } catch (err) {
-    return res.status(400).json({ success: false, error: err.message || "Verification failed." });
+    return res.status(err.statusCode || 400).json({ success: false, error: err.message || "Verification failed." });
   }
 }
 
@@ -153,6 +155,6 @@ export async function resetPassword(req, res) {
     });
     return res.status(200).json(result);
   } catch (err) {
-    return res.status(400).json({ success: false, error: err.message || "Password reset failed." });
+    return res.status(err.statusCode || 400).json({ success: false, error: err.message || "Password reset failed." });
   }
 }

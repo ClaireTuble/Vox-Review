@@ -1,17 +1,10 @@
-import { createClient } from "@supabase/supabase-js";
+import { createServiceRoleClient } from "./serviceRoleSupabase.js";
 
 /**
  * Create a Supabase admin client for audit operations.
  */
 function getAuditSupabase() {
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-  if (!process.env.SUPABASE_URL || !supabaseKey) {
-    console.error("Supabase environment variables are missing for audit logging.");
-    return null;
-  }
-  return createClient(process.env.SUPABASE_URL, supabaseKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  return createServiceRoleClient();
 }
 
 /**
@@ -44,7 +37,6 @@ export async function createAuditLog({
 }) {
   try {
     const auditSupabase = getAuditSupabase();
-    if (!auditSupabase) return false;
 
     const { error } = await auditSupabase.from("audit_logs").insert({
       action,
@@ -67,7 +59,11 @@ export async function createAuditLog({
     console.log(`[AuditLogger] Audit log created: action="${action}", status="${status}"`);
     return true;
   } catch (err) {
-    console.error(`[AuditLogger] Exception while creating audit log:`, err.message);
+    if (err?.code === "SERVICE_ROLE_CONFIGURATION_MISSING") {
+      console.error("[AuditLogger] Audit log was not persisted because service-role configuration is missing.");
+    } else {
+      console.error("[AuditLogger] Exception while creating audit log:", err.message);
+    }
     return false;
   }
 }
@@ -96,7 +92,6 @@ export async function createNotification({
 }) {
   try {
     const auditSupabase = getAuditSupabase();
-    if (!auditSupabase) return false;
 
     const { error } = await auditSupabase.from("notifications").insert({
       category,
@@ -117,7 +112,11 @@ export async function createNotification({
     console.log(`[AuditLogger] Notification created: category="${category}", title="${title}"`);
     return true;
   } catch (err) {
-    console.error(`[AuditLogger] Exception while creating notification:`, err.message);
+    if (err?.code === "SERVICE_ROLE_CONFIGURATION_MISSING") {
+      console.error("[AuditLogger] Notification was not persisted because service-role configuration is missing.");
+    } else {
+      console.error("[AuditLogger] Exception while creating notification:", err.message);
+    }
     return false;
   }
 }

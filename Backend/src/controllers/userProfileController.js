@@ -1,7 +1,10 @@
-import { createClient } from "@supabase/supabase-js";
 import { passwordService } from "../services/passwordService.js";
 import { createAuditLog, extractClientIp, extractDeviceInfo } from "../utils/auditLogger.js";
 import { buildFullName } from "../utils/profileName.js";
+import {
+  createServiceRoleClient,
+  respondIfServiceRoleUnavailable,
+} from "../utils/serviceRoleSupabase.js";
 
 const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
@@ -71,10 +74,7 @@ export async function getUserProfile(req, res) {
       return res.status(401).json({ success: false, error: "Authenticated user identity missing." });
     }
 
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminSupabase = createServiceRoleClient();
 
     const authMetadata = req.authUser.user_metadata || {};
     const currentUsername = authMetadata.username || authMetadata.name || req.authUser.email?.split("@")[0] || "";
@@ -114,6 +114,7 @@ export async function getUserProfile(req, res) {
       dbUser: userRow,
     });
   } catch (err) {
+    if (respondIfServiceRoleUnavailable(res, err)) return;
     console.error("Get user profile error:", err);
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -129,10 +130,7 @@ export async function updateUserProfile(req, res) {
     const { firstName, lastName, username, avatarUrl, avatar_url } = req.body;
     const targetAvatarUrl = avatarUrl !== undefined ? avatarUrl : avatar_url;
 
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminSupabase = createServiceRoleClient();
 
     const newFirstName = (firstName !== undefined ? firstName : req.authUser.user_metadata?.firstName || "").trim();
     const newLastName = (lastName !== undefined ? lastName : req.authUser.user_metadata?.lastName || "").trim();
@@ -252,6 +250,7 @@ export async function updateUserProfile(req, res) {
       dbUser: userRow,
     });
   } catch (err) {
+    if (respondIfServiceRoleUnavailable(res, err)) return;
     console.error("Update profile error:", err);
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -299,10 +298,7 @@ export async function uploadAvatar(req, res) {
       });
     }
 
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminSupabase = createServiceRoleClient();
 
     await ensureAvatarsBucket(adminSupabase);
 
@@ -351,6 +347,7 @@ export async function uploadAvatar(req, res) {
       isCustomAvatar: true,
     });
   } catch (err) {
+    if (respondIfServiceRoleUnavailable(res, err)) return;
     console.error("Avatar upload error:", err);
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -363,10 +360,7 @@ export async function removeAvatar(req, res) {
       return res.status(401).json({ success: false, error: "Authenticated user identity missing." });
     }
 
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminSupabase = createServiceRoleClient();
 
     // 1. Clear custom avatar from user metadata
     const nextUserMetadata = {
@@ -396,6 +390,7 @@ export async function removeAvatar(req, res) {
       isCustomAvatar: false,
     });
   } catch (err) {
+    if (respondIfServiceRoleUnavailable(res, err)) return;
     console.error("Remove avatar error:", err);
     return res.status(500).json({ success: false, error: err.message });
   }
@@ -420,6 +415,7 @@ export async function changePassword(req, res) {
     if (err.statusCode === 400 || err.statusCode === 401) {
       return res.status(err.statusCode).json({ success: false, error: err.message });
     }
+    if (respondIfServiceRoleUnavailable(res, err)) return;
     console.error("Change password error:", err);
     return res.status(500).json({ success: false, error: err.message || "Failed to update password." });
   }

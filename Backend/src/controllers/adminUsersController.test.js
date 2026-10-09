@@ -24,14 +24,6 @@ function queryResult(result) {
 }
 
 test("authorized Super Admin can still retrieve user history and activity", async () => {
-  const originalEnvironment = {
-    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    SUPABASE_URL: process.env.SUPABASE_URL,
-    SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY,
-  };
-  process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
-  process.env.SUPABASE_URL = "https://example.invalid";
-
   const admin = { id: "admin-auth-id", app_metadata: { role: "superadmin" } };
   const userRecord = {
     user_id: "app-user-id",
@@ -50,7 +42,7 @@ test("authorized Super Admin can still retrieve user history and activity", asyn
   };
 
   const handler = createGetAdminUsers({
-    createSupabaseClient: () => ({
+    createServiceRoleClientImpl: () => ({
       auth: {
         admin: {
           listUsers: async () => ({
@@ -106,12 +98,5 @@ test("authorized Super Admin can still retrieve user history and activity", asyn
   } finally {
     server.close();
     await once(server, "close");
-    for (const [key, value] of Object.entries(originalEnvironment)) {
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
-    }
   }
 });

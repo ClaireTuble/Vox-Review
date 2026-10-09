@@ -1,13 +1,6 @@
-import { createClient } from "@supabase/supabase-js";
 import supabaseClient from "../config/supabase.js";
 import { verificationService } from "./verificationService.js";
-
-function getAdminSupabase() {
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-  return createClient(process.env.SUPABASE_URL, supabaseKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-}
+import { createServiceRoleClient } from "../utils/serviceRoleSupabase.js";
 
 export const passwordService = {
   changePassword: async ({ authUser, currentPassword, newPassword }) => {
@@ -39,7 +32,7 @@ export const passwordService = {
       throw error;
     }
 
-    const { error: passwordUpdateError } = await getAdminSupabase().auth.admin.updateUserById(
+    const { error: passwordUpdateError } = await createServiceRoleClient().auth.admin.updateUserById(
       authUserId,
       { password: newPassword },
     );

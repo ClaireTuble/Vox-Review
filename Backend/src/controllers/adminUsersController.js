@@ -1,12 +1,15 @@
-import { createClient } from "@supabase/supabase-js";
 import { createAuditLog, extractClientIp, extractDeviceInfo } from "../utils/auditLogger.js";
+import {
+  createServiceRoleClient,
+  respondIfServiceRoleUnavailable,
+} from "../utils/serviceRoleSupabase.js";
 
 export function createGetAdminUsers({
-  createSupabaseClient = createClient,
+  createServiceRoleClientImpl = createServiceRoleClient,
   writeAuditLog = createAuditLog,
 } = {}) {
   return (req, res) => getAdminUsersWithDependencies(req, res, {
-    createSupabaseClient,
+    createServiceRoleClientImpl,
     writeAuditLog,
   });
 }
@@ -14,23 +17,11 @@ export function createGetAdminUsers({
 export const getAdminUsers = createGetAdminUsers();
 
 async function getAdminUsersWithDependencies(req, res, {
-  createSupabaseClient = createClient,
+  createServiceRoleClientImpl = createServiceRoleClient,
   writeAuditLog = createAuditLog,
 } = {}) {
   try {
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const requestHeaders = process.env.SUPABASE_SERVICE_ROLE_KEY
-      ? undefined
-      : { Authorization: `Bearer ${req.accessToken}` };
-
-    const userScopedSupabase = createSupabaseClient(
-      process.env.SUPABASE_URL,
-      supabaseKey,
-      {
-        auth: { autoRefreshToken: false, persistSession: false },
-        ...(requestHeaders ? { global: { headers: requestHeaders } } : {}),
-      }
-    );
+    const userScopedSupabase = createServiceRoleClientImpl();
 
     // Log that the Super Admin accessed user management
     const adminEmail = req.authUser?.email || "admin@voxreview.ai";
@@ -175,6 +166,7 @@ async function getAdminUsersWithDependencies(req, res, {
 
     return res.status(200).json({ success: true, users });
   } catch (error) {
+    if (respondIfServiceRoleUnavailable(res, error)) return;
     console.error("Admin users error:", error);
     return res.status(500).json({ success: false, error: "Unable to load users." });
   }

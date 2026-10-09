@@ -1,6 +1,8 @@
-import { createClient } from "@supabase/supabase-js";
-
 import { isPlatformActive } from "./healthController.js";
+import {
+  createServiceRoleClient,
+  respondIfServiceRoleUnavailable,
+} from "../utils/serviceRoleSupabase.js";
 
 // In-memory deduplication cache: user_id + platform + product/url identity (10 min TTL)
 const recentActivityMap = new Map();
@@ -76,10 +78,7 @@ export async function reportUserActivity(req, res) {
     const activityType = (activity_type === "Analyzed") ? "Analyzed" : "Used";
     const analysisRunId = activityType === "Analyzed" ? String(analysis_run_id || "").trim() : "";
 
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminSupabase = createServiceRoleClient();
 
     let { data: userRow } = await adminSupabase
       .from("users")
@@ -196,6 +195,7 @@ export async function reportUserActivity(req, res) {
 
     return res.status(201).json({ success: true, activity: inserted });
   } catch (err) {
+    if (respondIfServiceRoleUnavailable(res, err)) return;
     console.error("User activity report error:", err);
     return res.status(500).json({ success: false, error: err.message });
   }

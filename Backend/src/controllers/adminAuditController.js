@@ -1,4 +1,7 @@
-import { createClient } from "@supabase/supabase-js";
+import {
+  createServiceRoleClient,
+  respondIfServiceRoleUnavailable,
+} from "../utils/serviceRoleSupabase.js";
 
 function formatAuditTimestamp(value) {
   const date = new Date(value || Date.now());
@@ -45,10 +48,7 @@ function normalizeSecurityAlert(row) {
 
 export async function getAdminActivityLogs(req, res) {
   try {
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(process.env.SUPABASE_URL, supabaseKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const adminSupabase = createServiceRoleClient();
 
     const { data, error } = await adminSupabase
       .from("audit_logs")
@@ -75,6 +75,7 @@ export async function getAdminActivityLogs(req, res) {
       securityAlerts,
     });
   } catch (error) {
+    if (respondIfServiceRoleUnavailable(res, error)) return;
     return res.status(500).json({
       success: false,
       error: error.message || "Unable to load admin activity logs.",

@@ -1,17 +1,11 @@
 import crypto from "crypto";
-import { createClient } from "@supabase/supabase-js";
 import supabaseClient from "../config/supabase.js";
 import { createAuditLog } from "../utils/auditLogger.js";
 import { buildFullName } from "../utils/profileName.js";
+import { createServiceRoleClient } from "../utils/serviceRoleSupabase.js";
 
 function getAdminSupabase() {
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-  if (!process.env.SUPABASE_URL || !supabaseKey) {
-    throw new Error("Supabase environment variables are missing.");
-  }
-  return createClient(process.env.SUPABASE_URL, supabaseKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  return createServiceRoleClient();
 }
 
 function hashVerificationCode(code) {
