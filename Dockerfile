@@ -45,12 +45,24 @@ COPY Frontend/nlp/svm_worker.py \
 COPY Frontend/nlp/topic_worker.py \
     Frontend/nlp/predict_topics_batch.py \
     Frontend/nlp/topic_applicability.py \
+    Frontend/nlp/topic_refinement.py \
     Frontend/nlp/topic_taxonomy.py \
     /app/Frontend/nlp/
-RUN test -f /app/Frontend/nlp/topic_worker.py \
-    && test -f /app/Frontend/nlp/predict_topics_batch.py \
-    && test -f /app/Frontend/nlp/topic_applicability.py \
-    && test -f /app/Frontend/nlp/topic_taxonomy.py
+RUN set -eu; \
+    for module in \
+        topic_worker.py \
+        predict_topics_batch.py \
+        topic_refinement.py \
+        topic_applicability.py \
+        topic_taxonomy.py; \
+    do \
+        if [ ! -f "/app/Frontend/nlp/${module}" ]; then \
+            echo "Missing topic runtime module: /app/Frontend/nlp/${module}" >&2; \
+            exit 1; \
+        fi; \
+    done; \
+    cd /app/Frontend/nlp; \
+    python -c "import predict_topics_batch; import topic_refinement; import topic_applicability; import topic_taxonomy"
 COPY Frontend/nlp/preprocessing/preprocess.py ./Frontend/nlp/preprocessing/
 COPY Frontend/nlp/models/svm_model.joblib ./Frontend/nlp/models/
 
