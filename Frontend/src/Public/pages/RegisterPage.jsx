@@ -1,22 +1,32 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { User, Mail, Lock, ShieldCheck, Zap, AlertTriangle, Eye, EyeOff, Globe, Cpu, BookmarkCheck, Sparkles, Shield } from 'lucide-react';
-import logo from '../../assets/VRLogo.png';
-import authService from '../../services/authService.js';
+import { Link, useNavigate } from 'react-router-dom';
+import { User, Mail, Lock, ShieldCheck, Zap, AlertTriangle, Eye, EyeOff, Globe, BookmarkCheck, Sparkles, Shield } from 'lucide-react';
+import { logoDark } from '../../utils/useVoxLogo.js';
+import authService, { normalizeAuthErrorMessage } from '../../services/authService.js';
+import VerificationCodeModal from '../../Users/components/VerificationCodeModal.jsx';
 import '../css/AuthModern.css';
+
+const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value || '').trim());
 
 export default function RegisterPage() {
   const navigate = useNavigate();
-  const [fullName, setFullName]               = useState('');
+  const [username, setUsername]               = useState('');
+  const [firstName, setFirstName]             = useState('');
+  const [lastName, setLastName]               = useState('');
   const [email, setEmail]                     = useState('');
   const [password, setPassword]               = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword]       = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [selectedRole, setSelectedRole]       = useState('user');
   const [agreeTerms, setAgreeTerms]           = useState(true);
   const [isSubmitting, setIsSubmitting]       = useState(false);
   const [errorMessage, setErrorMessage]       = useState('');
+  const [successMessage, setSuccessMessage]   = useState('');
+
+  // Signup verification modal state
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [pendingSignupData, setPendingSignupData] = useState(null);
 
   const getPasswordStrength = (pwd) => {
     if (!pwd) return { strength: 0, label: '' };
@@ -36,8 +46,16 @@ export default function RegisterPage() {
     e.preventDefault();
     setErrorMessage('');
 
-    if (!fullName || !email || !password || !confirmPassword) {
+    if (!username || !firstName || !lastName || !email || !password || !confirmPassword) {
       setErrorMessage('Please fill out all required fields.');
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setErrorMessage('Please enter a valid email address.');
+      return;
+    }
+    if (password.length < 8 || !/[a-z]/i.test(password) || !/\d/.test(password)) {
+      setErrorMessage('Password must meet the required security requirements.');
       return;
     }
     if (password !== confirmPassword) {
@@ -50,11 +68,27 @@ export default function RegisterPage() {
     }
 
     setIsSubmitting(true);
-    await authService.login(email, password);
-    setIsSubmitting(false);
+    const signupData = { email, password, username, firstName, lastName };
 
-    // After registration, send user to login to sign in properly
-    navigate('/login');
+    try {
+      // Step 1: Send verification code email via Brevo. Account NOT created yet.
+      await authService.requestSignupVerification(signupData);
+      setPendingSignupData(signupData);
+      setShowVerificationModal(true);
+    } catch (err) {
+      setErrorMessage(normalizeAuthErrorMessage(err, 'signup'));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleVerificationSuccess = (result) => {
+    setShowVerificationModal(false);
+    setSuccessMessage('Registration & email verification successful! Your account is ready.');
+    setTimeout(() => {
+      setSuccessMessage('');
+      navigate('/login');
+    }, 4000);
   };
 
   return (
@@ -73,7 +107,7 @@ export default function RegisterPage() {
           
           <div className="auth-brand-section">
             <Link to="/" className="auth-brand-logo">
-              <img src={logo} alt="VoxReview Logo" className="auth-logo-img" />
+              <img src={logoDark} alt="VoxReview Logo" className="auth-logo-img" />
               <span className="auth-brand-name">VoxReview</span>
             </Link>
 
@@ -142,6 +176,16 @@ export default function RegisterPage() {
               </button>
             </div>
 
+            {/* Success Toast */}
+            {successMessage && (
+              <div className="auth-success-toast">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span>{successMessage}</span>
+              </div>
+            )}
+
             {/* Error Message */}
             {errorMessage && (
               <div className="auth-error-message">
@@ -153,27 +197,66 @@ export default function RegisterPage() {
             {/* Register Form */}
             <form className="auth-form" onSubmit={handleSubmit}>
               <div className="auth-form-group">
-                <label htmlFor="reg-fullname" className="auth-form-label">
+                <label htmlFor="reg-username" className="auth-form-label">
                   <User size={16} className="label-icon" />
-                  <span>Full Name</span>
+                  <span>Username*</span>
                 </label>
                 <div className="auth-input-wrapper">
                   <input
-                    id="reg-fullname"
+                    id="reg-username"
                     type="text"
                     className="auth-input"
-                    placeholder="John Doe"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="claire123"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
                     required
                   />
+                </div>
+              </div>
+
+              {/* Horizontal First Name & Last Name row */}
+              <div className="auth-form-row">
+                <div className="auth-form-group flex-1">
+                  <label htmlFor="reg-firstname" className="auth-form-label">
+                    <User size={16} className="label-icon" />
+                    <span>First Name*</span>
+                  </label>
+                  <div className="auth-input-wrapper">
+                    <input
+                      id="reg-firstname"
+                      type="text"
+                      className="auth-input"
+                      placeholder="Claire"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="auth-form-group flex-1">
+                  <label htmlFor="reg-lastname" className="auth-form-label">
+                    <User size={16} className="label-icon" />
+                    <span>Last Name*</span>
+                  </label>
+                  <div className="auth-input-wrapper">
+                    <input
+                      id="reg-lastname"
+                      type="text"
+                      className="auth-input"
+                      placeholder="Tuble"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      required
+                    />
+                  </div>
                 </div>
               </div>
 
               <div className="auth-form-group">
                 <label htmlFor="reg-email" className="auth-form-label">
                   <Mail size={16} className="label-icon" />
-                  <span>Email address</span>
+                  <span>Email address*</span>
                 </label>
                 <div className="auth-input-wrapper">
                   <input
@@ -191,7 +274,7 @@ export default function RegisterPage() {
               <div className="auth-form-group">
                 <label htmlFor="reg-password" className="auth-form-label">
                   <Lock size={16} className="label-icon" />
-                  <span>Password</span>
+                  <span>Password*</span>
                 </label>
                 <div className="auth-input-wrapper">
                   <input
@@ -228,7 +311,7 @@ export default function RegisterPage() {
               <div className="auth-form-group">
                 <label htmlFor="reg-confirm" className="auth-form-label">
                   <ShieldCheck size={16} className="label-icon" />
-                  <span>Confirm Password</span>
+                  <span>Confirm Password*</span>
                 </label>
                 <div className="auth-input-wrapper">
                   <input
@@ -282,8 +365,17 @@ export default function RegisterPage() {
           </div>
         </div>
       </div>
+
+      {showVerificationModal && (
+        <VerificationCodeModal
+          isOpen={showVerificationModal}
+          email={pendingSignupData?.email}
+          purpose="signup_email_verification"
+          signupData={pendingSignupData}
+          onVerifySuccess={handleVerificationSuccess}
+          onCancel={() => setShowVerificationModal(false)}
+        />
+      )}
     </div>
   );
 }
-
-

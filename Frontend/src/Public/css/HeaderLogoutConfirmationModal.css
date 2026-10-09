@@ -1,0 +1,218 @@
+/* ============================================================
+   VoxReview — Modern Website Logout Confirmation Modal
+   Design aligned with VoxReview Homepage (Vercel/Linear light SaaS aesthetic)
+   ============================================================ */
+
+.header-logout-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  z-index: 99999;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: headerLogoutFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.header-logout-modal {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 460px;
+  margin: 0;
+  padding: 30px 28px 24px;
+  border-radius: 22px;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.94) 100%);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  box-shadow:
+    0 24px 60px -12px rgba(15, 23, 42, 0.18),
+    0 12px 28px -8px rgba(99, 102, 241, 0.08),
+    0 0 0 1px rgba(255, 255, 255, 0.9) inset;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  color: #0F172A;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  animation: headerLogoutScaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Ambient Top Accent Highlight */
+.header-logout-modal::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 15%;
+  right: 15%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.35), rgba(37, 99, 235, 0.35), transparent);
+  pointer-events: none;
+}
+
+/* Close button (top right) */
+.header-logout-modal-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #94A3B8;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  padding: 0;
+}
+
+.header-logout-modal-close:hover:not(:disabled) {
+  background: #F1F5F9;
+  color: #0F172A;
+}
+
+/* Modal Body Layout */
+.header-logout-modal-body {
+  display: block;
+  padding-right: 28px;
+}
+
+.header-logout-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.header-logout-modal h2 {
+  margin: 0;
+  color: #0F172A;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+}
+
+.header-logout-modal-subtitle {
+  margin: 0;
+  color: #64748B;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+/* Actions Footer */
+.header-logout-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(226, 232, 240, 0.7);
+}
+
+.header-logout-modal-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 8px 18px;
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  line-height: 1.2;
+  box-sizing: border-box;
+}
+
+/* Cancel Button — Clean modern outlined */
+.header-logout-modal-actions .header-logout-modal-cancel {
+  border: 1px solid #E2E8F0;
+  background: #FFFFFF;
+  color: #334155;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.header-logout-modal-actions .header-logout-modal-cancel:hover:not(:disabled) {
+  border-color: #CBD5E1;
+  background: #F8FAFC;
+  color: #0F172A;
+}
+
+/* Log Out Button — Modern crimson/coral gradient action */
+.header-logout-modal-actions .header-logout-modal-confirm {
+  border: 1px solid rgba(220, 38, 38, 0.9);
+  background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%);
+  color: #FFFFFF;
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.3);
+}
+
+.header-logout-modal-actions .header-logout-modal-confirm:hover:not(:disabled) {
+  background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%);
+  border-color: #B91C1C;
+  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.4);
+  transform: translateY(-1px);
+}
+
+.header-logout-modal-actions button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.header-logout-modal-actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+@keyframes headerLogoutFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes headerLogoutScaleUp {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@media (max-width: 500px) {
+  .header-logout-modal {
+    padding: 24px 20px 20px;
+    border-radius: 20px;
+  }
+
+  .header-logout-modal-body {
+    padding-right: 0;
+  }
+
+  .header-logout-modal-actions {
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+
+  .header-logout-modal-actions button {
+    width: 100%;
+  }
+}

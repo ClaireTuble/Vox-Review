@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom';
-import { Sparkles, Download, ArrowRight, Brain, Globe, BookmarkCheck, BarChart3, ShoppingBag, Store, MapPin, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Download, ArrowRight, Brain, Globe, BookmarkCheck, BarChart3, Store, MapPin, Lock, CheckCircle2, Smartphone, Gamepad2 } from 'lucide-react';
 import Navigation from '../components/Navigation.jsx';
-import logo from '../../assets/VRLogo.png';
+import { useVoxLogo, logoDark } from '../../utils/useVoxLogo.js';
 import '../css/LandingPage.css';
 
 export default function LandingPage() {
+  const logo = useVoxLogo();
   return (
     <div className="landing-page-container">
       {/* Background Ambient Glows & Box Grid Texture */}
@@ -17,11 +18,12 @@ export default function LandingPage() {
       <Navigation activePage="home" />
 
       {/* Hero Section */}
-      <main className="landing-hero-section">
+      <main id="home" className="landing-hero-section">
+
         <div className="hero-content">
           <div className="hero-pill-badge">
             <Sparkles size={13} className="badge-icon" />
-            <span>AI-Powered Review Analysis</span>
+            <span>Review Analysis Platform</span>
           </div>
           
           <h1 className="hero-heading">
@@ -30,14 +32,19 @@ export default function LandingPage() {
           </h1>
           
           <p className="hero-subtext">
-            VoxReview uses AI emotion analysis to help you understand what people really feel about any product across major e-commerce platforms.
+            VoxReview is a customer feedback analysis platform that helps users understand large amounts of online reviews more efficiently. It analyzes customer feedback, identifies emotions and discussion topics, and helps users prioritize reviews that may require attention.
           </p>
 
           <div className="hero-cta-group">
-            <Link to="/register" className="cta-primary">
+            <button
+              type="button"
+              className="cta-primary"
+              style={{ border: 'none', fontFamily: 'inherit', cursor: 'pointer' }}
+              onClick={(e) => e.preventDefault()}
+            >
               <Download size={16} />
               <span>Add to Chrome</span>
-            </Link>
+            </button>
             <a href="#features" className="cta-secondary">
               <span>Learn More</span>
             </a>
@@ -45,11 +52,8 @@ export default function LandingPage() {
 
           {/* Supported Platforms Row */}
           <div className="hero-platforms-row">
-            <span className="platforms-label">Works on</span>
+            <span className="platforms-label">Supported platforms</span>
             <div className="platform-badges">
-              <span className="platform-tag">
-                <ShoppingBag size={13} className="plat-icon amazon" /> Amazon
-              </span>
               <span className="platform-tag">
                 <Store size={13} className="plat-icon shopee" /> Shopee
               </span>
@@ -58,6 +62,12 @@ export default function LandingPage() {
               </span>
               <span className="platform-tag">
                 <MapPin size={13} className="plat-icon maps" /> Google Maps
+              </span>
+              <span className="platform-tag">
+                <Smartphone size={13} className="plat-icon play" /> Google Play Store
+              </span>
+              <span className="platform-tag">
+                <Gamepad2 size={13} className="plat-icon steam" /> Steam
               </span>
             </div>
           </div>
@@ -71,7 +81,7 @@ export default function LandingPage() {
             Why <span className="gradient-text">VoxReview</span>?
           </h2>
           <p className="why-subtitle">
-            Extract emotional clarity from thousands of customer reviews in milliseconds.
+            Extract key sentiment patterns, emotions, discussion topics, and priority insights from customer reviews efficiently.
           </p>
         </div>
 
@@ -81,9 +91,9 @@ export default function LandingPage() {
             <div className="why-card-icon-wrapper purple">
               <Brain size={22} />
             </div>
-            <h3 className="why-card-title">AI Emotion Analysis</h3>
+            <h3 className="why-card-title">Review &amp; Emotion Analysis</h3>
             <p className="why-card-desc">
-              Detect emotions in reviews using advanced AI models trained on millions of feedback data points.
+              Analyze customer reviews and understand the emotions expressed in customer feedback.
             </p>
           </div>
 
@@ -92,9 +102,9 @@ export default function LandingPage() {
             <div className="why-card-icon-wrapper blue">
               <Globe size={22} />
             </div>
-            <h3 className="why-card-title">Works Everywhere</h3>
+            <h3 className="why-card-title">Supported Platforms</h3>
             <p className="why-card-desc">
-              Supports Amazon, Shopee, Lazada, Google Maps & more with instant on-page overlay detection.
+              Seamlessly analyze reviews across Shopee, Lazada, Google Maps, Google Play Store, and Steam directly on the page.
             </p>
           </div>
 
@@ -103,9 +113,9 @@ export default function LandingPage() {
             <div className="why-card-icon-wrapper indigo">
               <BookmarkCheck size={22} />
             </div>
-            <h3 className="why-card-title">Save & Track</h3>
+            <h3 className="why-card-title">Saved Analyses &amp; Refresh</h3>
             <p className="why-card-desc">
-              Save analyses and revisit your historical sentiment trends and product evaluations anytime.
+              Save previous review analyses and easily check for newly added customer reviews.
             </p>
           </div>
 
@@ -114,13 +124,14 @@ export default function LandingPage() {
             <div className="why-card-icon-wrapper sky">
               <BarChart3 size={22} />
             </div>
-            <h3 className="why-card-title">Smart Insights</h3>
+            <h3 className="why-card-title">Topic &amp; Priority Insights</h3>
             <p className="why-card-desc">
-              Get instant summary reports, emotional drivers, keyword breakdown, and authenticity scores.
+              See what customers are talking about across review topics and identify feedback that may need more immediate attention.
             </p>
           </div>
         </div>
       </section>
+
 
       {/* Product Preview Browser Mockup */}
       <section id="how-it-works" className="landing-preview-section">
@@ -133,8 +144,8 @@ export default function LandingPage() {
               <span className="dot green" />
             </div>
             <div className="browser-address-bar">
-              <span className="lock-icon">🔒</span>
-              <span className="url-text">amazon.com/dp/B08PZHYWJS</span>
+              <Lock size={10} className="lock-icon" />
+              <span className="url-text">shopee.ph/product/123456789</span>
             </div>
             <div className="browser-actions-placeholder"></div>
           </div>
@@ -162,7 +173,7 @@ export default function LandingPage() {
             <div className="vox-widget-overlay">
               <div className="widget-header">
                 <div className="widget-brand">
-                  <img src={logo} alt="VoxReview" className="widget-logo" />
+                  <img src={logoDark} alt="VoxReview" className="widget-logo" />
                   <span className="widget-name">VoxReview</span>
                 </div>
                 <div className="widget-user-icon">
@@ -186,11 +197,6 @@ export default function LandingPage() {
                   <span className="em-name">Happy</span>
                   <span className="em-val">86%</span>
                 </div>
-                <div className="emotion-legend-item neutral">
-                  <span className="em-dot gray" />
-                  <span className="em-name">Neutral</span>
-                  <span className="em-val">8%</span>
-                </div>
                 <div className="emotion-legend-item sad">
                   <span className="em-dot blue" />
                   <span className="em-name">Sad</span>
@@ -198,7 +204,22 @@ export default function LandingPage() {
                 </div>
                 <div className="emotion-legend-item angry">
                   <span className="em-dot red" />
-                  <span className="em-name">Angry</span>
+                  <span className="em-name">Anger</span>
+                  <span className="em-val">2%</span>
+                </div>
+                <div className="emotion-legend-item fear">
+                  <span className="em-dot orange" />
+                  <span className="em-name">Fear</span>
+                  <span className="em-val">3%</span>
+                </div>
+                <div className="emotion-legend-item disgust">
+                  <span className="em-dot purple" />
+                  <span className="em-name">Disgust</span>
+                  <span className="em-val">3%</span>
+                </div>
+                <div className="emotion-legend-item sarcastic">
+                  <span className="em-dot pink" />
+                  <span className="em-name">Sarcastic</span>
                   <span className="em-val">2%</span>
                 </div>
               </div>
@@ -215,8 +236,9 @@ export default function LandingPage() {
             <span className="footer-title">VoxReview</span>
           </div>
           <p className="footer-copy">
-            © {new Date().getFullYear()} VoxReview. AI Emotion Intelligence for Product Reviews. All rights reserved.
+            © {new Date().getFullYear()} VoxReview. Customer Feedback Analysis Platform. All rights reserved.
           </p>
+
         </div>
       </footer>
     </div>

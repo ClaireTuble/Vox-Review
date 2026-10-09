@@ -1,19 +1,54 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Header from '../components/Header.jsx';
 import Sidebar from '../components/Sidebar.jsx';
 import SearchBar from '../components/SearchBar.jsx';
 import TopActions from '../components/TopActions.jsx';
 import UserRow from '../components/UserRow.jsx';
-import { mockUsers, mockCurrentUser } from '../data/users.js';
+import UserHistoryModal from '../components/UserHistoryModal.jsx';
+import { mockCurrentUser } from '../data/users.js';
+import authService from '../../services/authService.js';
+import { API_BASE_URL } from '../../services/apiConfig.js';
 import '../css/dashboard.css';
 import '../css/sidebar.css';
 import '../css/header.css';
 import '../css/cards.css';
 import '../css/tables.css';
+import '../css/modal.css';
 import '../css/responsive.css';
 
 export default function Users({ activeTab, setActiveTab, onSignOut }) {
-  const [users] = useState(mockUsers);
+  const [users, setUsers] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [selectedHistoryUser, setSelectedHistoryUser] = useState(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadUsers = async () => {
+      try {
+        const token = await authService.getSuperAdminAccessToken();
+        if (!token) throw new Error('Super Admin session is no longer valid.');
+
+        const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || 'Unable to load users.');
+        }
+
+        if (mounted) setUsers(result.users || []);
+      } catch (error) {
+        if (mounted) setErrorMessage(error.message || 'Unable to load users.');
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    };
+
+    loadUsers();
+    return () => { mounted = false; };
+  }, []);
 
   return (
     <div className="superadmin-page-container">
@@ -22,17 +57,16 @@ export default function Users({ activeTab, setActiveTab, onSignOut }) {
       <main className="superadmin-viewport">
         <Header
           title="Manage Users"
-          subtitle="Review account activity, update roles, and oversee user access."
+          subtitle="View and monitor regular VoxReview users and their platform activity."
           user={mockCurrentUser}
+          onNavigate={setActiveTab}
         />
 
         <section className="admin-content-grid">
           <article className="admin-panel">
             <TopActions
-              title="User Management Hub"
-              subtitle="Manage platform users, update roles, and review extension activity logs."
-              primaryLabel="Add New User"
-              onPrimaryAction={() => window.alert('Add new user modal placeholder')}
+              title="User Overview"
+              subtitle="Monitor registered VoxReview users and their platform usage history."
             >
               <SearchBar />
             </TopActions>
@@ -45,19 +79,43 @@ export default function Users({ activeTab, setActiveTab, onSignOut }) {
                     <th>Name / Email</th>
                     <th>Role</th>
                     <th>Account Status</th>
-                    <th>Joined Date</th>
+                    <th>Current Status</th>
+                    <th>Last Seen</th>
+                    <th>Platforms Used</th>
+                    <th>Registered</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((user) => (
-                    <UserRow key={user.id} user={user} onEdit={() => window.alert(`Editing user ${user.name}`)} />
+                  {isLoading && (
+                    <tr><td colSpan="9">Loading users...</td></tr>
+                  )}
+                  {!isLoading && errorMessage && (
+                    <tr><td colSpan="9">{errorMessage}</td></tr>
+                  )}
+                  {!isLoading && !errorMessage && users.length === 0 && (
+                    <tr><td colSpan="9">No users registered yet.</td></tr>
+                  )}
+                  {!isLoading && !errorMessage && users.map((user) => (
+                    <UserRow
+                      key={user.user_id}
+                      user={user}
+                      onOpenHistory={(u) => setSelectedHistoryUser(u)}
+                    />
                   ))}
                 </tbody>
               </table>
             </div>
           </article>
         </section>
+
+        {/* Modern Activity History Modal */}
+        {selectedHistoryUser && (
+          <UserHistoryModal
+            user={selectedHistoryUser}
+            onClose={() => setSelectedHistoryUser(null)}
+          />
+        )}
       </main>
     </div>
   );

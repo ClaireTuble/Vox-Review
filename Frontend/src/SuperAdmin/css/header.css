@@ -1,3 +1,5 @@
+@import './notifications.css';
+
 .superadmin-topbar {
   display: flex;
   align-items: flex-start;
@@ -8,6 +10,12 @@
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 20px;
   box-shadow: 0 10px 30px rgba(2, 6, 23, 0.24);
+}
+
+.topbar-right-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
 
 .topbar-content-stack {

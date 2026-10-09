@@ -1,4 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import authService from '../services/authService';
 
 /**
@@ -9,21 +10,44 @@ import authService from '../services/authService';
  */
 export default function ProtectedRoute({ children, allowedRole }) {
   const location = useLocation();
-  const isAuthenticated = authService.isAuthenticated();
   const currentRole = authService.checkRole();
+  const [adminUser, setAdminUser] = useState(undefined);
 
-  if (!isAuthenticated) {
-    // Redirect unauthenticated user to /login with state saved
+  const isUserAuthenticated = authService.isAuthenticated();
+
+  useEffect(() => {
+    if (allowedRole !== 'superadmin') return undefined;
+
+    let active = true;
+    authService.verifySuperAdminSession().then((user) => {
+      if (active) setAdminUser(user || null);
+    });
+
+    return () => { active = false; };
+  }, [allowedRole]);
+
+  if (allowedRole === 'superadmin') {
+    if (adminUser === undefined) {
+      return null;
+    }
+
+    if (!adminUser) {
+      return <Navigate to="/admin/login" state={{ from: location }} replace />;
+    }
+
+    return children;
+  }
+
+  if (!isUserAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   if (allowedRole && currentRole !== allowedRole) {
-    // If logged in user tries to access a role-unauthorized route, redirect to their proper dashboard
     if (currentRole === 'superadmin') {
       return <Navigate to="/superadmin/dashboard" replace />;
-    } else {
-      return <Navigate to="/user/dashboard" replace />;
     }
+
+    return <Navigate to="/after-login" replace />;
   }
 
   return children;

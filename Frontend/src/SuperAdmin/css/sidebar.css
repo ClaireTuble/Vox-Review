@@ -12,10 +12,13 @@
   left: 0;
   height: 100vh;
   z-index: 1000;
+  overflow-x: hidden;
 }
 
 .admin-brand-header {
   padding: 4px 6px;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .admin-brand-logo {
@@ -31,18 +34,23 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .logo-stack {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  min-width: 0;
 }
 
 .logo-text {
   font-size: 15px;
   font-weight: 800;
   color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .role-pill-badge {
@@ -62,6 +70,23 @@
   gap: 8px;
   flex: 1;
   padding-top: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.admin-nav-menu::-webkit-scrollbar {
+  width: 4px;
+}
+
+.admin-nav-menu::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.admin-nav-menu::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
 }
 
 .admin-nav-item {
@@ -76,14 +101,15 @@
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
   text-align: left;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .admin-nav-item:hover {
   background: rgba(30, 41, 59, 0.9);
   color: #f8fafc;
-  transform: translateX(2px);
 }
 
 .admin-nav-item.active {
@@ -92,9 +118,101 @@
   box-shadow: 0 10px 24px rgba(37, 99, 235, 0.24);
 }
 
+/* Expandable Item Styles */
+.admin-nav-expandable-group {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.admin-nav-item.has-submenu {
+  justify-content: space-between;
+}
+
+.nav-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.nav-item-left span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-chevron-icon {
+  display: flex;
+  align-items: center;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+/* Submenu directly underneath Settings */
+.admin-nav-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 12px;
+  margin-top: 6px;
+  margin-bottom: 4px;
+  border-left: 2px solid rgba(148, 163, 184, 0.18);
+  margin-left: 14px;
+  box-sizing: border-box;
+  max-width: calc(100% - 14px);
+  overflow-x: hidden;
+  animation: submenuExpand 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes submenuExpand {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.admin-submenu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+  text-align: left;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.admin-submenu-item:hover {
+  background: rgba(30, 41, 59, 0.8);
+  color: #f8fafc;
+}
+
+.admin-submenu-item.active {
+  background: rgba(37, 99, 235, 0.2);
+  border-color: rgba(59, 130, 246, 0.35);
+  color: #60a5fa;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+}
+
 .admin-sidebar-footer {
   margin-top: auto;
   padding-top: 12px;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .admin-logout-btn {
@@ -111,11 +229,11 @@
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: background 0.18s ease, color 0.18s ease;
+  box-sizing: border-box;
 }
 
 .admin-logout-btn:hover {
   background: rgba(248, 113, 113, 0.2);
   color: #ffffff;
-  transform: translateY(-1px);
 }

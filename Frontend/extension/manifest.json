@@ -1,0 +1,134 @@
+{
+  "manifest_version": 3,
+  "name": "VoxReview",
+  "version": "1.0.0",
+  "description": "AI-powered review analysis extension",
+  "action": {
+    "default_title": "VoxReview",
+    "default_popup": "popup.html"
+  },
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "scripting",
+    "sidePanel",
+    "alarms"
+  ],
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "http://localhost:5000/*",
+    "http://127.0.0.1:5000/*",
+    "http://localhost:5173/*",
+    "https://vox-review-production.up.railway.app/*",
+    "https://vox-review-git-feature-supabase-auth-admin-platforms-vox-review.vercel.app/*"
+  ],
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.shopee.ph/*",
+        "https://*.shopee.com/*",
+        "https://*.shopee.co.id/*",
+        "https://*.shopee.com.my/*",
+        "https://*.shopee.sg/*",
+        "https://*.shopee.tw/*",
+        "https://*.shopee.vn/*"
+      ],
+      "js": [
+        "scraper/detector.js",
+        "scraper/platforms/shopee.js",
+        "scraper/scraperManager.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.lazada.com.ph/*",
+        "https://*.lazada.com/*",
+        "https://*.lazada.co.id/*",
+        "https://*.lazada.com.my/*",
+        "https://*.lazada.sg/*",
+        "https://*.lazada.vn/*"
+      ],
+      "js": [
+        "scraper/detector.js",
+        "scraper/platforms/lazada.js",
+        "scraper/scraperManager.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.google.com/maps/*",
+        "https://maps.google.com/*",
+        "https://*.google.com/maps/*",
+        "https://*.google.com.ph/maps/*",
+        "https://maps.google.com.ph/*"
+      ],
+      "js": [
+        "scraper/detector.js",
+        "scraper/platforms/google.js",
+        "scraper/scraperManager.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://play.google.com/*"
+      ],
+      "js": [
+        "scraper/detector.js",
+        "scraper/platforms/googleplay.js",
+        "scraper/scraperManager.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://store.steampowered.com/*",
+        "https://*.steampowered.com/*"
+      ],
+      "js": [
+        "scraper/detector.js",
+        "scraper/platforms/steam.js",
+        "scraper/scraperManager.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "http://localhost:5173/*",
+        "http://127.0.0.1:5173/*"
+      ],
+      "js": [
+        "scraper/detector.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://vox-review-git-feature-supabase-auth-admin-platforms-vox-review.vercel.app/*"
+      ],
+      "js": [
+        "assets/authSync.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -25,6 +25,7 @@
   left: 0;
   height: 100vh;
   z-index: 1000;
+  overflow-x: hidden;
 }
 
 .admin-brand-header {
@@ -429,9 +430,12 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #86EFAC;
+  color: #4ade80;
   font-size: 11px;
+  background: transparent;
+  box-shadow: none;
 }
+
 
 .platforms-list,
 .platforms-grid {

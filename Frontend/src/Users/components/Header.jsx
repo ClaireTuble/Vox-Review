@@ -1,8 +1,13 @@
-import { User, LogIn, LogOut } from 'lucide-react';
-import logo from '../../assets/VRLogo.png';
+import { useState } from 'react';
+import { LogIn, LogOut } from 'lucide-react';
+import { useVoxLogo } from '../../utils/useVoxLogo.js';
 import '../css/Header.css';
 
-export default function Header({ isLoggedIn, userName, onLogout, onLoginClick }) {
+export default function Header({ isLoggedIn, userName, avatarUrl, userInitial, onLogout, onLoginClick }) {
+  const logo = useVoxLogo();
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState(null);
+  const showAvatarImage = avatarUrl && failedAvatarUrl !== avatarUrl;
+
   return (
     <header className="vox-header">
       <div className="vox-brand">
@@ -18,8 +23,17 @@ export default function Header({ isLoggedIn, userName, onLogout, onLoginClick })
       <div className="vox-header-actions">
         {isLoggedIn ? (
           <div className="vox-user-profile" onClick={onLogout} title="Click to Sign Out">
-            <div className="vox-user-avatar">
-              <User size={13} color="#60A5FA" />
+            <div className={`vox-user-avatar${showAvatarImage ? ' has-image' : ''}`}>
+              {showAvatarImage ? (
+                <img
+                  src={avatarUrl}
+                  alt=""
+                  className="vox-user-avatar-image"
+                  onError={() => setFailedAvatarUrl(avatarUrl)}
+                />
+              ) : (
+                <span>{userInitial || userName?.charAt(0)?.toUpperCase() || 'U'}</span>
+              )}
             </div>
             <span className="vox-user-name">{userName || 'User'}</span>
             <LogOut size={12} color="#94A3B8" style={{ marginLeft: '2px' }} />

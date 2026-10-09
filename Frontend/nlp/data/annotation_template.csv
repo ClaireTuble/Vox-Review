@@ -1,0 +1,9 @@
+review_id,raw_review,preprocessed_review,emotion,emotion_code,evaluator_notes,evaluator_id,evaluator_emotion,evaluator_emotion_code,final_emotion,final_emotion_code
+1,"sobrang ganda pero medyo expensive","","","","Example only: preserve original wording and annotate later.","","","","",""
+2,"legittt ❤️","","","","Example only: keep emoji and informal spelling as collected.","","","","",""
+3,"ok lng naman","","","","","Example only: abbreviation and Taglish wording retained.","","","","",""
+4,"g00d quality","","","","","Example only: number substitution preserved.","","","","",""
+5,"pangettt","","","","","Example only: repeated letters retained in raw form.","","","","",""
+6,"Wow, ang ganda naman. Basag pagdating.","","","","","Example only: sarcasm must be judged from full context.","","","","",""
+7,"badtrip ka talaga","","","","","Example only: slang/informal review; evaluator decides final label.","","","","",""
+8,"","","","","","Add real annotated rows here.","","","","",""
