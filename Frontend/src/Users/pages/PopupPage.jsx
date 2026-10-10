@@ -33,6 +33,7 @@ import {
 import { getNewReviews } from '../utils/savedAnalysisRefresh.js';
 import { attachReviewPriorities } from '../utils/priorityEngine.js';
 import { getSvmEmotionKeywords } from '../utils/emotionDrivers.js';
+import { clearPopupAuthState } from '../utils/popupAuthSession.js';
 import { isMatchingRescanScrape } from '../utils/analysisScrapeState.js';
 import { requestSvmBatch } from '../utils/svmRequest.js';
 import { createPlatformAvailabilityChecker } from '../utils/platformAvailability.js';
@@ -206,7 +207,7 @@ function buildEmotionData(reviews, predictions, platform, topicResponse = null, 
     emoji: display.emoji,
     percentage: totalReviews ? Math.round((counts[category] / totalReviews) * 100) : 0,
     count: counts[category],
-    confidence: 'SVM',
+    model: 'SVM',
     keywords: getSvmEmotionKeywords(explanationResults, Number(category), reviews),
     color: display.color,
   }));
@@ -239,7 +240,7 @@ function buildEmotionData(reviews, predictions, platform, topicResponse = null, 
       label: dominantDisplay.label,
       emoji: dominantDisplay.emoji,
       percentage: totalReviews ? Math.round((counts[dominantCategory] / totalReviews) * 100) : 0,
-      confidence: 'SVM',
+      model: 'SVM',
     },
     emotions,
     topics,
@@ -1483,11 +1484,13 @@ export default function PopupPage() {
                 setTimeout(() => setAuthToastMessage(''), 4000);
               }
             } else {
-              lastAuthUserIdRef.current = null;
-              profileRefreshRef.current = { userId: null, promise: null };
-              authService.clearSessionLocally();
-              setAuthenticatedUser(null);
-              setAuthToastMessage('');
+              clearPopupAuthState({
+                authService,
+                lastAuthUserIdRef,
+                profileRefreshRef,
+                setAuthenticatedUser,
+                setAuthToastMessage,
+              });
             }
           }
 
@@ -1962,7 +1965,7 @@ export default function PopupPage() {
       emoji: display.emoji,
       percentage: totalReviews ? Math.round((counts[category] / totalReviews) * 100) : 0,
       count: counts[category],
-      confidence: 'SVM',
+      model: 'SVM',
       keywords: getSvmEmotionKeywords(combinedReviewAnalysis, Number(category), combinedReviews),
       color: display.color,
     }));
@@ -2004,7 +2007,7 @@ export default function PopupPage() {
         label: dominantDisplay.label,
         emoji: dominantDisplay.emoji,
         percentage: totalReviews ? Math.round((counts[dominantCategory] / totalReviews) * 100) : 0,
-        confidence: 'SVM',
+        model: 'SVM',
       },
       emotions,
       topics: combinedTopicAnalysis

@@ -11,10 +11,7 @@ window.addEventListener("voxreview_auth_sync", async (event) => {
 
   try {
     if (action === "signed_out") {
-      const stored = await chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY]);
-      if (stored?.[EXTENSION_USER_AUTH_STORAGE_KEY]?.user?.id === userId) {
-        await chrome.runtime.sendMessage({ type: "websiteLogoutSync", userId });
-      }
+      await chrome.runtime.sendMessage({ type: "websiteLogoutSync", userId });
       return;
     }
 

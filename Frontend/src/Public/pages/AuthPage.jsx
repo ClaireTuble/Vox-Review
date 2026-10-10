@@ -91,7 +91,7 @@ function LoginForm({
             <label htmlFor="new-password" className="ap-label">New password</label>
             <div className="ap-input-wrap">
               <Lock size={15} className="ap-icon" />
-              <input id="new-password" type={showNewPass ? 'text' : 'password'} className="ap-input" value={newPassword} onChange={e => setNewPassword(e.target.value)} required />
+              <input id="new-password" type={showNewPass ? 'text' : 'password'} className="ap-input" placeholder="Enter your password" value={newPassword} onChange={e => setNewPassword(e.target.value)} required />
               <button type="button" className="ap-eye" onClick={() => setShowNewPass(p => !p)} aria-label={showNewPass ? 'Hide password' : 'Show password'}>
                 {showNewPass ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
@@ -101,7 +101,7 @@ function LoginForm({
             <label htmlFor="confirm-new-password" className="ap-label">Confirm password</label>
             <div className="ap-input-wrap">
               <Lock size={15} className="ap-icon" />
-              <input id="confirm-new-password" type={showConfirmNewPass ? 'text' : 'password'} className="ap-input" value={confirmNewPassword} onChange={e => setConfirmNewPassword(e.target.value)} required />
+              <input id="confirm-new-password" type={showConfirmNewPass ? 'text' : 'password'} className="ap-input" placeholder="Re-enter your password" value={confirmNewPassword} onChange={e => setConfirmNewPassword(e.target.value)} required />
               <button type="button" className="ap-eye" onClick={() => setShowConfirmNewPass(p => !p)} aria-label={showConfirmNewPass ? 'Hide password' : 'Show password'}>
                 {showConfirmNewPass ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
@@ -120,7 +120,7 @@ function LoginForm({
         <div className="ap-form-header"><h2 className="ap-form-title">Forgot Password?</h2><p className="ap-form-subtitle">Enter your email to receive a verification code.</p></div>
         {error && <div className="ap-error"><AlertTriangle size={15} /> <span>{error}</span></div>}
         <form className="ap-form" onSubmit={handleForgotPasswordRequest}>
-          <div className="ap-field"><label htmlFor="forgot-email" className="ap-label">Email address</label><div className="ap-input-wrap"><Mail size={15} className="ap-icon" /><input id="forgot-email" type="email" className="ap-input" value={email} onChange={e => setEmail(e.target.value)} required /></div></div>
+          <div className="ap-field"><label htmlFor="forgot-email" className="ap-label">Email address</label><div className="ap-input-wrap"><Mail size={15} className="ap-icon" /><input id="forgot-email" type="email" className="ap-input" placeholder="Enter your email address" value={email} onChange={e => setEmail(e.target.value)} required /></div></div>
           <button type="submit" className="ap-submit-btn" disabled={submitting}>{submitting ? 'Sending code...' : 'Send Code'}</button>
         </form>
         <div className="ap-footer"><button type="button" className="ap-footer-link" onClick={() => setForgotPassword(false)}>Back to Login</button></div>
@@ -190,7 +190,7 @@ function LoginForm({
           <label htmlFor="login-email" className="ap-label">Email address</label>
           <div className="ap-input-wrap">
             <Mail size={15} className="ap-icon" />
-            <input id="login-email" type="email" className="ap-input" placeholder="you@example.com"
+            <input id="login-email" type="email" className="ap-input" placeholder="Enter your email address"
               value={email} onChange={e => setEmail(e.target.value)} required />
           </div>
         </div>
@@ -199,7 +199,7 @@ function LoginForm({
           <label htmlFor="login-password" className="ap-label">Password</label>
           <div className="ap-input-wrap">
             <Lock size={15} className="ap-icon" />
-            <input id="login-password" type={showPass ? 'text' : 'password'} className="ap-input" placeholder="••••••••"
+            <input id="login-password" type={showPass ? 'text' : 'password'} className="ap-input" placeholder="Enter your password"
               value={password} onChange={e => setPassword(e.target.value)} required />
             <button type="button" className="ap-eye" onClick={() => setShowPass(p => !p)} aria-label="Toggle password">
               {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -335,7 +335,7 @@ function RegisterForm({ onSwitchToLogin }) {
           <label htmlFor="reg-username" className="ap-label">Username*</label>
           <div className="ap-input-wrap">
             <User size={15} className="ap-icon" />
-            <input id="reg-username" type="text" className="ap-input" placeholder="claire123"
+            <input id="reg-username" type="text" className="ap-input" placeholder="Choose a username"
               value={username} onChange={e => setUsername(e.target.value)} required />
           </div>
         </div>
@@ -345,7 +345,7 @@ function RegisterForm({ onSwitchToLogin }) {
             <label htmlFor="reg-firstname" className="ap-label">First Name*</label>
             <div className="ap-input-wrap">
               <User size={15} className="ap-icon" />
-              <input id="reg-firstname" type="text" className="ap-input" placeholder="Claire"
+              <input id="reg-firstname" type="text" className="ap-input" placeholder="Enter your first name"
                 value={firstName} onChange={e => setFirstName(e.target.value)} required />
             </div>
           </div>
@@ -354,7 +354,7 @@ function RegisterForm({ onSwitchToLogin }) {
             <label htmlFor="reg-lastname" className="ap-label">Last Name*</label>
             <div className="ap-input-wrap">
               <User size={15} className="ap-icon" />
-              <input id="reg-lastname" type="text" className="ap-input" placeholder="Tuble"
+              <input id="reg-lastname" type="text" className="ap-input" placeholder="Enter your last name"
                 value={lastName} onChange={e => setLastName(e.target.value)} required />
             </div>
           </div>
@@ -364,7 +364,7 @@ function RegisterForm({ onSwitchToLogin }) {
           <label htmlFor="reg-email" className="ap-label">Email address</label>
           <div className="ap-input-wrap">
             <Mail size={15} className="ap-icon" />
-            <input id="reg-email" type="email" className="ap-input" placeholder="you@example.com"
+            <input id="reg-email" type="email" className="ap-input" placeholder="Enter your email address"
               value={email} onChange={e => setEmail(e.target.value)} required />
           </div>
         </div>
@@ -373,7 +373,7 @@ function RegisterForm({ onSwitchToLogin }) {
           <label htmlFor="reg-password" className="ap-label">Password</label>
           <div className="ap-input-wrap">
             <Lock size={15} className="ap-icon" />
-            <input id="reg-password" type={showPass ? 'text' : 'password'} className="ap-input" placeholder="••••••••"
+            <input id="reg-password" type={showPass ? 'text' : 'password'} className="ap-input" placeholder="Enter your password"
               value={password} onChange={e => setPassword(e.target.value)} required />
             <button type="button" className="ap-eye" onClick={() => setShowPass(p => !p)} aria-label="Toggle password">
               {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -395,7 +395,7 @@ function RegisterForm({ onSwitchToLogin }) {
           <label htmlFor="reg-confirm" className="ap-label">Confirm Password</label>
           <div className="ap-input-wrap">
             <ShieldCheck size={15} className="ap-icon" />
-            <input id="reg-confirm" type={showConf ? 'text' : 'password'} className="ap-input" placeholder="••••••••"
+            <input id="reg-confirm" type={showConf ? 'text' : 'password'} className="ap-input" placeholder="Re-enter your password"
               value={confirmPwd} onChange={e => setConfirmPwd(e.target.value)} required />
             <button type="button" className="ap-eye" onClick={() => setShowConf(p => !p)} aria-label="Toggle confirm">
               {showConf ? <EyeOff size={15} /> : <Eye size={15} />}
