@@ -4,6 +4,7 @@ import {
   isExpiredAccessToken,
   isInvalidAuthSessionError,
   isMatchingAuthUser,
+  getRegularUserAfterAuthSync,
   signOutMatchingLocalSession,
 } from './authSessionSync.js';
 
@@ -74,4 +75,47 @@ test('local logout clears the matching session after remote revocation cannot be
 
   assert.deepEqual(result, { cleared: true, reason: null });
   assert.deepEqual(signOutOptions, { scope: 'local' });
+});
+
+test('regular-user logout sync updates UI state immediately for the matching user', () => {
+  const result = getRegularUserAfterAuthSync(
+    { detail: { action: 'signed_out', userId: 'user-a' } },
+    { id: 'user-a' },
+    () => null,
+  );
+
+  assert.deepEqual(result, { handled: true, user: null });
+});
+
+test('regular-user logout sync leaves a different current user unchanged', () => {
+  const currentUser = { id: 'user-b' };
+  const result = getRegularUserAfterAuthSync(
+    { detail: { action: 'signed_out', userId: 'user-a' } },
+    currentUser,
+    () => null,
+  );
+
+  assert.deepEqual(result, { handled: false, user: currentUser });
+});
+
+test('regular-user login sync refreshes the matching profile without affecting other users', () => {
+  const user = { id: 'user-a', email: 'updated@example.com' };
+  const result = getRegularUserAfterAuthSync(
+    { detail: { action: 'session_updated', userId: 'user-a' } },
+    { id: 'user-a', email: 'old@example.com' },
+    () => user,
+  );
+
+  assert.deepEqual(result, { handled: true, user });
+});
+
+test('regular-user auth sync ignores Super Admin events', () => {
+  const currentUser = { id: 'user-a' };
+  const result = getRegularUserAfterAuthSync(
+    { type: 'voxreview_superadmin_auth_sync', detail: { id: 'admin-1' } },
+    currentUser,
+    () => null,
+  );
+
+  assert.deepEqual(result, { handled: false, user: currentUser });
 });

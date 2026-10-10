@@ -132,7 +132,21 @@ test("website logout propagates for the matching extension user without forwardi
   assert.equal(JSON.stringify(context.sentMessages).includes("refresh-secret"), false);
 });
 
-test("website logout leaves a different extension user's session untouched", async () => {
+test("website logout forwards the event directly for background identity validation", async () => {
+  const context = createAuthSyncContext();
+
+  await context.eventHandlers.get("voxreview_auth_sync")({
+    target: context.window,
+    detail: { action: "signed_out", userId: "user-a" },
+  });
+
+  assertJsonEqual(context.sentMessages, [{
+    type: "websiteLogoutSync",
+    userId: "user-a",
+  }]);
+});
+
+test("website logout forwards identity for background validation when extension has another user", async () => {
   const extensionSession = {
     user: { id: "user-b", role: "user" },
     token: "access-secret",
@@ -148,7 +162,10 @@ test("website logout leaves a different extension user's session untouched", asy
     detail: { action: "signed_out", userId: "user-a" },
   });
 
-  assertJsonEqual(context.sentMessages, []);
+  assertJsonEqual(context.sentMessages, [{
+    type: "websiteLogoutSync",
+    userId: "user-a",
+  }]);
   assertJsonEqual(context.removals, []);
 });
 

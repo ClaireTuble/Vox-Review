@@ -219,7 +219,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
             Saved Analyses &amp; History Locked
           </h3>
           <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.4, maxWidth: '260px' }}>
-            Log in to view your Saved Analyses, access Analysis History across platforms, and export PDF/CSV reports.
+            Log in to view your Saved Analyses and access Analysis History across platforms.
           </p>
           <button
             className="saved-action-btn"
