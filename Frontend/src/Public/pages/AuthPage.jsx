@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   ArrowLeft, Mail, Lock, User, Zap, AlertTriangle, Eye, EyeOff,
@@ -6,13 +6,22 @@ import {
 } from 'lucide-react';
 import { logoDark } from '../../utils/useVoxLogo.js';
 import authService, { normalizeAuthErrorMessage } from '../../services/authService.js';
+import {
+  createGoogleOAuthSuccessNavigator,
+  isGoogleOAuthCallback,
+} from '../../services/googleOAuthFlow.js';
 import VerificationCodeModal from '../../Users/components/VerificationCodeModal.jsx';
 import '../css/AuthPage.css';
 
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value || '').trim());
 
 /* ─── LOGIN FORM ─────────────────────────────────────────── */
-function LoginForm({ onSwitchToRegister }) {
+function LoginForm({
+  onSwitchToRegister,
+  onDismissGoogleCallbackError,
+  googleCallbackError = '',
+  googleCallbackProcessing = false,
+}) {
   const navigate = useNavigate();
   const [role, setRole] = useState('user');
   const [email, setEmail] = useState('');
@@ -122,6 +131,7 @@ function LoginForm({ onSwitchToRegister }) {
 
   const handleSubmit = async (ev) => {
     ev.preventDefault();
+    onDismissGoogleCallbackError?.();
     setError('');
     setSuccess('');
     if (!isValidEmail(email)) { setError('Please enter a valid email address.'); return; }
@@ -140,6 +150,7 @@ function LoginForm({ onSwitchToRegister }) {
   };
 
   const handleGoogleSignIn = async () => {
+    onDismissGoogleCallbackError?.();
     setError('');
     setSuccess('');
     setSubmitting(true);
@@ -168,9 +179,9 @@ function LoginForm({ onSwitchToRegister }) {
         </div>
       )}
 
-      {error && (
+      {(error || googleCallbackError) && (
         <div className="ap-error">
-          <AlertTriangle size={15} /> <span>{error}</span>
+          <AlertTriangle size={15} /> <span>{error || googleCallbackError}</span>
         </div>
       )}
 
@@ -206,21 +217,21 @@ function LoginForm({ onSwitchToRegister }) {
           </button>
         </div>
 
-        <button type="submit" className="ap-submit-btn" disabled={submitting}>
+        <button type="submit" className="ap-submit-btn" disabled={submitting || googleCallbackProcessing}>
           {submitting ? 'Signing in…' : 'Sign In'}
         </button>
       </form>
 
       {/* Google OAuth */}
       <div className="ap-divider"><span>or continue with</span></div>
-      <button type="button" className="ap-google-btn" onClick={handleGoogleSignIn} disabled={submitting}>
+      <button type="button" className="ap-google-btn" onClick={handleGoogleSignIn} disabled={submitting || googleCallbackProcessing}>
         <svg width="18" height="18" viewBox="0 0 24 24">
           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
           <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
           <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
           <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
         </svg>
-        {submitting ? 'Connecting...' : 'Continue with Google'}
+        {googleCallbackProcessing ? 'Completing sign-in...' : submitting ? 'Connecting...' : 'Continue with Google'}
       </button>
 
       <div className="ap-footer">
@@ -489,6 +500,10 @@ export default function AuthPage({ initialMode = 'login' }) {
   const pathMode = location.pathname === '/register' ? 'register' : 'login';
   const [mode, setMode] = useState(pathMode || initialMode);
   const [animating, setAnimating] = useState(false);
+  const [googleCallbackError, setGoogleCallbackError] = useState('');
+  const [googleCallbackProcessing, setGoogleCallbackProcessing] = useState(false);
+  const googleCallbackTaskRef = useRef(null);
+  const googleOAuthSuccessNavigatorRef = useRef(null);
   const navigate = useNavigate();
 
   // Sync mode if URL changes externally
@@ -496,12 +511,61 @@ export default function AuthPage({ initialMode = 'login' }) {
     setMode(pathMode);
   }, [pathMode]);
 
-  // Redirect authenticated regular users to /after-login
   useEffect(() => {
-    if (authService.isAuthenticated() && authService.checkRole() === 'user') {
+    if (pathMode !== 'login') return undefined;
+
+    const callbackUrl = window.location.href;
+    const hasOAuthCallback = isGoogleOAuthCallback(callbackUrl);
+    if (!hasOAuthCallback && !authService.hasPendingGoogleSignIn()) return undefined;
+
+    if (!googleOAuthSuccessNavigatorRef.current) {
+      googleOAuthSuccessNavigatorRef.current = createGoogleOAuthSuccessNavigator(navigate);
+    }
+    let active = true;
+    let task = googleCallbackTaskRef.current?.promise || null;
+    if (!task) {
+      task = Promise.resolve()
+        .then(() => {
+          setGoogleCallbackProcessing(true);
+          return authService.completeGoogleSignIn(callbackUrl);
+        })
+        .finally(() => {
+          if (googleCallbackTaskRef.current?.promise === task) {
+            googleCallbackTaskRef.current = null;
+          }
+        });
+      googleCallbackTaskRef.current = { promise: task };
+    }
+
+    task.then((result) => {
+      if (result?.success) googleOAuthSuccessNavigatorRef.current(result);
+    }).catch((error) => {
+      if (active) {
+        setGoogleCallbackError(error?.message || 'Google sign-in could not be completed. Please try again.');
+        navigate('/login', { replace: true });
+      }
+    }).finally(() => {
+      if (active) setGoogleCallbackProcessing(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [location.hash, location.pathname, location.search, navigate, pathMode]);
+
+  // Redirect existing sessions only after any Google OAuth callback has been handled.
+  useEffect(() => {
+    if (
+      pathMode === 'login' &&
+      !authService.hasPendingGoogleSignIn() &&
+      !authService.isGoogleOAuthSessionBlocked() &&
+      !isGoogleOAuthCallback(window.location.href) &&
+      authService.isAuthenticated() &&
+      authService.checkRole() === 'user'
+    ) {
       navigate('/after-login', { replace: true });
     }
-  }, [navigate]);
+  }, [location.hash, location.pathname, location.search, navigate, pathMode]);
 
   const switchTo = (target) => {
     if (animating || mode === target) return;
@@ -535,7 +599,12 @@ export default function AuthPage({ initialMode = 'login' }) {
             {/* Login form */}
             <div className={`ap-form-slide ${isLogin ? 'ap-slide-active' : 'ap-slide-hidden-right'}`}
               aria-hidden={!isLogin}>
-              <LoginForm onSwitchToRegister={() => switchTo('register')} />
+              <LoginForm
+                onSwitchToRegister={() => switchTo('register')}
+                onDismissGoogleCallbackError={() => setGoogleCallbackError('')}
+                googleCallbackError={googleCallbackError}
+                googleCallbackProcessing={googleCallbackProcessing}
+              />
             </div>
             {/* Register form */}
             <div className={`ap-form-slide ${!isLogin ? 'ap-slide-active' : 'ap-slide-hidden-left'}`}
