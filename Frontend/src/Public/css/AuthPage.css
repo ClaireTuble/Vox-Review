@@ -15,7 +15,9 @@
   background: #F8FAFC;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
 /* Page ambient glows — matches landing page glow-purple & glow-blue */
@@ -164,17 +166,45 @@ html.dark .ap-back-home:focus-visible {
   transition: transform 0.55s cubic-bezier(0.65, 0, 0.35, 1);
 }
 
-/* Register mode — swap order */
+/* Register mode — keep navigation and form content in normal flow. */
 .ap-mode-register .ap-form-panel {
   order: 2;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding-top: 24px;
+  padding-bottom: 40px;
+  align-items: flex-start;
+  overflow: visible;
+}
+
+.ap-mode-register .ap-back-home {
+  position: static;
+  align-self: flex-start;
+  margin-bottom: 20px;
 }
 
 .ap-mode-register .ap-brand-panel {
   order: 1;
 }
 
+.ap-mode-register .ap-forms-track {
+  min-height: 0;
+  flex: none;
+}
+
+.ap-mode-register .ap-form-slide.ap-slide-active {
+  position: relative;
+  inset: auto;
+}
+
+.ap-mode-register .ap-form-slide {
+  justify-content: flex-start;
+  padding-top: 0;
+}
+
 .ap-mode-register .ap-form-header {
-  margin-top: 36px;
+  margin-top: 0;
+  margin-bottom: 16px;
 }
 
 /* ── Forms Track ───────────────────────────────────────── */
@@ -312,16 +342,26 @@ html.dark .ap-back-home:focus-visible {
 /* Error banner */
 .ap-error {
   display: flex;
-  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  align-items: flex-start;
   gap: 8px;
   background: #FEF2F2;
   border: 1px solid #FECACA;
   color: #DC2626;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 500;
+  line-height: 1.45;
   border-radius: 10px;
-  padding: 9px 14px;
-  margin-bottom: 14px;
+  padding: 8px 12px;
+  margin: 0 0 14px;
+  overflow-wrap: anywhere;
+  animation: apToastIn 200ms ease-out;
+}
+
+.ap-error svg {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 /* Form fields */
@@ -829,10 +869,27 @@ html.dark .ap-back-home:focus-visible {
     min-height: 220px;
   }
 
+  .ap-mode-register .ap-form-panel {
+    order: 0 !important;
+  }
+
+  .ap-mode-register .ap-brand-panel {
+    order: 1 !important;
+  }
+
   .ap-form-panel {
     order: 1 !important;
     flex: 1;
-    padding: 32px 24px;
+    padding: 64px 24px 32px;
+  }
+
+  .ap-mode-register .ap-form-panel {
+    align-items: stretch;
+    padding: 24px 24px 32px;
+  }
+
+  .ap-mode-register .ap-back-home {
+    margin-bottom: 16px;
   }
 
   .ap-forms-track {
@@ -879,17 +936,20 @@ html.dark .ap-back-home:focus-visible {
 
 .ap-success-toast {
   display: flex;
+  box-sizing: border-box;
+  width: 100%;
   align-items: flex-start;
   gap: 10px;
   background: #ECFDF5;
   border: 1px solid #6EE7B7;
   border-radius: 10px;
   padding: 11px 13px;
-  margin-bottom: 4px;
+  margin: 0 0 14px;
   font-size: 12.5px;
   font-weight: 500;
   color: #065F46;
   line-height: 1.45;
+  overflow-wrap: anywhere;
   animation: apToastIn 280ms ease-out;
 }
 
@@ -908,4 +968,16 @@ html.dark .ap-back-home:focus-visible {
 .auth-form-row .flex-1 {
   flex: 1;
   min-width: 0;
+}
+
+@media (max-width: 480px) {
+  .ap-mode-register .ap-form-panel {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .ap-mode-register .auth-form-row {
+    flex-direction: column;
+    gap: 13px;
+  }
 }

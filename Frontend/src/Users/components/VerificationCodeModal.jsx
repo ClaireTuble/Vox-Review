@@ -229,7 +229,16 @@ export default function VerificationCodeModal({
         aria-modal="true"
         aria-labelledby="verification-modal-title"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: '380px', width: '92%', padding: '20px 22px' }}
+        style={{
+          maxWidth: '380px',
+          width: '92%',
+          maxHeight: 'calc(100vh - 32px)',
+          overflowY: 'auto',
+          padding: '20px 22px',
+          boxSizing: 'border-box',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -269,47 +278,60 @@ export default function VerificationCodeModal({
         </p>
 
         {errorMsg && (
-          <div style={{
-            background: 'rgba(239, 68, 68, 0.12)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            borderRadius: '8px',
-            padding: '8px 12px',
-            fontSize: '12px',
-            color: '#ef4444',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            marginBottom: '14px',
-          }}>
-            <AlertCircle size={14} style={{ flexShrink: 0 }} />
+          <div
+            role="alert"
+            aria-live="polite"
+            style={{
+              background: 'rgba(239, 68, 68, 0.12)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '8px',
+              padding: '8px 12px',
+              fontSize: '12px',
+              lineHeight: 1.45,
+              wordBreak: 'break-word',
+              color: '#ef4444',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '6px',
+              marginBottom: '14px',
+            }}
+          >
+            <AlertCircle size={14} style={{ flexShrink: 0, marginTop: '2px' }} />
             <span>{errorMsg}</span>
           </div>
         )}
 
         {successMsg && (
-          <div style={{
-            background: 'rgba(16, 185, 129, 0.12)',
-            border: '1px solid rgba(16, 185, 129, 0.3)',
-            borderRadius: '8px',
-            padding: '8px 12px',
-            fontSize: '12px',
-            color: '#10b981',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            marginBottom: '14px',
-          }}>
-            <CheckCircle2 size={14} style={{ flexShrink: 0 }} />
+          <div
+            role="status"
+            aria-live="polite"
+            style={{
+              background: 'rgba(16, 185, 129, 0.12)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              borderRadius: '8px',
+              padding: '8px 12px',
+              fontSize: '12px',
+              lineHeight: 1.45,
+              wordBreak: 'break-word',
+              color: '#10b981',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '6px',
+              marginBottom: '14px',
+            }}
+          >
+            <CheckCircle2 size={14} style={{ flexShrink: 0, marginTop: '2px' }} />
             <span>{successMsg}</span>
           </div>
         )}
 
         {/* 6-Digit Code Input Row */}
         <form onSubmit={handleVerifySubmit}>
-          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginBottom: '16px' }}>
+          <div className="verification-code-inputs" style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginBottom: '16px' }}>
             {digits.map((digit, idx) => (
               <input
                 key={idx}
+                className="verification-code-input"
                 ref={inputRefs[idx]}
                 type="text"
                 inputMode="numeric"
@@ -321,7 +343,10 @@ export default function VerificationCodeModal({
                 onPaste={handlePaste}
                 disabled={isSubmitting}
                 style={{
-                  width: '42px',
+                  width: '100%',
+                  maxWidth: '42px',
+                  minWidth: 0,
+                  flex: '1 1 0',
                   height: '48px',
                   fontSize: '20px',
                   fontWeight: 700,
@@ -332,13 +357,14 @@ export default function VerificationCodeModal({
                   color: 'var(--text-primary, #111827)',
                   outline: 'none',
                   transition: 'all 0.15s ease',
+                  boxSizing: 'border-box',
                 }}
               />
             ))}
           </div>
 
           {/* Countdown & Resend Code Bar */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', fontSize: '12px' }}>
+          <div className="verification-countdown-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', fontSize: '12px' }}>
             <span style={{ color: countdown < 60 ? '#ef4444' : 'var(--text-secondary)', fontWeight: 600 }}>
               Expires in: {formatTimer(countdown)}
             </span>

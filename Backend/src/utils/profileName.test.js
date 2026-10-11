@@ -7,7 +7,19 @@ test("combines first and last names into the stored full name", () => {
   assert.equal(buildFullName("Claire", "Tuble"), "Claire Tuble");
 });
 
+test("uses the first name alone when the optional last name is empty", () => {
+  assert.equal(buildFullName("Claire", "", "claire"), "Claire");
+});
+
 test("trims name parts and uses the fallback only when both parts are empty", () => {
   assert.equal(buildFullName(" Claire ", " Tuble "), "Claire Tuble");
+  assert.equal(buildFullName(" Claire ", "   "), "Claire");
   assert.equal(buildFullName("", "", "claire"), "claire");
+});
+
+test("handles blank or missing last name without undefined or duplicate spaces", () => {
+  assert.equal(buildFullName("Claire", ""), "Claire");
+  assert.equal(buildFullName("Claire", "  "), "Claire");
+  assert.equal(buildFullName("Claire", undefined), "Claire");
+  assert.equal(buildFullName("Claire", null), "Claire");
 });
