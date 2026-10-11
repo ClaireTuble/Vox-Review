@@ -2,6 +2,7 @@ import {
   createServiceRoleClient,
   respondIfServiceRoleUnavailable,
 } from "../utils/serviceRoleSupabase.js";
+import { resolveAdminUserDisplayName } from "../utils/adminUserDisplayName.js";
 
 export function getAnalysisActivitySummary(activities, since) {
   const activityByDay = new Map();
@@ -153,9 +154,8 @@ export async function getAdminDashboardStats(req, res) {
 
         const u = userData.user;
         const meta = u.user_metadata || u.raw_user_meta_data || {};
-        const fullName = [meta.firstName, meta.lastName].filter(Boolean).join(" ").trim() || meta.username || "";
         const username = meta.username || u.email?.split("@")[0] || "";
-        const nextMeta = { fullName, username };
+        const nextMeta = { userMetadata: meta, username };
         authUserMetaMap.set(authUserId, nextMeta);
         return nextMeta;
       } catch {
@@ -173,10 +173,9 @@ export async function getAdminDashboardStats(req, res) {
               superAdminAuthIds.add(u.id);
             }
             const meta = u.user_metadata || u.raw_user_meta_data || {};
-            const fullName = [meta.firstName, meta.lastName].filter(Boolean).join(" ").trim() || meta.username || "";
             const username = meta.username || u.email?.split("@")[0] || "";
-            if (fullName || username) {
-              authUserMetaMap.set(u.id, { fullName, username });
+            if (Object.keys(meta).length || username) {
+              authUserMetaMap.set(u.id, { userMetadata: meta, username });
             }
           }
         }
@@ -238,7 +237,11 @@ export async function getAdminDashboardStats(req, res) {
     const userMap = new Map();
     const formattedRecentUsers = canonicalRegularUsers.slice(0, 4).map((u) => {
       const authMeta = authUserMetaMap.get(u.auth_user_id) || {};
-      const name = u.full_name || authMeta.fullName || u.email?.split("@")[0] || "User";
+      const name = resolveAdminUserDisplayName({
+        publicFullName: u.full_name,
+        userMetadata: authMeta.userMetadata,
+        email: u.email,
+      });
       userMap.set(u.user_id, name);
       return {
         id: `usr_${u.user_id}`,
@@ -257,7 +260,11 @@ export async function getAdminDashboardStats(req, res) {
     canonicalRegularUsers.forEach((u) => {
       if (!userMap.has(u.user_id)) {
         const authMeta = authUserMetaMap.get(u.auth_user_id) || {};
-        userMap.set(u.user_id, u.full_name || authMeta.fullName || u.email?.split("@")[0] || "User");
+        userMap.set(u.user_id, resolveAdminUserDisplayName({
+          publicFullName: u.full_name,
+          userMetadata: authMeta.userMetadata,
+          email: u.email,
+        }));
       }
     });
 
