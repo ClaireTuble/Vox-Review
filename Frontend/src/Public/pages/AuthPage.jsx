@@ -620,6 +620,7 @@ export default function AuthPage({ initialMode = 'login' }) {
 
         {/* ── FORM PANEL ── */}
         <div className="ap-form-panel">
+          <div className="ap-form-scroll-content">
           <Link to="/" className="ap-back-home">
             <ArrowLeft size={14} aria-hidden="true" />
             <span>Back to Home</span>
@@ -640,6 +641,7 @@ export default function AuthPage({ initialMode = 'login' }) {
               aria-hidden={isLogin}>
               <RegisterForm onSwitchToLogin={() => switchTo('login')} />
             </div>
+          </div>
           </div>
         </div>
 

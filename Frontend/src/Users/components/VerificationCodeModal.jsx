@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { ShieldCheck, Mail, RefreshCw, X, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ShieldCheck, Mail, RefreshCw, X, AlertCircle, CheckCircle2, Loader2, KeyRound } from 'lucide-react';
 import authService, { normalizeAuthErrorMessage } from '../../services/authService.js';
 import '../css/VerificationCodeModal.css';
 
@@ -40,7 +41,17 @@ export default function VerificationCodeModal({
   const isSignupFlow = purpose === 'signup_email_verification';
   const isForgotPasswordFlow = purpose === 'forgot_password';
 
-  // Auto focus first input on open
+  // Prevent background page scroll while modal is open & restore on close
+  useEffect(() => {
+    if (!isOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isOpen]);
+
+  // Auto-focus first input on open
   useEffect(() => {
     if (isOpen && inputRefs[0].current) {
       setTimeout(() => inputRefs[0].current?.focus(), 150);
@@ -186,7 +197,7 @@ export default function VerificationCodeModal({
           email: email || signupData?.email,
           code: fullCode,
         });
-        setSuccessMsg('Email verified. You can now create a new password.');
+        setSuccessMsg('Email verified successfully! Preparing your account...');
         setTimeout(() => {
           onVerifySuccess?.(verifyRes);
         }, 600);
@@ -221,118 +232,168 @@ export default function VerificationCodeModal({
     ? targetEmail.replace(/^(.{2})(.*)(@.*)$/, (_, p1, p2, p3) => p1 + '*'.repeat(Math.max(p2.length, 3)) + p3)
     : 'your registered email';
 
-  return (
-    <div className="verification-modal-backdrop" role="presentation" onClick={isSubmitting ? undefined : onCancel}>
+  const modalTitle = isSignupFlow ? 'Verify Your Email Address' : 'Security Verification';
+
+  const modalContent = (
+    <div
+      className="vcm-backdrop"
+      role="presentation"
+      onClick={isSubmitting ? undefined : onCancel}
+    >
       <div
-        className="verification-modal-card"
+        className="vcm-card"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="verification-modal-title"
+        aria-labelledby="vcm-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="verification-modal-header">
-          <div className="verification-modal-heading">
-            <div className="verification-modal-icon">
-              {isSignupFlow ? <Mail size={18} /> : <ShieldCheck size={18} />}
+        {/* Close button in top-right */}
+        <button
+          type="button"
+          className="vcm-close-btn"
+          onClick={onCancel}
+          disabled={isSubmitting}
+          aria-label="Close verification modal"
+        >
+          <X size={18} />
+        </button>
+
+        {/* Scrollable inner content */}
+        <div className="vcm-body">
+          {/* Centered Email/Key Illustration */}
+          <div className="vcm-illustration" aria-hidden="true">
+            <div className="vcm-illustration-ring">
+              <div className="vcm-illustration-core">
+                {isSignupFlow ? (
+                  <Mail size={32} className="vcm-illustration-icon" strokeWidth={2.2} />
+                ) : (
+                  <KeyRound size={32} className="vcm-illustration-icon" strokeWidth={2.2} />
+                )}
+              </div>
             </div>
-            <h2 id="verification-modal-title" className="verification-modal-title">
-              {isSignupFlow ? 'Verify your email' : 'Security Verification'}
-            </h2>
           </div>
-          <button
-            type="button"
-            className="verification-modal-close"
-            onClick={onCancel}
-            disabled={isSubmitting}
-            aria-label="Close verification dialog"
-          >
-            <X size={16} />
-          </button>
-        </div>
 
-        <p className="verification-modal-description">
-          {isSignupFlow ? (
-            <>We sent a 6-digit verification code to: <strong>{maskedEmail}</strong></>
-          ) : (
-            <>Enter the 6-digit verification code sent to <strong>{maskedEmail}</strong>.</>
+          {/* Centered Heading */}
+          <div className="vcm-header">
+            <h2 id="vcm-title" className="vcm-title">{modalTitle}</h2>
+            <p className="vcm-subtitle">
+              We sent a 6-digit verification code to
+            </p>
+            <div className="vcm-email-chip" aria-label={`Code sent to ${maskedEmail}`}>
+              <Mail size={13} aria-hidden="true" />
+              <span>{maskedEmail}</span>
+            </div>
+            <p className="vcm-instruction">
+              Enter the code below to confirm your account and get started.
+            </p>
+          </div>
+
+          {/* Status / Error Alert Messages */}
+          {errorMsg && (
+            <div className="vcm-alert vcm-alert--error" role="alert" aria-live="polite">
+              <AlertCircle size={16} />
+              <span>{errorMsg}</span>
+            </div>
           )}
-        </p>
 
-        {errorMsg && (
-          <div className="verification-modal-message verification-modal-error" role="alert" aria-live="polite">
-            <AlertCircle size={15} aria-hidden="true" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
+          {successMsg && (
+            <div className="vcm-alert vcm-alert--success" role="status" aria-live="polite">
+              <CheckCircle2 size={16} />
+              <span>{successMsg}</span>
+            </div>
+          )}
 
-        {successMsg && (
-          <div className="verification-modal-message verification-modal-success" role="status" aria-live="polite">
-            <CheckCircle2 size={15} aria-hidden="true" />
-            <span>{successMsg}</span>
-          </div>
-        )}
+          {/* 6-Digit Code Input Row */}
+          <form onSubmit={handleVerifySubmit} noValidate className="vcm-form">
+            <div className="vcm-code-row" role="group" aria-label="6-digit verification code">
+              {digits.map((digit, idx) => (
+                <input
+                  key={idx}
+                  ref={inputRefs[idx]}
+                  id={`vcm-digit-${idx}`}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={1}
+                  value={digit}
+                  aria-label={`Digit ${idx + 1} of 6`}
+                  autoComplete={idx === 0 ? 'one-time-code' : 'off'}
+                  onChange={(e) => handleDigitChange(idx, e.target.value)}
+                  onKeyDown={(e) => handleKeyDown(idx, e)}
+                  onPaste={handlePaste}
+                  disabled={isSubmitting}
+                  className={`vcm-code-input${digit ? ' vcm-code-input--filled' : ''}`}
+                />
+              ))}
+            </div>
 
-        <form onSubmit={handleVerifySubmit}>
-          <div className="verification-code-inputs">
-            {digits.map((digit, idx) => (
-              <input
-                key={idx}
-                className="verification-code-input"
-                ref={inputRefs[idx]}
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={1}
-                value={digit}
-                onChange={(e) => handleDigitChange(idx, e.target.value)}
-                onKeyDown={(e) => handleKeyDown(idx, e)}
-                onPaste={handlePaste}
+            {/* Verification Status / Countdown & Resend Action Row */}
+            <div className="vcm-meta-row">
+              <div className="vcm-countdown-badge">
+                <span className="vcm-meta-label">Code expires in:</span>
+                <span
+                  className={`vcm-countdown-time${countdown < 60 ? ' vcm-countdown-time--urgent' : ''}`}
+                  aria-live="polite"
+                  aria-atomic="true"
+                >
+                  {formatTimer(countdown)}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                id="vcm-resend-btn"
+                className="vcm-resend-btn"
+                onClick={handleResendCode}
+                disabled={resendCooldown > 0 || isResending || isSubmitting}
+                aria-label={resendCooldown > 0 ? `Resend code available in ${resendCooldown} seconds` : 'Resend verification code'}
+              >
+                {isResending ? (
+                  <Loader2 size={13} className="vcm-spinner" />
+                ) : (
+                  <RefreshCw size={13} aria-hidden="true" />
+                )}
+                <span>
+                  {resendCooldown > 0
+                    ? `Resend code (${resendCooldown}s)`
+                    : 'Resend code'}
+                </span>
+              </button>
+            </div>
+
+            {/* Primary & Secondary Action Buttons */}
+            <div className="vcm-actions">
+              <button
+                id="vcm-verify-btn"
+                type="submit"
+                className="vcm-btn-primary"
+                disabled={digits.join('').length < 6 || isSubmitting || countdown === 0}
+              >
+                {isSubmitting && <Loader2 size={18} className="vcm-spinner" />}
+                <span>
+                  {isSubmitting
+                    ? (isSignupFlow ? 'Creating your account…' : 'Verifying…')
+                    : (isSignupFlow ? 'Verify Email' : 'Verify Code')}
+                </span>
+              </button>
+
+              <button
+                id="vcm-cancel-btn"
+                type="button"
+                className="vcm-btn-secondary"
+                onClick={onCancel}
                 disabled={isSubmitting}
-                aria-label={`Verification code digit ${idx + 1}`}
-                className={`verification-code-input${digit ? ' has-value' : ''}`}
-              />
-            ))}
-          </div>
-
-          <div className="verification-countdown-row">
-            <span className={`verification-countdown${countdown < 60 ? ' is-urgent' : ''}`}>
-              Expires in: {formatTimer(countdown)}
-            </span>
-            <button
-              type="button"
-              className="verification-resend"
-              onClick={handleResendCode}
-              disabled={resendCooldown > 0 || isResending || isSubmitting}
-            >
-              {isResending ? (
-                <Loader2 size={14} className="verification-modal-spinner" />
-              ) : (
-                <RefreshCw size={14} />
-              )}
-              {resendCooldown > 0 ? `Resend code (${resendCooldown}s)` : 'Resend code'}
-            </button>
-          </div>
-
-          <div className="verification-modal-actions">
-            <button
-              type="button"
-              className="verification-action-button secondary"
-              onClick={onCancel}
-              disabled={isSubmitting}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="verification-action-button primary"
-              disabled={digits.join('').length < 6 || isSubmitting || countdown === 0}
-            >
-              {isSubmitting && <Loader2 size={15} className="verification-modal-spinner" />}
-              {isSubmitting ? (isSignupFlow ? 'Creating your account...' : 'Verifying...') : 'Verify Code'}
-            </button>
-          </div>
-        </form>
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined'
+    ? createPortal(modalContent, document.body)
+    : modalContent;
 }
