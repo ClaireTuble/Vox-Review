@@ -66,7 +66,8 @@
   z-index: 1;
   width: 100%;
   max-width: 1080px;
-  min-height: 640px;
+  height: 640px;
+  max-height: calc(100vh - 48px);
   margin: 24px;
   display: flex;
   border-radius: 24px;
@@ -83,28 +84,58 @@
 .ap-form-panel {
   flex: 1;
   order: 1;
+  height: 100%;
+  max-height: 100%;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 44px;
+  flex-direction: column;
+  padding: 36px 44px;
   background: #FFFFFF;
   position: relative;
   z-index: 2;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
   transition: transform 0.55s cubic-bezier(0.65, 0, 0.35, 1),
     opacity 0.4s ease;
 }
 
+.ap-form-panel::-webkit-scrollbar {
+  width: 5px;
+}
+
+.ap-form-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ap-form-panel::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.ap-form-panel::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.ap-form-scroll-content {
+  width: 100%;
+  max-width: 380px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: min-content;
+}
+
 .ap-back-home {
-  position: absolute;
-  top: 20px;
-  left: 24px;
-  z-index: 3;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: calc(100% - 48px);
+  margin-bottom: 20px;
+  align-self: flex-start;
+  max-width: 100%;
   box-sizing: border-box;
-  padding: 6px 10px;
+  padding: 6px 12px;
   border: 1px solid #bfdbfe;
   border-radius: 999px;
   background: #f8fbff;
@@ -113,6 +144,7 @@
   font-weight: 600;
   text-decoration: none;
   transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.12s ease;
+  flex-shrink: 0;
 }
 
 .ap-back-home:hover {
@@ -154,6 +186,7 @@ html.dark .ap-back-home:focus-visible {
 .ap-brand-panel {
   flex: 1.05;
   order: 2;
+  height: 100%;
   position: relative;
   overflow: hidden;
   /* Blue gradient matching landing page CTA blue */
@@ -166,94 +199,59 @@ html.dark .ap-back-home:focus-visible {
   transition: transform 0.55s cubic-bezier(0.65, 0, 0.35, 1);
 }
 
-/* Register mode — keep navigation and form content in normal flow. */
+/* Register mode — swap order */
 .ap-mode-register .ap-form-panel {
   order: 2;
-  flex-direction: column;
-  justify-content: flex-start;
-  padding-top: 24px;
-  padding-bottom: 40px;
-  align-items: flex-start;
-  overflow: visible;
-}
-
-.ap-mode-register .ap-back-home {
-  position: static;
-  align-self: flex-start;
-  margin-bottom: 20px;
 }
 
 .ap-mode-register .ap-brand-panel {
   order: 1;
 }
 
-.ap-mode-register .ap-forms-track {
-  min-height: 0;
-  flex: none;
-}
-
-.ap-mode-register .ap-form-slide.ap-slide-active {
-  position: relative;
-  inset: auto;
-}
-
-.ap-mode-register .ap-form-slide {
-  justify-content: flex-start;
-  padding-top: 0;
-}
-
-.ap-mode-register .ap-form-header {
-  margin-top: 0;
-  margin-bottom: 16px;
-}
-
 /* ── Forms Track ───────────────────────────────────────── */
 .ap-forms-track {
   width: 100%;
-  max-width: 380px;
   position: relative;
-  min-height: 560px;
 }
 
 /* ── Form Slides ───────────────────────────────────────── */
 .ap-form-slide {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
   transition:
-    opacity 0.42s cubic-bezier(0.65, 0, 0.35, 1),
-    transform 0.42s cubic-bezier(0.65, 0, 0.35, 1),
-    visibility 0s linear 0.42s;
+    opacity 0.35s cubic-bezier(0.65, 0, 0.35, 1),
+    transform 0.35s cubic-bezier(0.65, 0, 0.35, 1),
+    visibility 0s linear 0.35s;
   will-change: transform, opacity;
 }
 
 .ap-form-slide.ap-slide-active {
+  position: relative;
   opacity: 1;
-  transform: translateX(0) scale(1);
+  transform: translateX(0);
   visibility: visible;
   pointer-events: auto;
-  transition:
-    opacity 0.42s cubic-bezier(0.65, 0, 0.35, 1) 0.1s,
-    transform 0.42s cubic-bezier(0.65, 0, 0.35, 1) 0.1s,
-    visibility 0s linear 0s;
 }
 
 .ap-form-slide.ap-slide-hidden-right {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   opacity: 0;
-  transform: translateX(32px) scale(0.97);
+  transform: translateX(32px);
   visibility: hidden;
   pointer-events: none;
 }
 
 .ap-form-slide.ap-slide-hidden-left {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   opacity: 0;
-  transform: translateX(-32px) scale(0.97);
+  transform: translateX(-32px);
   visibility: hidden;
   pointer-events: none;
 }
-
 /* ── Form Body ─────────────────────────────────────────── */
 .ap-form-body {
   width: 100%;
@@ -860,6 +858,8 @@ html.dark .ap-back-home:focus-visible {
     flex-direction: column !important;
     margin: 0;
     border-radius: 0;
+    height: auto !important;
+    max-height: none !important;
     min-height: 100vh;
   }
 
@@ -867,29 +867,20 @@ html.dark .ap-back-home:focus-visible {
     order: 0 !important;
     flex: none;
     min-height: 220px;
-  }
-
-  .ap-mode-register .ap-form-panel {
-    order: 0 !important;
-  }
-
-  .ap-mode-register .ap-brand-panel {
-    order: 1 !important;
+    height: auto;
   }
 
   .ap-form-panel {
     order: 1 !important;
     flex: 1;
-    padding: 64px 24px 32px;
+    height: auto;
+    max-height: none;
+    overflow-y: visible;
+    padding: 28px 20px;
   }
 
-  .ap-mode-register .ap-form-panel {
-    align-items: stretch;
-    padding: 24px 24px 32px;
-  }
-
-  .ap-mode-register .ap-back-home {
-    margin-bottom: 16px;
+  .ap-form-scroll-content {
+    max-width: 100%;
   }
 
   .ap-forms-track {
@@ -920,7 +911,6 @@ html.dark .ap-back-home:focus-visible {
     font-size: 26px;
   }
 }
-
 /* ── Success Toast Notification ──────────────────────────── */
 @keyframes apToastIn {
   from {
