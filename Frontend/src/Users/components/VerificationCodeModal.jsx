@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ShieldCheck, Mail, RefreshCw, X, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import authService, { normalizeAuthErrorMessage } from '../../services/authService.js';
-import '../css/ExtensionConfirmationModal.css';
+import '../css/VerificationCodeModal.css';
 
 function mapVerificationUiError(error, isForgotPasswordFlow) {
   const fallbackMessage = isForgotPasswordFlow
@@ -222,112 +222,58 @@ export default function VerificationCodeModal({
     : 'your registered email';
 
   return (
-    <div className="extension-modal-backdrop" role="presentation" onClick={isSubmitting ? undefined : onCancel}>
+    <div className="verification-modal-backdrop" role="presentation" onClick={isSubmitting ? undefined : onCancel}>
       <div
-        className="extension-modal-card verification-modal-card"
+        className="verification-modal-card"
         role="dialog"
         aria-modal="true"
         aria-labelledby="verification-modal-title"
         onClick={(e) => e.stopPropagation()}
-        style={{
-          maxWidth: '380px',
-          width: '92%',
-          maxHeight: 'calc(100vh - 32px)',
-          overflowY: 'auto',
-          padding: '20px 22px',
-          boxSizing: 'border-box',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: 'rgba(79, 70, 229, 0.12)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--accent-color, #4F46E5)'
-            }}>
+        <div className="verification-modal-header">
+          <div className="verification-modal-heading">
+            <div className="verification-modal-icon">
               {isSignupFlow ? <Mail size={18} /> : <ShieldCheck size={18} />}
             </div>
-            <h2 id="verification-modal-title" style={{ fontSize: '15px', fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+            <h2 id="verification-modal-title" className="verification-modal-title">
               {isSignupFlow ? 'Verify your email' : 'Security Verification'}
             </h2>
           </div>
           <button
             type="button"
-            className="modal-close-btn"
+            className="verification-modal-close"
             onClick={onCancel}
             disabled={isSubmitting}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}
+            aria-label="Close verification dialog"
           >
             <X size={16} />
           </button>
         </div>
 
-        <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.4, margin: '0 0 16px 0' }}>
+        <p className="verification-modal-description">
           {isSignupFlow ? (
-            <>We sent a 6-digit verification code to: <strong style={{ color: 'var(--text-primary)' }}>{maskedEmail}</strong></>
+            <>We sent a 6-digit verification code to: <strong>{maskedEmail}</strong></>
           ) : (
-            <>Enter the 6-digit verification code sent to <strong style={{ color: 'var(--text-primary)' }}>{maskedEmail}</strong>.</>
+            <>Enter the 6-digit verification code sent to <strong>{maskedEmail}</strong>.</>
           )}
         </p>
 
         {errorMsg && (
-          <div
-            role="alert"
-            aria-live="polite"
-            style={{
-              background: 'rgba(239, 68, 68, 0.12)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              borderRadius: '8px',
-              padding: '8px 12px',
-              fontSize: '12px',
-              lineHeight: 1.45,
-              wordBreak: 'break-word',
-              color: '#ef4444',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '6px',
-              marginBottom: '14px',
-            }}
-          >
-            <AlertCircle size={14} style={{ flexShrink: 0, marginTop: '2px' }} />
+          <div className="verification-modal-message verification-modal-error" role="alert" aria-live="polite">
+            <AlertCircle size={15} aria-hidden="true" />
             <span>{errorMsg}</span>
           </div>
         )}
 
         {successMsg && (
-          <div
-            role="status"
-            aria-live="polite"
-            style={{
-              background: 'rgba(16, 185, 129, 0.12)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-              borderRadius: '8px',
-              padding: '8px 12px',
-              fontSize: '12px',
-              lineHeight: 1.45,
-              wordBreak: 'break-word',
-              color: '#10b981',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '6px',
-              marginBottom: '14px',
-            }}
-          >
-            <CheckCircle2 size={14} style={{ flexShrink: 0, marginTop: '2px' }} />
+          <div className="verification-modal-message verification-modal-success" role="status" aria-live="polite">
+            <CheckCircle2 size={15} aria-hidden="true" />
             <span>{successMsg}</span>
           </div>
         )}
 
-        {/* 6-Digit Code Input Row */}
         <form onSubmit={handleVerifySubmit}>
-          <div className="verification-code-inputs" style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginBottom: '16px' }}>
+          <div className="verification-code-inputs">
             {digits.map((digit, idx) => (
               <input
                 key={idx}
@@ -342,84 +288,46 @@ export default function VerificationCodeModal({
                 onKeyDown={(e) => handleKeyDown(idx, e)}
                 onPaste={handlePaste}
                 disabled={isSubmitting}
-                style={{
-                  width: '100%',
-                  maxWidth: '42px',
-                  minWidth: 0,
-                  flex: '1 1 0',
-                  height: '48px',
-                  fontSize: '20px',
-                  fontWeight: 700,
-                  textAlign: 'center',
-                  borderRadius: '8px',
-                  border: digit ? '2px solid var(--accent-color, #4F46E5)' : '1px solid var(--border-card, #d1d5db)',
-                  background: 'var(--bg-stage, #f9fafb)',
-                  color: 'var(--text-primary, #111827)',
-                  outline: 'none',
-                  transition: 'all 0.15s ease',
-                  boxSizing: 'border-box',
-                }}
+                aria-label={`Verification code digit ${idx + 1}`}
+                className={`verification-code-input${digit ? ' has-value' : ''}`}
               />
             ))}
           </div>
 
-          {/* Countdown & Resend Code Bar */}
-          <div className="verification-countdown-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', fontSize: '12px' }}>
-            <span style={{ color: countdown < 60 ? '#ef4444' : 'var(--text-secondary)', fontWeight: 600 }}>
+          <div className="verification-countdown-row">
+            <span className={`verification-countdown${countdown < 60 ? ' is-urgent' : ''}`}>
               Expires in: {formatTimer(countdown)}
             </span>
             <button
               type="button"
+              className="verification-resend"
               onClick={handleResendCode}
               disabled={resendCooldown > 0 || isResending || isSubmitting}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: resendCooldown > 0 ? 'var(--text-secondary)' : 'var(--accent-color, #4F46E5)',
-                fontWeight: 600,
-                cursor: resendCooldown > 0 ? 'not-allowed' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                padding: 0,
-              }}
             >
               {isResending ? (
-                <Loader2 size={12} className="extension-modal-spinner" />
+                <Loader2 size={14} className="verification-modal-spinner" />
               ) : (
-                <RefreshCw size={12} />
+                <RefreshCw size={14} />
               )}
               {resendCooldown > 0 ? `Resend code (${resendCooldown}s)` : 'Resend code'}
             </button>
           </div>
 
-          {/* Action Buttons */}
-          <div className="extension-modal-actions" style={{ gap: '10px' }}>
+          <div className="verification-modal-actions">
             <button
               type="button"
-              className="extension-modal-button extension-modal-button-secondary"
+              className="verification-action-button secondary"
               onClick={onCancel}
               disabled={isSubmitting}
-              style={{ flex: 1 }}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="extension-modal-button extension-modal-button-primary"
+              className="verification-action-button primary"
               disabled={digits.join('').length < 6 || isSubmitting || countdown === 0}
-              style={{
-                flex: 1,
-                background: 'var(--accent-color, #4F46E5)',
-                color: '#ffffff',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px'
-              }}
             >
-              {isSubmitting && <Loader2 size={14} className="extension-modal-spinner" />}
+              {isSubmitting && <Loader2 size={15} className="verification-modal-spinner" />}
               {isSubmitting ? (isSignupFlow ? 'Creating your account...' : 'Verifying...') : 'Verify Code'}
             </button>
           </div>
