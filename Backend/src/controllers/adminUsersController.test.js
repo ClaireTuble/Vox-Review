@@ -31,6 +31,18 @@ test("authorized Super Admin can still retrieve user history and activity", asyn
     email: "user@example.invalid",
     created_at: "2025-01-01T00:00:00.000Z",
   };
+  const authSuperAdminRecord = {
+    user_id: "admin-app-user-id",
+    auth_user_id: admin.id,
+    email: "admin@example.invalid",
+    role: "user",
+  };
+  const roleSuperAdminRecord = {
+    user_id: "role-admin-app-user-id",
+    auth_user_id: "role-admin-auth-id",
+    email: "role-admin@example.invalid",
+    role: "superadmin",
+  };
   const activity = {
     id: "activity-id",
     user_id: "app-user-id",
@@ -49,7 +61,12 @@ test("authorized Super Admin can still retrieve user history and activity", asyn
             data: {
               users: [
                 admin,
-                { id: userRecord.auth_user_id, email: userRecord.email, user_metadata: {} },
+                {
+                  id: userRecord.auth_user_id,
+                  email: userRecord.email,
+                  user_metadata: { name: "Google Profile Name", role: "superadmin" },
+                },
+                { id: roleSuperAdminRecord.auth_user_id, email: roleSuperAdminRecord.email, user_metadata: {} },
               ],
             },
           }),
@@ -57,7 +74,9 @@ test("authorized Super Admin can still retrieve user history and activity", asyn
       },
       from(table) {
         return queryResult({
-          data: table === "users" ? [userRecord] : [activity],
+          data: table === "users"
+            ? [userRecord, authSuperAdminRecord, roleSuperAdminRecord]
+            : [activity],
           error: null,
         });
       },
@@ -74,6 +93,8 @@ test("authorized Super Admin can still retrieve user history and activity", asyn
   );
 
   const server = app.listen(0, "127.0.0.1");
+  const originalServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
   try {
     await once(server, "listening");
     const address = server.address();
@@ -86,6 +107,7 @@ test("authorized Super Admin can still retrieve user history and activity", asyn
     assert.equal(body.success, true);
     assert.equal(body.users.length, 1);
     assert.equal(body.users[0].user_id, "app-user-id");
+    assert.equal(body.users[0].full_name, "Google Profile Name");
     assert.deepEqual(body.users[0].activities.map(({ id, platform, activity_type }) => ({
       id,
       platform,
@@ -98,5 +120,10 @@ test("authorized Super Admin can still retrieve user history and activity", asyn
   } finally {
     server.close();
     await once(server, "close");
+    if (originalServiceRoleKey === undefined) {
+      delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    } else {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = originalServiceRoleKey;
+    }
   }
 });

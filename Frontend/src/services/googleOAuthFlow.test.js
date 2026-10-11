@@ -144,7 +144,7 @@ test('OAuth session gate blocks listener persistence until verification', async 
   assert.equal(gate.canPersistRegularUserSession(), true);
 });
 
-test('successful OAuth callback navigates to after-login once after session verification', async () => {
+test('new Google signup callback on login navigates to after-login without email verification', async () => {
   const navigations = [];
   const navigateAfterSuccess = createGoogleOAuthSuccessNavigator((...args) => {
     navigations.push(args);
@@ -161,7 +161,6 @@ test('successful OAuth callback navigates to after-login once after session veri
     persistSession: (verifiedSession) => verifiedSession,
     clearSession: async () => assert.fail('successful callback must not clear the session'),
   });
-
   assert.equal(isGoogleOAuthCallback('https://vox-review.vercel.app/login?code=oauth-code'), true);
   assert.equal(navigateAfterSuccess(result), true);
   assert.equal(navigateAfterSuccess(result), false);
