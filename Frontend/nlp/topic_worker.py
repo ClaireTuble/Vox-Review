@@ -9,6 +9,7 @@ from time import perf_counter
 
 from predict_topics_batch import (
     classify_reviews,
+    get_process_rss_bytes,
     score_topic_candidates,
     set_topic_request_id,
 )
@@ -29,6 +30,7 @@ for line in sys.stdin:
             "event": "topic_request_received",
             "requestId": request_id,
             "workerPid": os.getpid(),
+            "rssBytes": get_process_rss_bytes(),
             "operation": operation,
             "reviewCount": len(reviews) if isinstance(reviews, list) else None,
         }),
@@ -54,6 +56,7 @@ for line in sys.stdin:
                 "event": "topic_request_failed",
                 "requestId": request_id,
                 "workerPid": os.getpid(),
+                "rssBytes": get_process_rss_bytes(),
                 "operation": operation,
                 "errorType": type(error).__name__,
                 "error": error_message[:500],
