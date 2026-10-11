@@ -39,12 +39,23 @@ def set_topic_request_id(request_id) -> None:
     _diagnostic_request_id = request_id
 
 
+def get_process_rss_bytes() -> int | None:
+    try:
+        for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
 def log_model_event(event: str, **metadata) -> None:
     print(
         json.dumps({
             "event": event,
             "workerPid": os.getpid(),
             "requestId": _diagnostic_request_id,
+            "rssBytes": get_process_rss_bytes(),
             **metadata,
         }),
         file=sys.stderr,

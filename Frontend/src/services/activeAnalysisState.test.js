@@ -396,12 +396,17 @@ test('Topic failures remain completed and SVM failures are persisted', async () 
   const activityEvents = [];
   const topicsUnavailable = createAnalysisJobCoordinator({
     requestSvm: async () => ({ predictions: [1] }),
-    requestTopics: async () => { throw new Error('topic offline'); },
+    requestTopics: async () => {
+      throw Object.assign(new Error('topic inference failed'), {
+        code: 'TOPIC_INFERENCE_FAILED',
+      });
+    },
     onCompleted: async (state) => activityEvents.push(state.runId),
   });
   const completed = await topicsUnavailable.start(input());
   assert.equal(completed.state.status, 'completed');
-  assert.equal(completed.state.topicError, 'topic offline');
+  assert.equal(completed.state.topicError, 'topic inference failed');
+  assert.equal(completed.state.topicResult, null);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(activityEvents, []);
 
@@ -416,6 +421,38 @@ test('Topic failures remain completed and SVM failures are persisted', async () 
   assert.equal(failed.state.status, 'error');
   assert.equal(failed.state.error, 'svm offline');
   assert.deepEqual(failedEvents, []);
+});
+
+test('a terminated Steam topic worker leaves topic insights unavailable without fabricated results', async () => {
+  const reviews = Array.from({ length: 20 }, (_, index) => ({
+    id: `steam-review-${index}`,
+    text: `Steam review ${index}`,
+  }));
+  const coordinator = createAnalysisJobCoordinator({
+    requestSvm: async (texts, platform) => {
+      assert.equal(texts.length, 20);
+      assert.equal(platform, 'steam');
+      return { predictions: Array(20).fill(1) };
+    },
+    requestTopics: async (texts, platform) => {
+      assert.equal(texts.length, 20);
+      assert.equal(platform, 'steam');
+      throw Object.assign(new Error('Topic worker terminated by SIGKILL'), {
+        code: 'TOPIC_WORKER_TERMINATED',
+      });
+    },
+  });
+
+  const result = await coordinator.start({
+    ...input('https://store.steampowered.com/app/123/'),
+    platform: 'steam',
+    reviews,
+  });
+
+  assert.equal(result.state.status, 'completed');
+  assert.equal(result.state.topicResult, null);
+  assert.match(result.state.topicError, /SIGKILL/);
+  assert.deepEqual(result.state.svmResult.predictions, Array(20).fill(1));
 });
 
 test('Topic Analysis failure preserves the Anger review and its calculated priority', async () => {

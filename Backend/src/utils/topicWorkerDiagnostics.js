@@ -12,6 +12,7 @@ const SAFE_TOPIC_WORKER_FIELDS = new Set([
   "embeddingDurationMs",
   "embeddingCount",
   "reviewCount",
+  "rssBytes",
   "torchNumThreads",
   "previousTorchNumThreads",
   "processCpuCount",
@@ -134,11 +135,39 @@ export function getTopicWorkerFailureDetails(error) {
       failureReason: "inference_failure",
     };
   }
+  if (error?.code === "TOPIC_WORKER_TERMINATED") {
+    return {
+      status: 503,
+      code: "TOPIC_WORKER_TERMINATED",
+      failureReason: "worker_terminated",
+    };
+  }
+  if (error?.code === "TOPIC_WORKER_EXITED") {
+    return {
+      status: 503,
+      code: "TOPIC_WORKER_EXITED",
+      failureReason: "worker_exited",
+    };
+  }
   return {
     status: 503,
     code: "TOPIC_WORKER_UNAVAILABLE",
     failureReason: "worker_unavailable",
   };
+}
+
+export function createTopicWorkerExitError(code, signal) {
+  const safeSignal = typeof signal === "string" && /^SIG[A-Z0-9]+$/.test(signal)
+    ? signal
+    : null;
+  const exitCode = Number.isInteger(code) ? code : null;
+  const error = new Error(safeSignal
+    ? `Topic worker terminated by ${safeSignal}`
+    : `Topic worker exited with code ${exitCode ?? "unknown"}`);
+  error.code = safeSignal ? "TOPIC_WORKER_TERMINATED" : "TOPIC_WORKER_EXITED";
+  error.exitCode = exitCode;
+  error.signal = safeSignal;
+  return error;
 }
 
 function isSafeTopicWorkerValue(key, value) {
