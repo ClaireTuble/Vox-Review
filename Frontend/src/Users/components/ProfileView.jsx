@@ -27,7 +27,11 @@ import authService, { normalizeAuthErrorMessage } from '../../services/authServi
 import ProfileChangesConfirmationModal from './ProfileChangesConfirmationModal.jsx';
 import RemoveAvatarConfirmationModal from './RemoveAvatarConfirmationModal.jsx';
 import VerificationCodeModal from './VerificationCodeModal.jsx';
-import { getProfileSaveChanges, persistProfileDraft } from '../utils/profileSave.js';
+import {
+  getProfileDraftValidationError,
+  getProfileSaveChanges,
+  persistProfileDraft,
+} from '../utils/profileSave.js';
 import '../css/ProfileView.css';
 
 export default function ProfileView({
@@ -235,8 +239,9 @@ export default function ProfileView({
 
   const handleSaveProfile = (e) => {
     e.preventDefault();
-    if (!firstName.trim() || !lastName.trim()) {
-      triggerToast('Please fill out first name and last name.', 'error');
+    const validationError = getProfileDraftValidationError({ username, firstName });
+    if (validationError) {
+      triggerToast(validationError, 'error');
       return;
     }
 
@@ -695,7 +700,7 @@ export default function ProfileView({
               <span className="pf-section-hint">Update your account information below.</span>
             </div>
 
-            <form onSubmit={handleSaveProfile} className="pf-form">
+            <form onSubmit={handleSaveProfile} className="pf-form" noValidate>
 
               {/* Row 1: Username | Email Address */}
               <div className="pf-field-row">
@@ -739,7 +744,7 @@ export default function ProfileView({
                   />
                 </div>
                 <div className="pf-field">
-                  <label className="pf-label" htmlFor="edit-lastname">Last Name</label>
+                  <label className="pf-label" htmlFor="edit-lastname">Last Name (Optional)</label>
                   <input
                     id="edit-lastname"
                     className="pf-input"
@@ -747,7 +752,6 @@ export default function ProfileView({
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
                     placeholder="Enter your last name"
-                    required
                   />
                 </div>
               </div>

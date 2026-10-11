@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeSupabaseUser } from '../../services/userProfileSync.js';
-import { getProfileSaveChanges, persistProfileDraft } from './profileSave.js';
+import {
+  getProfileDraftValidationError,
+  getProfileSaveChanges,
+  persistProfileDraft,
+} from './profileSave.js';
 
 const savedProfile = {
   username: 'testuser',
@@ -89,6 +93,52 @@ test('confirming one save uploads the pending image and saves all profile fields
   ]);
   assert.equal(updatedUser.avatarUrl, 'https://example.com/new-avatar.jpg');
   assert.equal(sharedProfile, updatedUser);
+});
+
+test('profile Settings allows avatar upload with blank Last Name and preserves profile fields', async () => {
+  const authService = createAuthService();
+  const file = { name: 'new-photo.png', type: 'image/png' };
+
+  assert.equal(getProfileDraftValidationError({
+    username: savedProfile.username,
+    firstName: savedProfile.firstName,
+  }), null);
+
+  const updatedUser = await persistProfileDraft({
+    authService,
+    username: savedProfile.username,
+    firstName: savedProfile.firstName,
+    lastName: '   ',
+    avatarAction: { type: 'upload', file },
+  });
+
+  assert.deepEqual(authService.calls, [
+    ['uploadAvatar', file],
+    ['updateUserProfile', {
+      username: savedProfile.username,
+      firstName: savedProfile.firstName,
+      lastName: '',
+      avatarUrl: 'https://example.com/new-avatar.jpg',
+    }],
+  ]);
+  assert.equal(updatedUser.username, savedProfile.username);
+  assert.equal(updatedUser.avatarUrl, 'https://example.com/new-avatar.jpg');
+  assert.equal(updatedUser.googleAvatarUrl, savedProfile.googleAvatarUrl);
+  assert.equal(updatedUser.isCustomAvatar, true);
+});
+
+test('profile Settings validation rejects a blank First Name', () => {
+  assert.equal(
+    getProfileDraftValidationError({ username: savedProfile.username, firstName: '  ' }),
+    'Please fill out your username and first name.',
+  );
+});
+
+test('profile Settings validation rejects a blank Username', () => {
+  assert.equal(
+    getProfileDraftValidationError({ username: '  ', firstName: savedProfile.firstName }),
+    'Please fill out your username and first name.',
+  );
 });
 
 test('confirming removal deletes the custom avatar only at save time and retains Google fallback', async () => {
