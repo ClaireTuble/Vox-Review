@@ -14,9 +14,9 @@
   justify-content: center;
   padding: 20px;
   box-sizing: border-box;
-  background: rgba(15, 23, 42, 0.62);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(9px);
   overflow: hidden;
   animation: vcmBackdropFadeIn 180ms ease-out both;
 }
@@ -25,8 +25,8 @@
 .vcm-card {
   position: relative;
   width: 100%;
-  max-width: 620px;
-  max-height: min(90vh, 720px);
+  max-width: 530px;
+  max-height: min(88vh, 640px);
   display: flex;
   flex-direction: column;
   background: #ffffff;
@@ -45,9 +45,9 @@
 .vcm-close-btn {
   position: absolute;
   top: 18px;
-  right: 18px;
-  width: 36px;
-  height: 36px;
+  right: 16px;
+  width: 34px;
+  height: 34px;
   border-radius: 10px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
@@ -82,7 +82,7 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 44px 48px 36px;
+  padding: 32px 36px 28px;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
@@ -112,14 +112,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 auto 20px;
+  margin: 0 auto 14px;
   flex-shrink: 0;
 }
 
 .vcm-illustration-ring {
-  width: 80px;
-  height: 80px;
-  border-radius: 24px;
+  width: 66px;
+  height: 66px;
+  border-radius: 20px;
   background: rgba(37, 99, 235, 0.08);
   border: 1.5px solid rgba(37, 99, 235, 0.18);
   display: flex;
@@ -129,9 +129,9 @@
 }
 
 .vcm-illustration-core {
-  width: 58px;
-  height: 58px;
-  border-radius: 18px;
+  width: 48px;
+  height: 48px;
+  border-radius: 15px;
   background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
   border: 1px solid #bfdbfe;
   display: flex;
@@ -148,15 +148,15 @@
 /* ── Header block ───────────────────────────────────────── */
 .vcm-header {
   text-align: center;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 
 .vcm-title {
-  margin: 0 0 8px;
-  font-size: 24px;
+  margin: 0 0 6px;
+  font-size: 22px;
   font-weight: 800;
   color: #0f172a;
   letter-spacing: -0.03em;
@@ -164,8 +164,8 @@
 }
 
 .vcm-subtitle {
-  margin: 0 0 8px;
-  font-size: 14px;
+  margin: 0 0 6px;
+  font-size: 13px;
   color: #64748b;
   line-height: 1.5;
 }
@@ -175,23 +175,23 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 6px 16px;
+  padding: 5px 12px;
   background: #eff6ff;
   border: 1px solid #bfdbfe;
   border-radius: 999px;
-  font-size: 13.5px;
+  font-size: 12.5px;
   font-weight: 700;
   color: #1d4ed8;
   word-break: break-all;
   text-align: center;
   max-width: 100%;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   box-sizing: border-box;
 }
 
 .vcm-instruction {
   margin: 0;
-  font-size: 13px;
+  font-size: 12.5px;
   color: #64748b;
   line-height: 1.45;
 }
@@ -201,11 +201,11 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 11px 14px;
-  border-radius: 12px;
-  font-size: 13px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
   line-height: 1.45;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
   flex-shrink: 0;
   box-sizing: border-box;
 }
@@ -238,18 +238,18 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  margin-bottom: 22px;
+  gap: 10px;
+  margin-bottom: 16px;
 }
 
 .vcm-code-input {
-  width: 58px;
-  height: 66px;
-  font-size: 26px;
+  width: 48px;
+  height: 56px;
+  font-size: 23px;
   font-weight: 700;
   font-family: inherit;
   text-align: center;
-  border-radius: 14px;
+  border-radius: 12px;
   border: 1.5px solid #cbd5e1;
   background: #f8fafc;
   color: #0f172a;
@@ -287,7 +287,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 26px;
+  margin-bottom: 18px;
   padding: 0 4px;
 }
 
@@ -295,7 +295,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12.5px;
   color: #64748b;
 }
 
@@ -321,7 +321,7 @@
   border: none;
   padding: 4px 6px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
@@ -345,14 +345,14 @@
 .vcm-actions {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
 /* Primary: Verify Email */
 .vcm-btn-primary {
   width: 100%;
-  height: 48px;
+  height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -362,7 +362,7 @@
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
   color: #ffffff;
   font-family: inherit;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
   transition: background 160ms ease, box-shadow 160ms ease, transform 100ms ease;
@@ -396,7 +396,7 @@
 /* Secondary: Cancel */
 .vcm-btn-secondary {
   width: 100%;
-  height: 42px;
+  height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -405,7 +405,7 @@
   background: #f8fafc;
   color: #475569;
   font-family: inherit;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
@@ -450,90 +450,94 @@
 
 /* ── Responsive: Mobile / Narrow Viewport ───────────────── */
 @media (max-width: 540px) {
+  .vcm-backdrop {
+    padding: 12px;
+  }
+
   .vcm-card {
     border-radius: 20px;
     max-width: 100%;
   }
 
   .vcm-body {
-    padding: 32px 20px 24px;
+    padding: 28px 16px 20px;
   }
 
   .vcm-title {
-    font-size: 20px;
+    font-size: 19px;
   }
 
   .vcm-illustration-ring {
-    width: 68px;
-    height: 68px;
-    border-radius: 20px;
+    width: 60px;
+    height: 60px;
+    border-radius: 18px;
   }
 
   .vcm-illustration-core {
-    width: 50px;
-    height: 50px;
+    width: 44px;
+    height: 44px;
     border-radius: 14px;
   }
 
   .vcm-code-row {
-    gap: 8px;
+    gap: 6px;
   }
 
   .vcm-code-input {
-    width: 44px;
-    height: 54px;
-    font-size: 22px;
+    width: clamp(34px, 11vw, 44px);
+    height: 52px;
+    font-size: 20px;
     border-radius: 11px;
   }
 
   .vcm-meta-row {
     flex-direction: column;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 20px;
+    gap: 6px;
+    margin-bottom: 16px;
   }
 }
 
 /* ── Short-Viewport Safety ──────────────────────────────── */
 @media (max-height: 640px) {
   .vcm-illustration {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
   }
 
   .vcm-illustration-ring {
-    width: 56px;
-    height: 56px;
-    border-radius: 16px;
+    width: 52px;
+    height: 52px;
+    border-radius: 15px;
   }
 
   .vcm-illustration-core {
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
   }
 
   .vcm-body {
-    padding: 24px 28px 20px;
+    padding: 18px 24px 16px;
   }
 
   .vcm-header {
-    margin-bottom: 14px;
+    margin-bottom: 12px;
   }
 
   .vcm-title {
-    font-size: 19px;
+    font-size: 18px;
     margin-bottom: 4px;
   }
 
   .vcm-code-row {
-    margin-bottom: 16px;
+    margin-bottom: 12px;
   }
 
   .vcm-code-input {
-    height: 52px;
+    height: 48px;
   }
 
   .vcm-meta-row {
-    margin-bottom: 18px;
+    margin-bottom: 12px;
   }
 }
