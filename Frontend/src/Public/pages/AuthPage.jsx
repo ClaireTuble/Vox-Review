@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { logoDark } from '../../utils/useVoxLogo.js';
 import authService, { normalizeAuthErrorMessage } from '../../services/authService.js';
+import { hasRequiredSignupFields } from '../utils/signupValidation.js';
 import {
   createGoogleOAuthSuccessNavigator,
   isGoogleOAuthCallback,
@@ -275,7 +276,7 @@ function RegisterForm({ onSwitchToLogin }) {
   const handleSubmit = async (ev) => {
     ev.preventDefault();
     setError('');
-    if (!username || !firstName || !lastName || !email || !password || !confirmPwd) {
+    if (!hasRequiredSignupFields({ username, firstName, email, password, confirmPassword: confirmPwd })) {
       setError('Please fill all required fields.');
       return;
     }
@@ -285,7 +286,13 @@ function RegisterForm({ onSwitchToLogin }) {
     if (!agreeTerms) { setError('You must agree to the terms.'); return; }
 
     setSubmitting(true);
-    const signupData = { email, password, username, firstName, lastName };
+    const signupData = {
+      email: email.trim(),
+      password,
+      username: username.trim(),
+      firstName: firstName.trim(),
+      lastName: (lastName || '').trim(),
+    };
 
     try {
       // Step 1: Send verification code email via Brevo. Account NOT created yet.
@@ -325,7 +332,7 @@ function RegisterForm({ onSwitchToLogin }) {
       )}
 
       {error && (
-        <div className="ap-error">
+        <div className="ap-error" role="alert" aria-live="polite">
           <AlertTriangle size={15} /> <span>{error}</span>
         </div>
       )}
@@ -351,11 +358,11 @@ function RegisterForm({ onSwitchToLogin }) {
           </div>
 
           <div className="ap-field flex-1">
-            <label htmlFor="reg-lastname" className="ap-label">Last Name*</label>
+            <label htmlFor="reg-lastname" className="ap-label">Last Name (Optional)</label>
             <div className="ap-input-wrap">
               <User size={15} className="ap-icon" />
               <input id="reg-lastname" type="text" className="ap-input" placeholder="Enter your last name"
-                value={lastName} onChange={e => setLastName(e.target.value)} required />
+                value={lastName} onChange={e => setLastName(e.target.value)} />
             </div>
           </div>
         </div>

@@ -132,7 +132,7 @@ export const verificationService = {
     if (!password || password.length < 6) {
       throw new Error("Password must be at least 6 characters long.");
     }
-    if (!cleanUsername || !cleanFirstName || !cleanLastName) {
+    if (!cleanUsername || !cleanFirstName) {
       throw new Error("Please fill out all required fields.");
     }
 
