@@ -23,6 +23,13 @@ export function getProfileSaveChanges(savedProfile, draft, avatarAction = null) 
   return changes;
 }
 
+export function getProfileDraftValidationError({ username, firstName }) {
+  if (!String(username ?? "").trim() || !String(firstName ?? "").trim()) {
+    return "Please fill out your username and first name.";
+  }
+  return null;
+}
+
 export async function persistProfileDraft({
   authService,
   username,
@@ -31,6 +38,10 @@ export async function persistProfileDraft({
   avatarAction = null,
   onPersisted = () => {},
 }) {
+  const clean = (value) => String(value ?? "").trim();
+  const normalizedUsername = clean(username);
+  const normalizedFirstName = clean(firstName);
+  const normalizedLastName = clean(lastName);
   let avatarUrl;
 
   if (avatarAction?.type === "upload") {
@@ -48,9 +59,9 @@ export async function persistProfileDraft({
   }
 
   const profileResult = await authService.updateUserProfile({
-    username,
-    firstName,
-    lastName,
+    username: normalizedUsername,
+    firstName: normalizedFirstName,
+    lastName: normalizedLastName,
     ...(avatarAction ? { avatarUrl } : {}),
   });
   if (!profileResult?.success) {
