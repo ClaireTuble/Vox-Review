@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getNewReviews, getSavedReviewIdentity } from './savedAnalysisRefresh.js';
+import { getNewReviews, getSavedReviewIdentity, alignSavedAnalysisRefreshBatch } from './savedAnalysisRefresh.js';
+import { prepareReviewsForAnalysis } from './reviewLanguage.js';
 
 test('uses a stable source review ID even when review text was edited', () => {
   const saved = [{ id: 'source-comment-123', text: 'Original wording' }];
@@ -59,4 +60,23 @@ test('does not rediscover reviews after they are merged into the saved batch', (
 
   assert.deepEqual(getNewReviews(saved, newlyDetected), newlyDetected);
   assert.deepEqual(getNewReviews(merged, [...newlyDetected, ...saved]), []);
+});
+
+test('aligns saved-refresh emotion results to accepted reviews in a mixed-language batch', async () => {
+  const supportedReview = { id: 'en-1', text: 'The package arrived safely and works as expected.' };
+  const unsupportedReview = {
+    id: 'ja-1',
+    text: 'この商品はとても良いです。使いやすくて満足しています。品質も高く、また購入したいです。',
+  };
+  const prepared = await prepareReviewsForAnalysis([supportedReview, unsupportedReview]);
+
+  const batch = alignSavedAnalysisRefreshBatch(prepared.reviews, [2]);
+
+  assert.deepEqual(batch, {
+    reviews: [supportedReview],
+    predictions: [2],
+  });
+  assert.equal(prepared.skippedReviews[0].review, unsupportedReview);
+  assert.equal(prepared.skippedReviews[0].status, 'skipped');
+  assert.equal(prepared.skippedReviews[0].reason, 'unsupported_language');
 });

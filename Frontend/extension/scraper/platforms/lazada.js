@@ -147,6 +147,16 @@ function extractLazadaHelpfulCount(card) {
   return Number.isSafeInteger(count) && count >= 0 ? count : null;
 }
 
+function isSubstantiveLazadaReviewText(text) {
+  const remainingText = text
+    .replace(/\b[A-Z]?\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?=\s|Helpful|$|[^\p{L}\p{N}_])/giu, " ")
+    .replace(/\bHelpful\s*\(\s*[\d,]+\s*\)/giu, " ")
+    .replace(/\b(?:verified\s+purchase|anonymous|lazada\s+buyer|seller\s+response|response\s+from\s+seller)\b/giu, " ")
+    .trim();
+
+  return /\p{L}/u.test(remainingText) || /\p{Extended_Pictographic}/u.test(remainingText);
+}
+
 /**
  * Scrape genuine customer review text from Lazada product page.
  */
@@ -201,44 +211,21 @@ function scrapeLazadaReviews() {
       : "";
 
     // 3. User Review Content Text
-    const lines = [];
-
-    // Primary: dedicated review comment text container
+    // Read only a dedicated review-body element; never treat leftover card metadata as a review.
     const mainTextContainer = card.querySelector(
       ".item-content-main-content-reviews-item, [class*='main-content-reviews-item'], [class*='review-content'], [class*='user-comment']"
     );
-
-    if (mainTextContainer) {
-      const rawMainText = mainTextContainer.innerText || mainTextContainer.textContent || "";
-      const rawLines = rawMainText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-      rawLines.forEach((l) => {
-        if (!shouldIgnoreLazadaText(l) && !lines.includes(l)) {
-          lines.push(l);
-        }
-      });
-    }
-
-    // Secondary / Fallback: clone card and strip non-comment sub-elements (scripts, styles, seller replies, footers)
-    if (lines.length === 0) {
-      const cardClone = card.cloneNode(true);
-      const toRemove = cardClone.querySelectorAll(
-        "script, style, template, meta, link, svg, button, .item-content-seller-reply, .item-content-footer, .reviewer, .user-name, .title.right, .item-content-head-rating, [class*='seller-reply'], [class*='helpful'], [class*='footer']"
-      );
-      toRemove.forEach((el) => el.remove());
-
-      const rawCardText = cardClone.innerText || cardClone.textContent || "";
-      const rawLines = rawCardText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-      rawLines.forEach((l) => {
-        if (!shouldIgnoreLazadaText(l) && l !== reviewer && l !== date && !lines.includes(l)) {
-          lines.push(l);
-        }
-      });
-    }
-
-    const fullText = lines.join("\n").trim();
+    const rawMainText = mainTextContainer
+      ? mainTextContainer.innerText || mainTextContainer.textContent || ""
+      : "";
+    const fullText = rawMainText.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => !shouldIgnoreLazadaText(line))
+      .join("\n")
+      .trim();
 
     // Must be non-empty, genuine review text and NOT code/JSON
-    if (!fullText || fullText.length < 2 || isCodeOrJsonText(fullText)) return;
+    if (!fullText || isCodeOrJsonText(fullText) || !isSubstantiveLazadaReviewText(fullText)) return;
 
     const textKey = fullText.toLowerCase();
     if (!seenTexts.has(textKey)) {

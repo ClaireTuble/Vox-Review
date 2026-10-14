@@ -142,6 +142,24 @@ export function getReviewText(review) {
   return '';
 }
 
+export function isSubstantiveReviewText(text) {
+  if (typeof text !== 'string' || !text.trim()) return false;
+
+  const remainingText = text
+    .replace(/\b[A-Z]?\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?=\s|Helpful|$|[^\p{L}\p{N}_])/giu, ' ')
+    .replace(/\bHelpful\s*\(\s*[\d,]+\s*\)/giu, ' ')
+    .replace(/\b(?:verified\s+purchase|anonymous|lazada\s+buyer|seller\s+response|response\s+from\s+seller)\b/giu, ' ')
+    .trim();
+
+  return /\p{L}/u.test(remainingText) || /\p{Extended_Pictographic}/u.test(remainingText);
+}
+
+export function filterSubstantiveReviews(reviews) {
+  return Array.isArray(reviews)
+    ? reviews.filter((review) => isSubstantiveReviewText(getReviewText(review)))
+    : [];
+}
+
 export function getReviewId(review, fallbackIndex = 0) {
   return review && typeof review === 'object'
     ? review.id ?? review.reviewId ?? fallbackIndex + 1

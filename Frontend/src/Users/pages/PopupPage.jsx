@@ -25,12 +25,15 @@ import LogoutConfirmationModalExtension from '../components/LogoutConfirmationMo
 import UnsavedChangesConfirmationModal from '../components/UnsavedChangesConfirmationModal.jsx';
 import {
   aggregateTopicsForReviews,
+  filterSubstantiveReviews,
   getReviewId,
   getReviewText,
+  isSubstantiveReviewText,
   getTopicKeywordCandidates,
   getTopicKeywordDiagnostics,
 } from '../utils/reviewTopics.js';
-import { getNewReviews } from '../utils/savedAnalysisRefresh.js';
+import { prepareReviewsForAnalysis } from '../utils/reviewLanguage.js';
+import { alignSavedAnalysisRefreshBatch, getNewReviews } from '../utils/savedAnalysisRefresh.js';
 import { attachReviewPriorities } from '../utils/priorityEngine.js';
 import { getSvmEmotionKeywords } from '../utils/emotionDrivers.js';
 import { clearPopupAuthState } from '../utils/popupAuthSession.js';
@@ -191,7 +194,22 @@ function isPlatformDisabledError(error) {
     /PLATFORM_DISABLED|analysis for this platform is currently disabled/i.test(error?.message || '');
 }
 
-function buildEmotionData(reviews, predictions, platform, topicResponse = null, topicStatus = 'pending', explanationResults = []) {
+function buildEmotionData(
+  reviews,
+  predictions,
+  platform,
+  topicResponse = null,
+  topicStatus = 'pending',
+  explanationResults = [],
+  skippedReviews = [],
+) {
+  const validReviewIndexes = reviews
+    .map((review, index) => isSubstantiveReviewText(getReviewText(review)) ? index : -1)
+    .filter((index) => index >= 0);
+  reviews = validReviewIndexes.map((index) => reviews[index]);
+  predictions = validReviewIndexes.map((index) => predictions[index]);
+  explanationResults = validReviewIndexes.map((index) => explanationResults[index] || {});
+
   const counts = predictions.reduce((summary, category) => {
     summary[category] += 1;
     return summary;
@@ -247,20 +265,61 @@ function buildEmotionData(reviews, predictions, platform, topicResponse = null, 
     topicStatus,
     topicModel: topicResponse?.model || null,
     topicThreshold: topicResponse?.threshold ?? null,
+    skippedReviews,
     quotes: attachReviewPriorities(quotes, topicResponse),
   };
 }
 
+function filterActiveAnalysisStateReviews(activeState) {
+  if (!Array.isArray(activeState?.reviews)) return activeState;
+  const originalReviews = activeState.reviews;
+  const validReviewIndexes = originalReviews
+    .map((review, index) => isSubstantiveReviewText(getReviewText(review)) ? index : -1)
+    .filter((index) => index >= 0);
+  if (validReviewIndexes.length === originalReviews.length) return activeState;
+
+  const filteredReviews = validReviewIndexes.map((index) => originalReviews[index]);
+  const filterAligned = (values) => Array.isArray(values) && values.length === originalReviews.length
+    ? validReviewIndexes.map((index) => values[index])
+    : values;
+  const svmResult = activeState.svmResult && {
+    ...activeState.svmResult,
+    predictions: filterAligned(activeState.svmResult.predictions),
+    results: filterAligned(activeState.svmResult.results),
+  };
+  const topicResult = activeState.topicResult && {
+    ...activeState.topicResult,
+    results: Array.isArray(activeState.topicResult.results) &&
+      activeState.topicResult.results.length === originalReviews.length
+      ? validReviewIndexes.map((index, reviewIndex) => ({
+          ...activeState.topicResult.results[index],
+          reviewIndex,
+        }))
+      : activeState.topicResult.results,
+  };
+
+  return {
+    ...activeState,
+    reviews: filteredReviews,
+    reviewSetSignature: getTopicReviewSetSignature(filteredReviews.map(getReviewText)),
+    svmResult,
+    topicResult,
+  };
+}
+
 function buildActiveAnalysisView(activeState) {
+  activeState = filterActiveAnalysisStateReviews(activeState);
   const reviews = Array.isArray(activeState?.reviews) ? activeState.reviews : [];
   const predictions = activeState?.svmResult?.predictions;
-  if (!Array.isArray(predictions) || predictions.length !== reviews.length) {
+  if (!Array.isArray(predictions) || predictions.length !== reviews.length || reviews.length === 0) {
     return { record: activeState, emotionData: null, topicAnalysis: null };
   }
 
-  const explanationResults = Array.isArray(activeState.svmResult.results) &&
-    activeState.svmResult.results.length === reviews.length
-    ? activeState.svmResult.results.map((result, index) => ({
+  const originalExplanationResults = activeState.svmResult.results;
+  const explanationResults = Array.isArray(originalExplanationResults) &&
+    originalExplanationResults.length === reviews.length
+    ? originalExplanationResults.map((result, index) => ({
+        ...result,
         category: result?.category === predictions[index] ? result.category : predictions[index],
         emotionDrivers: Array.isArray(result?.emotionDrivers)
           ? result.emotionDrivers.filter((driver) => typeof driver === 'string')
@@ -270,14 +329,23 @@ function buildActiveAnalysisView(activeState) {
           : null,
       }))
     : predictions.map((category) => ({ category, emotionDrivers: [], contextualResolution: null }));
+  const filteredTopicResult = activeState.topicResult;
   const platform = getPlatformLabel(activeState.platform);
-  const topicAnalysis = hasValidTopicAnalysis(activeState.topicResult, reviews.length)
-    ? activeState.topicResult
+  const topicAnalysis = hasValidTopicAnalysis(filteredTopicResult, reviews.length)
+    ? filteredTopicResult
     : null;
   const topicStatus = topicAnalysis
     ? 'ready'
     : activeState.topicError ? 'unavailable' : ENABLE_TOPIC_ANALYSIS ? 'pending' : 'disabled';
-  const emotionData = buildEmotionData(reviews, predictions, platform, topicAnalysis, topicStatus, explanationResults);
+  const emotionData = buildEmotionData(
+    reviews,
+    predictions,
+    platform,
+    topicAnalysis,
+    topicStatus,
+    explanationResults,
+    activeState.skippedReviews || [],
+  );
   const reviewAnalysis = explanationResults.map((result, index) => ({
     review: reviews[index],
     category: result.category,
@@ -291,6 +359,13 @@ function buildActiveAnalysisView(activeState) {
     pageKey: activeState.pageKey || getPageKey(activeState.platform, activeState.page_url),
     productTitle: activeState.productTitle || activeState.targetTitle || 'Product Review',
     targetTitle: activeState.targetTitle || activeState.productTitle || 'Product Review',
+    reviews,
+    svmResult: {
+      ...activeState.svmResult,
+      predictions,
+      results: explanationResults,
+    },
+    topicResult: filteredTopicResult,
     reviewAnalysis,
     topicAnalysis,
     emotionData,
@@ -709,6 +784,7 @@ export default function PopupPage() {
 
   const applyActiveAnalysisState = (activeState) => {
     if (!activeState?.pageKey || activeState.pageKey !== activeContextRef.current.pageKey) return;
+    activeState = filterActiveAnalysisStateReviews(activeState);
     const incomingReviews = Array.isArray(activeState.reviews) ? activeState.reviews : [];
     const currentRecord = currentAnalysisRecordRef.current;
     const currentTopics = topicAnalysisRef.current;
@@ -1012,8 +1088,9 @@ export default function PopupPage() {
     if (data.rating !== undefined) setScrapedRating(data.rating);
     if (data.productImage !== undefined) setScrapedProductImage(data.productImage);
     if (Array.isArray(data.reviews)) {
-      setScrapedReviews(data.reviews);
-      lastScrapedReviewsRef.current = data.reviews;
+      const validReviews = filterSubstantiveReviews(data.reviews);
+      setScrapedReviews(validReviews);
+      lastScrapedReviewsRef.current = validReviews;
     }
     if (data.hasError !== undefined) setScrapedHasError(!!data.hasError);
     if (data.errorMessage !== undefined) setScrapedErrorMessage(data.errorMessage);
@@ -1538,9 +1615,20 @@ export default function PopupPage() {
       detectedPlatform,
       scrapeMetadata?.url || activeTabUrlRef.current,
     );
-    const analysisReviews = Array.isArray(reviewsToAnalyze) && reviewsToAnalyze.length > 0
+    const requestedReviews = Array.isArray(reviewsToAnalyze) && reviewsToAnalyze.length > 0
       ? reviewsToAnalyze
       : scrapedReviews.length > 0 ? scrapedReviews : lastScrapedReviewsRef.current;
+    const sourceReviews = filterSubstantiveReviews(requestedReviews);
+    const preparedAnalysis = await prepareReviewsForAnalysis(sourceReviews);
+    const analysisReviews = preparedAnalysis.reviews;
+    const skippedReviews = preparedAnalysis.skippedReviews;
+    if (analysisReviews.length === 0) {
+      setAnalysisStatus('idle');
+      setAnalysisError(
+        `No supported-language reviews were available for analysis. ${skippedReviews.length} review(s) were skipped.`,
+      );
+      return;
+    }
     const analysisPlatformLabel = scrapeMetadata?.platform
       ? getPlatformLabel(scrapeMetadata.platform)
       : platformLabel;
@@ -1563,7 +1651,7 @@ export default function PopupPage() {
     setSaveAnalysisError('');
     setAnalysisError('');
     setIsSavingAnalysis(false);
-    setScrapedReviews(analysisReviews);
+    setScrapedReviews(sourceReviews);
     if (!preserveCurrentTopics) {
       setTopicAnalysis(null);
       setEmotionData(null);
@@ -1585,6 +1673,7 @@ export default function PopupPage() {
         category: scrapeMetadata?.category ?? scrapedCategory,
         productImage: scrapeMetadata?.productImage ?? scrapedProductImage,
         reviews: analysisReviews,
+        skippedReviews,
         force: Boolean(scrapeMetadata?.rescanRequestId),
       };
 
@@ -1678,6 +1767,7 @@ export default function PopupPage() {
         preserveCurrentTopics ? topicAnalysis : null,
         preserveCurrentTopics ? 'ready' : ENABLE_TOPIC_ANALYSIS ? 'pending' : 'disabled',
         explanationResults,
+        skippedReviews,
       );
       setEmotionData(nextEmotionData);
       setAnalysisStatus('completed');
@@ -1696,6 +1786,7 @@ export default function PopupPage() {
         dominantEmotion: nextEmotionData.dominantEmotion.label,
         percentage: `${nextEmotionData.dominantEmotion.percentage}%`,
         reviews: analysisReviews,
+        skippedReviews,
         reviewAnalysis: explanationResults.map((result, index) => ({
           review: analysisReviews[index],
           category: result.category,
@@ -1739,6 +1830,7 @@ export default function PopupPage() {
           topicPayload,
           'ready',
           explanationResults,
+          skippedReviews,
         );
         if (analysisRevisionRef.current !== analysisRevision) return;
         analysisRevisionRef.current += 1;
@@ -1770,6 +1862,7 @@ export default function PopupPage() {
             topicAnalysis,
             'ready',
             explanationResults,
+            skippedReviews,
           );
           analysisRevisionRef.current += 1;
           setTopicAnalysis(topicAnalysis);
@@ -1792,6 +1885,7 @@ export default function PopupPage() {
           null,
           'unavailable',
           explanationResults,
+          skippedReviews,
         );
         setEmotionData(unavailableData);
         setCurrentAnalysisRecord({ ...record, topicAnalysis: null, emotionData: unavailableData });
@@ -1868,20 +1962,33 @@ export default function PopupPage() {
       throw new Error('This saved analysis is missing per-review topic results and cannot be incrementally refreshed.');
     }
 
-    const newReviewTexts = newReviews.map(getReviewText);
+    const preparedNewReviews = await prepareReviewsForAnalysis(newReviews);
+    const analysisReviews = preparedNewReviews.reviews;
+    const skippedReviews = preparedNewReviews.skippedReviews;
+    if (analysisReviews.length === 0) {
+      return {
+        success: true,
+        newReviewCount: 0,
+        skippedReviewCount: skippedReviews.length,
+        skippedReviews,
+        message: `${skippedReviews.length} new review(s) skipped because the language was unsupported; none were analyzed.`,
+      };
+    }
+
+    const newReviewTexts = analysisReviews.map(getReviewText);
     if (newReviewTexts.some((text) => !text.trim())) {
       throw new Error('A newly fetched review did not contain usable review text.');
     }
 
     const svmPayload = await requestSvmBatch(newReviewTexts, { platform: savedItem.platform });
     if (!Array.isArray(svmPayload.predictions) ||
-      svmPayload.predictions.length !== newReviews.length ||
+      svmPayload.predictions.length !== analysisReviews.length ||
       svmPayload.predictions.some((category) => !VALID_CATEGORIES.has(category))) {
       throw new Error(svmPayload.error || 'SVM analysis failed for new reviews.');
     }
 
     const newExplanationResults = Array.isArray(svmPayload.results) &&
-      svmPayload.results.length === newReviews.length
+      svmPayload.results.length === analysisReviews.length
       ? svmPayload.results.map((result, index) => ({
           category: result?.category === svmPayload.predictions[index]
             ? result.category
@@ -1917,17 +2024,19 @@ export default function PopupPage() {
       }
     }
 
+    const alignedAnalysisBatch = alignSavedAnalysisRefreshBatch(analysisReviews, svmPayload.predictions);
     const newEmotionData = buildEmotionData(
-      newReviews,
-      svmPayload.predictions,
+      alignedAnalysisBatch.reviews,
+      alignedAnalysisBatch.predictions,
       getPlatformLabel(savedItem.platform),
       newTopicPayload,
       ENABLE_TOPIC_ANALYSIS ? 'ready' : 'disabled',
       newExplanationResults,
+      skippedReviews,
     );
-    const combinedReviews = [...savedReviews, ...newReviews];
+    const combinedReviews = [...savedReviews, ...analysisReviews];
     const combinedReviewAnalysis = [...savedReviewAnalysis, ...newExplanationResults.map((result, index) => ({
-      review: newReviews[index],
+      review: analysisReviews[index],
       category: result.category,
       emotionDrivers: result.emotionDrivers,
       contextualResolution: result.contextualResolution,
@@ -1937,7 +2046,7 @@ export default function PopupPage() {
       ...(hasSavedTopicResults
         ? savedItem.topicAnalysis.results.map((result, index) => ({ ...result, reviewIndex: index }))
         : savedReviews.map((_, index) => ({ reviewIndex: index, topics: [] }))),
-      ...(newTopicPayload?.results || newReviews.map((_, index) => ({
+      ...(newTopicPayload?.results || analysisReviews.map((_, index) => ({
         reviewIndex: savedReviews.length + index,
         topics: [],
       }))).map((result, index) => ({ ...result, reviewIndex: savedReviews.length + index })),
@@ -2018,6 +2127,10 @@ export default function PopupPage() {
         : combinedTopicAnalysis ? (savedItem.emotionData?.topicStatus || 'ready') : 'disabled',
       topicModel: combinedTopicAnalysis?.model || null,
       topicThreshold: combinedTopicAnalysis?.threshold ?? null,
+      skippedReviews: [
+        ...(Array.isArray(savedItem.skippedReviews) ? savedItem.skippedReviews : []),
+        ...skippedReviews,
+      ],
       quotes: combinedQuotes,
     };
     const pageKey = getPageKey(savedItem.platform, savedItem.page_url) || savedItem.pageKey;
@@ -2027,6 +2140,7 @@ export default function PopupPage() {
       pageKey,
       reviews: combinedReviews,
       reviewCount: combinedReviews.length,
+      skippedReviews: mergedEmotionData.skippedReviews,
       reviewAnalysis: combinedReviewAnalysis,
       topicAnalysis: combinedTopicAnalysis,
       emotionData: mergedEmotionData,
@@ -2051,8 +2165,11 @@ export default function PopupPage() {
 
     return {
       success: true,
-      newReviewCount: newReviews.length,
-      message: `${newReviews.length} new reviews added`,
+      newReviewCount: analysisReviews.length,
+      skippedReviewCount: skippedReviews.length,
+      message: `${analysisReviews.length} new review(s) analyzed${skippedReviews.length
+        ? `; ${skippedReviews.length} skipped because the language was unsupported`
+        : ''}`,
       record: mergedRecord,
     };
   };

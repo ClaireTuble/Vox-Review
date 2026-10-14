@@ -117,6 +117,8 @@ test("authorized Super Admin can still retrieve user history and activity", asyn
       platform: "Steam",
       activity_type: "analysis",
     }]);
+    assert.equal(Object.hasOwn(body.users[0].activities[0], "product_title"), false);
+    assert.equal(Object.hasOwn(body.users[0].activities[0], "product_url"), false);
   } finally {
     server.close();
     await once(server, "close");

@@ -55,3 +55,11 @@ export function getNewReviews(existingReviews, fetchedReviews) {
     return true;
   });
 }
+
+export function alignSavedAnalysisRefreshBatch(reviews, predictions) {
+  if (!Array.isArray(reviews) || !Array.isArray(predictions) || reviews.length !== predictions.length) {
+    throw new Error('Saved-analysis review and emotion results are not aligned.');
+  }
+
+  return { reviews, predictions };
+}

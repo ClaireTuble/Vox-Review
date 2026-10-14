@@ -235,6 +235,131 @@ test('includes the source platform in the SVM request', async () => {
   assert.equal(requestedPlatform, 'shopee');
 });
 
+test('filters unsupported languages before both analysis requests and records skipped status', async () => {
+  const japanese = 'この商品はとても良いです。使いやすくて満足しています。品質も高く、また購入したいです。';
+  const chinese = '这个产品质量很好，使用方便，非常满意。这个产品质量很好，使用方便，非常满意。';
+  const acceptedReview = {
+    id: 'english-1',
+    text: 'The product is great and easy to use. I am very happy with it.',
+  };
+  let svmReviews;
+  let topicReviews;
+  const coordinator = createAnalysisJobCoordinator({
+    requestSvm: async (reviews) => {
+      svmReviews = reviews;
+      return { predictions: [1] };
+    },
+    requestTopics: async (reviews) => {
+      topicReviews = reviews;
+      return { results: [{ reviewIndex: 0, topics: [{ label: 'Quality', score: 0.9 }] }] };
+    },
+  });
+
+  const result = await coordinator.start({
+    ...input(),
+    reviews: [
+      acceptedReview,
+      { id: 'japanese-1', text: japanese },
+      { id: 'chinese-1', text: chinese },
+    ],
+  });
+
+  assert.deepEqual(svmReviews, [acceptedReview.text]);
+  assert.deepEqual(topicReviews, [acceptedReview.text]);
+  assert.deepEqual(result.state.reviews, [acceptedReview]);
+  assert.equal(result.state.svmResult.predictions.length, 1);
+  assert.equal(result.state.topicResult.results.length, 1);
+  assert.deepEqual(
+    result.state.skippedReviews.map(({ status, reason }) => ({ status, reason })),
+    [
+      { status: 'skipped', reason: 'unsupported_language' },
+      { status: 'skipped', reason: 'unsupported_language' },
+    ],
+  );
+  assert.equal(calculateReviewPriorities([
+    { text: acceptedReview.text, category: result.state.svmResult.predictions[0] },
+  ]).length, 1);
+});
+
+test('reuses completed results while refreshing skipped reviews for the current input', async () => {
+  const supportedReview = { id: 'en-1', text: 'The product is great and easy to use. I am very happy with it.' };
+  const priorUnsupportedReview = {
+    id: 'ja-1',
+    text: 'この商品はとても良いです。使いやすくて満足しています。品質も高く、また購入したいです。',
+  };
+  const currentUnsupportedReview = {
+    id: 'zh-1',
+    text: '这个产品质量很好，使用方便，非常满意。这个产品质量很好，使用方便，非常满意。',
+  };
+  const page = input();
+  await setActiveAnalysisState({
+    ...page,
+    reviews: [supportedReview],
+    skippedReviews: [{
+      review: priorUnsupportedReview,
+      status: 'skipped',
+      reason: 'unsupported_language',
+      detectedLanguage: 'ja',
+      confidence: 1,
+    }],
+    status: 'completed',
+    svmResult: { predictions: [1] },
+    topicResult: { results: [{ reviewIndex: 0, topics: [{ label: 'Quality', score: 0.9 }] }] },
+  });
+  let svmCalls = 0;
+  let topicCalls = 0;
+  const coordinator = createAnalysisJobCoordinator({
+    requestSvm: async () => { svmCalls += 1; return { predictions: [2] }; },
+    requestTopics: async () => { topicCalls += 1; return { results: [] }; },
+  });
+
+  const result = await coordinator.start({
+    ...page,
+    reviews: [supportedReview, currentUnsupportedReview],
+  });
+  const persisted = await getActiveAnalysisForPage(page.pageKey);
+
+  assert.equal(result.started, false);
+  assert.deepEqual(result.state.reviews, [supportedReview]);
+  assert.deepEqual(result.state.svmResult, { predictions: [1] });
+  assert.deepEqual(result.state.topicResult.results[0].topics, [{ label: 'Quality', score: 0.9 }]);
+  assert.deepEqual(result.state.skippedReviews.map(({ review, status, reason }) => ({
+    review,
+    status,
+    reason,
+  })), [{
+    review: currentUnsupportedReview,
+    status: 'skipped',
+    reason: 'unsupported_language',
+  }]);
+  assert.deepEqual(persisted.skippedReviews, result.state.skippedReviews);
+  assert.equal(svmCalls, 0);
+  assert.equal(topicCalls, 0);
+});
+
+test('does not request either analysis when all reviews are confidently unsupported', async () => {
+  let svmCalls = 0;
+  let topicCalls = 0;
+  const coordinator = createAnalysisJobCoordinator({
+    requestSvm: async () => { svmCalls += 1; return { predictions: [] }; },
+    requestTopics: async () => { topicCalls += 1; return { results: [] }; },
+  });
+
+  const result = await coordinator.start({
+    ...input('https://shopee.ph/product/123/789'),
+    reviews: [
+      { text: 'この商品はとても良いです。使いやすくて満足しています。品質も高く、また購入したいです。' },
+      { text: '这个产品质量很好，使用方便，非常满意。这个产品质量很好，使用方便，非常满意。' },
+    ],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /2 review\(s\) were skipped/);
+  assert.equal(result.skippedReviews.length, 2);
+  assert.equal(svmCalls, 0);
+  assert.equal(topicCalls, 0);
+});
+
 test('only an explicit Rescan replaces a completed page result', async () => {
   let svmCalls = 0;
   const coordinator = createAnalysisJobCoordinator({
