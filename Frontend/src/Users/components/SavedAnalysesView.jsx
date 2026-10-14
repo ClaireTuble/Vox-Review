@@ -7,6 +7,7 @@ import {
   SAVED_PLATFORM_OPTIONS,
   toggleSavedFilterSelection,
 } from '../utils/savedAnalysisFilters.js';
+import { getSavedAnalysisSummary } from '../utils/savedAnalysisSummary.js';
 import '../css/SavedAnalysesView.css';
 import '../css/ExtensionConfirmationModal.css';
 
@@ -397,7 +398,9 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
             <span>No saved analyses found.</span>
           </div>
         ) : (
-            filteredItems.map((item) => (
+          filteredItems.map((item) => {
+            const summary = getSavedAnalysisSummary(item);
+            return (
             <div key={getPageKey(item.platform, item.page_url) || item.pageKey || item.id} className="saved-card" onClick={() => onSelectSaved(item)}>
               <div className="saved-card-info">
                 <span className="saved-card-title">{item.targetTitle}</span>
@@ -482,10 +485,15 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                 >
                   <Trash2 size={13} />
                 </button>
-                <span className="saved-score-tag">{item.dominantEmotion} ({item.percentage})</span>
+                <span className="saved-emotion-summary">
+                  {summary
+                    ? `${summary.dominantEmotion} (${summary.percentage})`
+                    : '—'}
+                </span>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
 
