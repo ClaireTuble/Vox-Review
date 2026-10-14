@@ -365,14 +365,14 @@ html.dark .saved-clear-all-btn:hover:not(:disabled) .saved-clear-icon {
   background: rgba(239, 68, 68, 0.12);
 }
 
-.saved-score-tag {
+.saved-emotion-summary {
   padding: 2px 7px;
   border-radius: 6px;
   font-size: 10px;
   font-weight: 700;
-  background: var(--status-success-bg);
-  color: var(--status-success-text);
-  border: 1px solid var(--status-success-border);
+  background: var(--bg-stage);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-card);
   white-space: nowrap;
   flex-shrink: 0;
 }

@@ -3,6 +3,9 @@
   "name": "VoxReview",
   "version": "1.0.0",
   "description": "AI-powered review analysis extension",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
   "action": {
     "default_title": "VoxReview",
     "default_popup": "popup.html"
