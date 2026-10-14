@@ -82,7 +82,7 @@ export default function SuperAdminLoginPage() {
                                             id="sa-email"
                                             type="email"
                                             className="sa-input"
-                                            placeholder="admin@example.com"
+                                            placeholder="Enter your email address"
                                             value={email}
                                             onChange={e => setEmail(e.target.value)}
                                             autoComplete="email"
@@ -99,7 +99,7 @@ export default function SuperAdminLoginPage() {
                                             id="sa-password"
                                             type={showPass ? 'text' : 'password'}
                                             className="sa-input"
-                                            placeholder="••••••••••••"
+                                            placeholder="Enter your password"
                                             value={password}
                                             onChange={e => setPassword(e.target.value)}
                                             autoComplete="current-password"

@@ -14,6 +14,7 @@ import {
   getTopicWorkerFailureDetails,
   getSafeTopicRequestMetadata,
   sanitizeTopicWorkerStderr,
+  createTopicWorkerExitError,
 } from "../utils/topicWorkerDiagnostics.js";
 
 const controllerDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -211,7 +212,11 @@ function stopTopicWorker(error, workerExitCode = topicWorker?.exitCode ?? null) 
   topicWorkerBuffer = "";
   topicWorkerRequestId = null;
   isProcessingTopic = false;
-  if (activeTopicDiagnostics) activeTopicDiagnostics.workerExitCode = workerExitCode;
+  if (activeTopicDiagnostics) {
+    activeTopicDiagnostics.workerExitCode = workerExitCode;
+    activeTopicDiagnostics.workerExitSignal = worker?.signalCode || error?.signal || null;
+    activeTopicDiagnostics.workerStopReason = error?.code || "worker_stopped";
+  }
   const pendingRequests = [...pendingTopicRequests.values()];
   pendingTopicRequests.clear();
   isStoppingTopicWorker = true;
@@ -351,6 +356,10 @@ function ensureTopicWorker(requestId) {
       requestId: workerRequestId,
       workerPid: worker.pid ?? null,
       workerExitCode: worker.exitCode,
+      workerExitSignal: worker.signalCode,
+      workerElapsedMs: diagnostics?.workerStartedAt
+        ? Date.now() - diagnostics.workerStartedAt
+        : null,
       errorMessage: safeTopicDiagnosticText(error?.message || error, diagnostics?.reviews || []),
     });
     stopTopicWorker(error);
@@ -358,7 +367,11 @@ function ensureTopicWorker(requestId) {
   worker.on("exit", (code, signal) => {
     const workerRequestId = topicWorkerRequestIds.get(worker) ?? requestId;
     const diagnostics = topicRequestDiagnostics.get(workerRequestId) || activeTopicDiagnostics;
-    if (diagnostics) diagnostics.workerExitCode = code;
+    if (diagnostics) {
+      diagnostics.workerExitCode = code;
+      diagnostics.workerExitSignal = signal;
+      diagnostics.workerStopReason ||= signal ? "signal_termination" : "process_exit";
+    }
     console.log("[TOPIC WORKER EXIT]", {
       requestId: workerRequestId,
       clientRequestId: diagnostics?.clientRequestId ?? null,
@@ -366,19 +379,29 @@ function ensureTopicWorker(requestId) {
       workerPid: worker.pid ?? null,
       workerExitCode: code,
       signal,
+      terminationReason: diagnostics?.workerStopReason || (signal ? "signal_termination" : "process_exit"),
+      elapsedMs: diagnostics?.workerStartedAt
+        ? Date.now() - diagnostics.workerStartedAt
+        : null,
     });
   });
-  worker.on("close", (code) => {
+  worker.on("close", (code, signal) => {
     const workerRequestId = topicWorkerRequestIds.get(worker) ?? requestId;
     const diagnostics = topicRequestDiagnostics.get(workerRequestId) || activeTopicDiagnostics;
+    const exitSignal = signal || worker.signalCode || null;
     console.log("[TOPIC WORKER CLOSE]", {
       requestId: workerRequestId,
       workerPid: worker.pid ?? null,
       workerExitCode: code,
-      signalCode: worker.signalCode,
+      signalCode: exitSignal,
+      terminationReason: diagnostics?.workerStopReason ||
+        (exitSignal ? "signal_termination" : code === 0 ? "normal_exit" : "process_exit"),
+      elapsedMs: diagnostics?.workerStartedAt
+        ? Date.now() - diagnostics.workerStartedAt
+        : null,
     });
     if (topicWorker === worker) {
-      stopTopicWorker(new Error(`Topic worker exited with code ${code}`), code);
+      stopTopicWorker(createTopicWorkerExitError(code, exitSignal), code);
     }
   });
   return worker;
@@ -510,8 +533,10 @@ function processNextTopicRequest() {
       requestContext: diagnostics.requestContext,
       reviewCount: reviews.length,
       timeoutMs: topicProcessTimeoutMs,
+      terminationReason: "timeout",
       elapsedMs: Date.now() - diagnostics.workerStartedAt,
       workerPid: worker?.pid ?? null,
+      workerExitSignal: worker?.signalCode ?? null,
       workerProcessAlive: Boolean(worker && worker.exitCode === null && worker.signalCode === null),
       stdoutBytesReceived: diagnostics.stdoutBytesReceived,
     });
@@ -673,6 +698,8 @@ export async function predictTopics(req, res) {
     requestStartedAt,
     workerStartedAt: null,
     workerExitCode: null,
+    workerExitSignal: null,
+    workerStopReason: null,
     stdoutValidJson: false,
     resultCount: null,
     assignmentCount: null,
@@ -891,6 +918,11 @@ export async function predictTopics(req, res) {
       errorCode: failure.code,
       stderrExcerpt,
       workerExitCode: diagnostics.workerExitCode,
+      workerExitSignal: diagnostics.workerExitSignal,
+      workerStopReason: diagnostics.workerStopReason,
+      workerElapsedMs: diagnostics.workerStartedAt
+        ? Date.now() - diagnostics.workerStartedAt
+        : null,
       errorType: failure.code === "TOPIC_WORKER_TIMEOUT"
         ? "TimeoutError"
         : error?.name === "TypeError" ? "TypeError" : "Error",

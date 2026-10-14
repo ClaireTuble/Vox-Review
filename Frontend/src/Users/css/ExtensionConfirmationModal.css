@@ -16,6 +16,7 @@
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
   animation: extensionModalFadeIn 160ms ease-out;
+  overflow-y: auto;
 }
 
 /* ─── Card ────────────────────────────────────────────────────────────────── */
@@ -36,6 +37,31 @@
   box-shadow: var(--shadow-popup, 0 10px 30px rgba(0, 0, 0, 0.15));
   text-align: left;
   animation: extensionModalRiseIn 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.verification-modal-card {
+  min-width: 0;
+}
+
+.verification-code-inputs {
+  width: 100%;
+  min-width: 0;
+}
+
+.verification-countdown-row {
+  gap: 8px;
+}
+
+@media (max-width: 360px) {
+  .verification-countdown-row {
+    flex-wrap: wrap;
+    justify-content: flex-start !important;
+  }
+
+  .verification-countdown-row > * {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
 }
 
 /* Danger tokens — dark mode */

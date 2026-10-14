@@ -38,3 +38,25 @@ export async function signOutMatchingLocalSession({ userId, getSession, signOut 
   }
   return { cleared: true, reason: null };
 }
+
+export function getRegularUserAfterAuthSync(event, currentUser, getCurrentUser) {
+  const { action, userId } = event?.detail || {};
+  if (typeof userId !== 'string' || !userId) return { handled: false, user: currentUser };
+
+  if (action === 'signed_out') {
+    if (currentUser?.id && currentUser.id !== userId) {
+      return { handled: false, user: currentUser };
+    }
+    const user = getCurrentUser();
+    if (user?.id && user.id !== userId) return { handled: false, user: currentUser };
+    return { handled: true, user };
+  }
+
+  if (action === 'session_updated') {
+    const user = getCurrentUser();
+    if (user?.id !== userId) return { handled: false, user: currentUser };
+    return { handled: true, user };
+  }
+
+  return { handled: false, user: currentUser };
+}

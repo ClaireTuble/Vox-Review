@@ -27,7 +27,11 @@ import authService, { normalizeAuthErrorMessage } from '../../services/authServi
 import ProfileChangesConfirmationModal from './ProfileChangesConfirmationModal.jsx';
 import RemoveAvatarConfirmationModal from './RemoveAvatarConfirmationModal.jsx';
 import VerificationCodeModal from './VerificationCodeModal.jsx';
-import { getProfileSaveChanges, persistProfileDraft } from '../utils/profileSave.js';
+import {
+  getProfileDraftValidationError,
+  getProfileSaveChanges,
+  persistProfileDraft,
+} from '../utils/profileSave.js';
 import '../css/ProfileView.css';
 
 export default function ProfileView({
@@ -235,8 +239,9 @@ export default function ProfileView({
 
   const handleSaveProfile = (e) => {
     e.preventDefault();
-    if (!firstName.trim() || !lastName.trim()) {
-      triggerToast('Please fill out first name and last name.', 'error');
+    const validationError = getProfileDraftValidationError({ username, firstName });
+    if (validationError) {
+      triggerToast(validationError, 'error');
       return;
     }
 
@@ -695,7 +700,7 @@ export default function ProfileView({
               <span className="pf-section-hint">Update your account information below.</span>
             </div>
 
-            <form onSubmit={handleSaveProfile} className="pf-form">
+            <form onSubmit={handleSaveProfile} className="pf-form" noValidate>
 
               {/* Row 1: Username | Email Address */}
               <div className="pf-field-row">
@@ -707,7 +712,7 @@ export default function ProfileView({
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="username"
+                    placeholder="Choose a username"
                     required
                   />
                 </div>
@@ -719,7 +724,7 @@ export default function ProfileView({
                     type="email"
                     value={email}
                     readOnly
-                    placeholder="user@example.com"
+                    placeholder="Enter your email address"
                   />
                 </div>
               </div>
@@ -734,20 +739,19 @@ export default function ProfileView({
                     type="text"
                     value={firstName}
                     onChange={(e) => setFirstName(e.target.value)}
-                    placeholder="First Name"
+                    placeholder="Enter your first name"
                     required
                   />
                 </div>
                 <div className="pf-field">
-                  <label className="pf-label" htmlFor="edit-lastname">Last Name</label>
+                  <label className="pf-label" htmlFor="edit-lastname">Last Name (Optional)</label>
                   <input
                     id="edit-lastname"
                     className="pf-input"
                     type="text"
                     value={lastName}
                     onChange={(e) => setLastName(e.target.value)}
-                    placeholder="Last Name"
-                    required
+                    placeholder="Enter your last name"
                   />
                 </div>
               </div>
@@ -836,7 +840,7 @@ export default function ProfileView({
                 <div className="password-input-wrap">
                   <input
                     type={showCurrentPass ? 'text' : 'password'}
-                    placeholder="••••••••"
+                    placeholder="Enter your password"
                     value={currentPass}
                     onChange={(e) => setCurrentPass(e.target.value)}
                   />
@@ -856,7 +860,7 @@ export default function ProfileView({
                 <div className="password-input-wrap">
                   <input
                     type={showNewPass ? 'text' : 'password'}
-                    placeholder="••••••••"
+                    placeholder="Enter your new password"
                     value={newPass}
                     onChange={(e) => setNewPass(e.target.value)}
                     required
@@ -877,7 +881,7 @@ export default function ProfileView({
                 <div className="password-input-wrap">
                   <input
                     type={showConfirmPass ? 'text' : 'password'}
-                    placeholder="••••••••"
+                    placeholder="Re-enter your password"
                     value={confirmPass}
                     onChange={(e) => setConfirmPass(e.target.value)}
                     required

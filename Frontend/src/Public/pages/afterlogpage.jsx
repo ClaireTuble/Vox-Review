@@ -1,8 +1,10 @@
 import { Navigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { Store, MapPin, Smartphone, Gamepad2, ExternalLink, CheckCircle2, Globe, FileText, Puzzle, Sparkles, Info } from 'lucide-react';
 import AuthNavigation from '../components/AuthNavigation.jsx';
 import { useVoxLogo } from '../../utils/useVoxLogo.js';
 import authService from '../../services/authService.js';
+import { getRegularUserAfterAuthSync } from '../../services/authSessionSync.js';
 import '../css/AfterLogPage.css';
 
 const SUPPORTED_WEBSITES = [
@@ -72,13 +74,24 @@ const USAGE_STEPS = [
 ];
 
 export default function AfterLogPage() {
-  const isAuthenticated = authService.isAuthenticated();
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
+  const [currentUser, setCurrentUser] = useState(() => authService.getCurrentUser());
   const logo = useVoxLogo();
+
+  useEffect(() => {
+    const handleAuthSync = (event) => {
+      const result = getRegularUserAfterAuthSync(
+        event,
+        currentUser,
+        () => authService.getCurrentUser(),
+      );
+      if (result.handled) setCurrentUser(result.user);
+    };
+
+    window.addEventListener('voxreview_auth_sync', handleAuthSync);
+    return () => window.removeEventListener('voxreview_auth_sync', handleAuthSync);
+  }, [currentUser]);
+
+  if (!currentUser) return <Navigate to="/login" replace />;
 
   return (
     <div className="afterlog-container">

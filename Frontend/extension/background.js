@@ -4,6 +4,7 @@ import { createActivityReporter } from "../src/services/activityReporter.js";
 import { requestSvmBatch } from "../src/Users/utils/svmRequest.js";
 import { supabaseAnonKey, supabaseUrl } from "../src/lib/supabase.js";
 import { revokePendingAuthSessions } from "./authSessionRevocation.js";
+import { removeMatchingWebsiteLogoutSession } from "./websiteLogoutSync.js";
 import {
   createTopicAnalysisRequestCoordinator,
   createTopicRequestTimeout,
@@ -626,21 +627,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
-    chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY])
-      .then(async (result) => {
-        const session = result?.[EXTENSION_USER_AUTH_STORAGE_KEY];
-        if (session?.user?.id !== userId) return false;
-        await queueAuthLogout(session);
-        await markAuthUserLoggedOut(userId);
-        const current = await chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY]);
-        if (current?.[EXTENSION_USER_AUTH_STORAGE_KEY]?.user?.id === userId) {
-          await chrome.storage.local.remove([EXTENSION_USER_AUTH_STORAGE_KEY]);
-        }
-        return true;
-      })
+    removeMatchingWebsiteLogoutSession({
+      storage: chrome.storage.local,
+      userId,
+      queueAuthLogout,
+      markAuthUserLoggedOut,
+    })
       .then((matchedSession) => {
         if (matchedSession) void processPendingAuthLogouts();
-        sendResponse({ ok: true });
+        sendResponse({ ok: matchedSession });
       })
       .catch((error) => {
         console.warn("Could not queue website sign-out for provider revocation:", {

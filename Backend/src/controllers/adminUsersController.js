@@ -3,6 +3,7 @@ import {
   createServiceRoleClient,
   respondIfServiceRoleUnavailable,
 } from "../utils/serviceRoleSupabase.js";
+import { resolveAdminUserDisplayName } from "../utils/adminUserDisplayName.js";
 
 export function createGetAdminUsers({
   createServiceRoleClientImpl = createServiceRoleClient,
@@ -43,7 +44,7 @@ async function getAdminUsersWithDependencies(req, res, {
 
     const superAdminAuthIds = new Set();
     const authUserIds = new Set();
-    const authUserMetaMap = new Map();   // auth_user_id → { fullName, username }
+    const authUserMetaMap = new Map();
 
     if (req.authUser?.id) {
       superAdminAuthIds.add(req.authUser.id);
@@ -59,9 +60,8 @@ async function getAdminUsersWithDependencies(req, res, {
               superAdminAuthIds.add(u.id);
             }
             const meta = u.user_metadata || u.raw_user_meta_data || {};
-            const fullName = [meta.firstName, meta.lastName].filter(Boolean).join(" ").trim() || meta.username || "";
             const username = meta.username || u.email?.split("@")[0] || "";
-            authUserMetaMap.set(u.id, { fullName, username });
+            authUserMetaMap.set(u.id, { userMetadata: meta, username });
           }
         }
       } catch (authListErr) {
@@ -145,7 +145,11 @@ async function getAdminUsersWithDependencies(req, res, {
 
       return {
         user_id: user.user_id,
-        full_name: user.full_name || authMeta.fullName || user.email?.split("@")[0] || "",
+        full_name: resolveAdminUserDisplayName({
+          publicFullName: user.full_name,
+          userMetadata: authMeta.userMetadata,
+          email: user.email,
+        }),
         username: authMeta.username || user.email?.split("@")[0] || "",
         email: user.email || "",
         role: user.role || "user",

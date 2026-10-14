@@ -7,6 +7,7 @@
 
 /* ── Root & Page Shell ─────────────────────────────────── */
 .ap-root {
+  height: 100vh;
   min-height: 100vh;
   width: 100%;
   display: flex;
@@ -15,7 +16,9 @@
   background: #F8FAFC;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   position: relative;
+  padding: 24px;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 /* Page ambient glows — matches landing page glow-purple & glow-blue */
@@ -64,12 +67,14 @@
   z-index: 1;
   width: 100%;
   max-width: 1080px;
-  min-height: 640px;
-  margin: 24px;
+  height: 640px;
+  max-height: 100%;
+  margin: 0;
   display: flex;
   border-radius: 24px;
   overflow: hidden;
   background: #FFFFFF;
+  box-sizing: border-box;
   box-shadow:
     0 0 0 1px rgba(226, 232, 240, 0.9),
     0 32px 64px -12px rgba(15, 23, 42, 0.12),
@@ -81,28 +86,59 @@
 .ap-form-panel {
   flex: 1;
   order: 1;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 48px 44px;
+  flex-direction: column;
+  padding: 36px 44px;
   background: #FFFFFF;
   position: relative;
   z-index: 2;
+  overflow-y: hidden;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
   transition: transform 0.55s cubic-bezier(0.65, 0, 0.35, 1),
     opacity 0.4s ease;
 }
 
+.ap-form-panel::-webkit-scrollbar {
+  width: 5px;
+}
+
+.ap-form-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ap-form-panel::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.ap-form-panel::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.ap-form-scroll-content {
+  width: 100%;
+  max-width: 380px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: min-content;
+}
+
 .ap-back-home {
-  position: absolute;
-  top: 20px;
-  left: 24px;
-  z-index: 3;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: calc(100% - 48px);
+  margin-bottom: 20px;
+  align-self: flex-start;
+  max-width: 100%;
   box-sizing: border-box;
-  padding: 6px 10px;
+  padding: 6px 12px;
   border: 1px solid #bfdbfe;
   border-radius: 999px;
   background: #f8fbff;
@@ -111,6 +147,7 @@
   font-weight: 600;
   text-decoration: none;
   transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.12s ease;
+  flex-shrink: 0;
 }
 
 .ap-back-home:hover {
@@ -152,6 +189,7 @@ html.dark .ap-back-home:focus-visible {
 .ap-brand-panel {
   flex: 1.05;
   order: 2;
+  height: 100%;
   position: relative;
   overflow: hidden;
   /* Blue gradient matching landing page CTA blue */
@@ -167,63 +205,57 @@ html.dark .ap-back-home:focus-visible {
 /* Register mode — swap order */
 .ap-mode-register .ap-form-panel {
   order: 2;
+  overflow-y: auto;
 }
 
 .ap-mode-register .ap-brand-panel {
   order: 1;
 }
 
-.ap-mode-register .ap-form-header {
-  margin-top: 36px;
-}
-
 /* ── Forms Track ───────────────────────────────────────── */
 .ap-forms-track {
   width: 100%;
-  max-width: 380px;
   position: relative;
-  min-height: 560px;
 }
 
 /* ── Form Slides ───────────────────────────────────────── */
 .ap-form-slide {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
   transition:
-    opacity 0.42s cubic-bezier(0.65, 0, 0.35, 1),
-    transform 0.42s cubic-bezier(0.65, 0, 0.35, 1),
-    visibility 0s linear 0.42s;
+    opacity 0.35s cubic-bezier(0.65, 0, 0.35, 1),
+    transform 0.35s cubic-bezier(0.65, 0, 0.35, 1),
+    visibility 0s linear 0.35s;
   will-change: transform, opacity;
 }
 
 .ap-form-slide.ap-slide-active {
+  position: relative;
   opacity: 1;
-  transform: translateX(0) scale(1);
+  transform: translateX(0);
   visibility: visible;
   pointer-events: auto;
-  transition:
-    opacity 0.42s cubic-bezier(0.65, 0, 0.35, 1) 0.1s,
-    transform 0.42s cubic-bezier(0.65, 0, 0.35, 1) 0.1s,
-    visibility 0s linear 0s;
 }
 
 .ap-form-slide.ap-slide-hidden-right {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   opacity: 0;
-  transform: translateX(32px) scale(0.97);
+  transform: translateX(32px);
   visibility: hidden;
   pointer-events: none;
 }
 
 .ap-form-slide.ap-slide-hidden-left {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   opacity: 0;
-  transform: translateX(-32px) scale(0.97);
+  transform: translateX(-32px);
   visibility: hidden;
   pointer-events: none;
 }
-
 /* ── Form Body ─────────────────────────────────────────── */
 .ap-form-body {
   width: 100%;
@@ -312,16 +344,26 @@ html.dark .ap-back-home:focus-visible {
 /* Error banner */
 .ap-error {
   display: flex;
-  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  align-items: flex-start;
   gap: 8px;
   background: #FEF2F2;
   border: 1px solid #FECACA;
   color: #DC2626;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 500;
+  line-height: 1.45;
   border-radius: 10px;
-  padding: 9px 14px;
-  margin-bottom: 14px;
+  padding: 8px 12px;
+  margin: 0 0 14px;
+  overflow-wrap: anywhere;
+  animation: apToastIn 200ms ease-out;
+}
+
+.ap-error svg {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 /* Form fields */
@@ -816,10 +858,19 @@ html.dark .ap-back-home:focus-visible {
 
 /* ── Responsive ─────────────────────────────────────────── */
 @media (max-width: 768px) {
+  .ap-root {
+    height: auto;
+    min-height: 100vh;
+    padding: 0;
+    overflow: visible;
+  }
+
   .ap-container {
     flex-direction: column !important;
     margin: 0;
     border-radius: 0;
+    height: auto !important;
+    max-height: none !important;
     min-height: 100vh;
   }
 
@@ -827,12 +878,21 @@ html.dark .ap-back-home:focus-visible {
     order: 0 !important;
     flex: none;
     min-height: 220px;
+    height: auto;
   }
 
-  .ap-form-panel {
+  .ap-form-panel,
+  .ap-mode-register .ap-form-panel {
     order: 1 !important;
     flex: 1;
-    padding: 32px 24px;
+    height: auto;
+    max-height: none;
+    overflow-y: visible;
+    padding: 28px 20px;
+  }
+
+  .ap-form-scroll-content {
+    max-width: 100%;
   }
 
   .ap-forms-track {
@@ -864,6 +924,11 @@ html.dark .ap-back-home:focus-visible {
   }
 }
 
+@media (min-width: 769px) and (max-height: 680px) {
+  .ap-mode-login .ap-form-panel {
+    overflow-y: auto;
+  }
+}
 /* ── Success Toast Notification ──────────────────────────── */
 @keyframes apToastIn {
   from {
@@ -879,17 +944,20 @@ html.dark .ap-back-home:focus-visible {
 
 .ap-success-toast {
   display: flex;
+  box-sizing: border-box;
+  width: 100%;
   align-items: flex-start;
   gap: 10px;
   background: #ECFDF5;
   border: 1px solid #6EE7B7;
   border-radius: 10px;
   padding: 11px 13px;
-  margin-bottom: 4px;
+  margin: 0 0 14px;
   font-size: 12.5px;
   font-weight: 500;
   color: #065F46;
   line-height: 1.45;
+  overflow-wrap: anywhere;
   animation: apToastIn 280ms ease-out;
 }
 
@@ -908,4 +976,16 @@ html.dark .ap-back-home:focus-visible {
 .auth-form-row .flex-1 {
   flex: 1;
   min-width: 0;
+}
+
+@media (max-width: 480px) {
+  .ap-mode-register .ap-form-panel {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .ap-mode-register .auth-form-row {
+    flex-direction: column;
+    gap: 13px;
+  }
 }

@@ -11,12 +11,37 @@ import {
   isMatchingAuthUser,
   signOutMatchingLocalSession,
 } from './authSessionSync.js';
+import {
+  completeGoogleOAuthSession,
+  createGoogleOAuthSessionGate,
+} from './googleOAuthFlow.js';
 
 const USER_AUTH_STORAGE_KEY = 'user_auth_session';
 const SUPERADMIN_AUTH_STORAGE_KEY = 'superadmin_auth_session';
 const EXTENSION_USER_AUTH_STORAGE_KEY = 'voxreview_auth_session';
 const PENDING_AUTH_LOGOUTS_STORAGE_KEY = 'voxreview_pending_auth_logouts';
+const PENDING_GOOGLE_SIGN_IN_STORAGE_KEY = 'voxreview_google_sign_in_pending';
 let lastRegularUserId = null;
+let googleCallbackTask = null;
+
+function hasPendingGoogleSignIn() {
+  try {
+    return sessionStorage.getItem(PENDING_GOOGLE_SIGN_IN_STORAGE_KEY) === 'true';
+  } catch (error) {
+    console.warn('VoxReview: Could not read pending Google sign-in state.', error?.message || error);
+    return false;
+  }
+}
+
+function clearPendingGoogleSignIn() {
+  try {
+    sessionStorage.removeItem(PENDING_GOOGLE_SIGN_IN_STORAGE_KEY);
+  } catch (error) {
+    console.warn('VoxReview: Could not clear pending Google sign-in state.', error?.message || error);
+  }
+}
+
+const googleOAuthSessionGate = createGoogleOAuthSessionGate(hasPendingGoogleSignIn());
 
 function getStoredRegularUserId() {
   try {
@@ -118,10 +143,14 @@ function clearRegularUserSession(userId = lastRegularUserId || getStoredRegularU
   return null;
 }
 
-function persistRegularUserSession(session, { clearLogoutMarker = false } = {}) {
+function persistRegularUserSession(
+  session,
+  { clearLogoutMarker = false, verifiedOAuthSession = false } = {},
+) {
   if (!session || !session.user) {
     return clearRegularUserSession();
   }
+  if (!googleOAuthSessionGate.canPersistRegularUserSession(verifiedOAuthSession)) return null;
 
   const normalizedUser = normalizeSupabaseUser(session.user);
   const normalizedSession = {
@@ -135,6 +164,20 @@ function persistRegularUserSession(session, { clearLogoutMarker = false } = {}) 
   syncExtensionAuthSession(normalizedSession, normalizedUser.id, clearLogoutMarker);
 
   return normalizedSession;
+}
+
+async function clearFailedGoogleOAuthSession(userId) {
+  if (!userId) return;
+  const result = await signOutMatchingLocalSession({
+    userId,
+    getSession: () => supabase.auth.getSession(),
+    signOut: (options) => supabase.auth.signOut(options),
+  });
+  if (!result.cleared && result.reason !== 'identity_mismatch') {
+    console.warn('VoxReview: Could not clear the failed Google sign-in session.', {
+      reason: result.reason,
+    });
+  }
 }
 
 async function readRegularUserExtensionSession({ persistSession = true } = {}) {
@@ -392,6 +435,8 @@ supabase.auth.onAuthStateChange((event, session) => {
 
   if (event === 'SIGNED_OUT') {
     clearRegularUserSession(lastRegularUserId || getStoredRegularUserId());
+  } else if (!googleOAuthSessionGate.canPersistRegularUserSession()) {
+    return;
   } else if (event === 'INITIAL_SESSION' && !session) {
     localStorage.removeItem(USER_AUTH_STORAGE_KEY);
     lastRegularUserId = null;
@@ -528,16 +573,48 @@ export const authService = {
     const redirectTo = typeof window !== 'undefined'
       ? `${window.location.origin}/login`
       : undefined;
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: redirectTo ? { redirectTo } : undefined,
-    });
-
-    if (error) {
-      throw new Error(error.message || 'Google sign-in failed.');
+    googleOAuthSessionGate.block();
+    try {
+      sessionStorage.setItem(PENDING_GOOGLE_SIGN_IN_STORAGE_KEY, 'true');
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: redirectTo ? { redirectTo } : undefined,
+      });
+      if (error) throw new Error(error.message || 'Google sign-in failed.');
+      return { success: true, data };
+    } catch (error) {
+      clearPendingGoogleSignIn();
+      googleOAuthSessionGate.release();
+      throw error;
     }
+  },
 
-    return { success: true, data };
+  hasPendingGoogleSignIn,
+
+  isGoogleOAuthSessionBlocked: () => googleOAuthSessionGate.isBlocked(),
+
+  completeGoogleSignIn: (callbackUrl) => {
+    if (googleCallbackTask) return googleCallbackTask;
+    googleCallbackTask = googleOAuthSessionGate.run(() => completeGoogleOAuthSession({
+      supabaseClient: supabase,
+      callbackUrl,
+      hasPendingSignIn: hasPendingGoogleSignIn(),
+      persistSession: (session) => persistRegularUserSession(session, {
+        clearLogoutMarker: true,
+        verifiedOAuthSession: true,
+      }),
+      clearSession: clearFailedGoogleOAuthSession,
+    })).then((result) => {
+      clearPendingGoogleSignIn();
+      return result;
+    }).catch((error) => {
+      clearPendingGoogleSignIn();
+      googleOAuthSessionGate.release();
+      throw error;
+    }).finally(() => {
+      googleCallbackTask = null;
+    });
+    return googleCallbackTask;
   },
 
   signUp: async (email, password, extraProfile = {}) => {

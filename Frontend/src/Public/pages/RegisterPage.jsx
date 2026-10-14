@@ -206,7 +206,7 @@ export default function RegisterPage() {
                     id="reg-username"
                     type="text"
                     className="auth-input"
-                    placeholder="claire123"
+                    placeholder="Choose a username"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
                     required
@@ -226,7 +226,7 @@ export default function RegisterPage() {
                       id="reg-firstname"
                       type="text"
                       className="auth-input"
-                      placeholder="Claire"
+                      placeholder="Enter your first name"
                       value={firstName}
                       onChange={(e) => setFirstName(e.target.value)}
                       required
@@ -244,7 +244,7 @@ export default function RegisterPage() {
                       id="reg-lastname"
                       type="text"
                       className="auth-input"
-                      placeholder="Tuble"
+                      placeholder="Enter your last name"
                       value={lastName}
                       onChange={(e) => setLastName(e.target.value)}
                       required
@@ -263,7 +263,7 @@ export default function RegisterPage() {
                     id="reg-email"
                     type="email"
                     className="auth-input"
-                    placeholder="you@example.com"
+                    placeholder="Enter your email address"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
@@ -281,7 +281,7 @@ export default function RegisterPage() {
                     id="reg-password"
                     type={showPassword ? 'text' : 'password'}
                     className="auth-input"
-                    placeholder="••••••••"
+                    placeholder="Enter your password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
@@ -318,7 +318,7 @@ export default function RegisterPage() {
                     id="reg-confirm"
                     type={showConfirmPassword ? 'text' : 'password'}
                     className="auth-input"
-                    placeholder="••••••••"
+                    placeholder="Re-enter your password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     required

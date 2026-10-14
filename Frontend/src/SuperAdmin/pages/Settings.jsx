@@ -135,7 +135,7 @@ export default function Settings({ activeTab, setActiveTab, onSignOut }) {
                       <input
                         type="password"
                         className="form-input-text"
-                        placeholder="••••••••"
+                        placeholder="Enter your password"
                         value={currentPassword}
                         onChange={(e) => setCurrentPassword(e.target.value)}
                       />
@@ -157,7 +157,7 @@ export default function Settings({ activeTab, setActiveTab, onSignOut }) {
                       <input
                         type="password"
                         className="form-input-text"
-                        placeholder="Confirm new password"
+                        placeholder="Re-enter your password"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                       />

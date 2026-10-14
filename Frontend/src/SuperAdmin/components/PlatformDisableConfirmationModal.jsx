@@ -58,6 +58,7 @@ export default function PlatformDisableConfirmationModal({
               id="platform-confirmation-password"
               className="platform-confirmation-input"
               type="password"
+              placeholder="Enter your password"
               autoComplete="current-password"
               value={confirmationPassword}
               onChange={(event) => {

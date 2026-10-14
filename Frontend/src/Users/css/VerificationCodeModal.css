@@ -1,0 +1,560 @@
+/* ============================================================
+   VerificationCodeModal.css
+   VoxReview — Email Verification Modal
+   Viewport-centered modal with VoxReview blue brand styling.
+   ============================================================ */
+
+/* ── Viewport Fixed Backdrop ────────────────────────────── */
+.vcm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+  background: rgba(15, 23, 42, 0.32);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  overflow: hidden;
+  animation: vcmBackdropFadeIn 180ms ease-out both;
+}
+
+/* ── Modal Card ─────────────────────────────────────────── */
+.vcm-card {
+  position: relative;
+  width: calc(100vw - 32px);
+  max-width: 432px;
+  max-height: min(86vh, 560px);
+  max-height: min(86dvh, 560px);
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-radius: 24px;
+  box-shadow:
+    0 0 0 1px rgba(226, 232, 240, 0.8),
+    0 25px 60px -12px rgba(15, 23, 42, 0.28),
+    0 12px 28px -6px rgba(15, 23, 42, 0.12);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow: hidden;
+  box-sizing: border-box;
+  animation: vcmCardScaleIn 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── Close Button (Top-Right) ───────────────────────────── */
+.vcm-close-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  z-index: 10;
+  flex-shrink: 0;
+}
+
+.vcm-close-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.vcm-close-btn:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 1px;
+}
+
+.vcm-close-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Scrollable Inner Content ───────────────────────────── */
+.vcm-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 22px 26px 20px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.vcm-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+.vcm-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.vcm-body::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.vcm-body::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ── Centered Illustration / Icon Badge ─────────────────── */
+.vcm-illustration {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 10px;
+  flex-shrink: 0;
+}
+
+.vcm-illustration-ring {
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1.5px solid rgba(37, 99, 235, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.25s ease;
+}
+
+.vcm-illustration-core {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #bfdbfe;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #2563eb;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.14);
+}
+
+.vcm-illustration-icon {
+  color: #2563eb;
+}
+
+/* ── Header block ───────────────────────────────────────── */
+.vcm-header {
+  text-align: center;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.vcm-title {
+  margin: 0 0 5px;
+  font-size: 21px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.03em;
+  line-height: 1.25;
+}
+
+.vcm-subtitle {
+  margin: 0 0 5px;
+  font-size: 12.5px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+/* ── Masked Email Chip ──────────────────────────────────── */
+.vcm-email-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1d4ed8;
+  word-break: break-all;
+  text-align: center;
+  max-width: 100%;
+  margin-bottom: 5px;
+  box-sizing: border-box;
+}
+
+.vcm-instruction {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+/* ── Alerts (Error / Success) ───────────────────────────── */
+.vcm-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.vcm-alert svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.vcm-alert--error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+}
+
+.vcm-alert--success {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #059669;
+}
+
+/* ── Form & 6-Digit Code Inputs ─────────────────────────── */
+.vcm-form {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.vcm-code-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.vcm-code-input {
+  width: 43px;
+  height: 50px;
+  font-size: 21px;
+  font-weight: 700;
+  font-family: inherit;
+  text-align: center;
+  border-radius: 10px;
+  border: 1.5px solid #cbd5e1;
+  background: #f8fafc;
+  color: #0f172a;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+  caret-color: #2563eb;
+  box-sizing: border-box;
+  -moz-appearance: textfield;
+}
+
+.vcm-code-input::-webkit-outer-spin-button,
+.vcm-code-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+.vcm-code-input:focus {
+  border-color: #2563eb;
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.16);
+}
+
+.vcm-code-input--filled {
+  border-color: #2563eb;
+  background: #ffffff;
+}
+
+.vcm-code-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ── Meta Row: Countdown & Resend Button ────────────────── */
+.vcm-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 0 4px;
+}
+
+.vcm-countdown-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.vcm-meta-label {
+  font-weight: 500;
+}
+
+.vcm-countdown-time {
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.vcm-countdown-time--urgent {
+  color: #dc2626;
+  font-weight: 800;
+}
+
+.vcm-resend-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  color: #2563eb;
+  transition: color 140ms ease, background-color 140ms ease;
+}
+
+.vcm-resend-btn:hover:not(:disabled) {
+  color: #1d4ed8;
+  background: #eff6ff;
+  text-decoration: underline;
+}
+
+.vcm-resend-btn:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
+/* ── Actions: Primary & Secondary Buttons ───────────────── */
+.vcm-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Primary: Verify Email */
+.vcm-btn-primary {
+  width: 100%;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 160ms ease, box-shadow 160ms ease, transform 100ms ease;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.32);
+  letter-spacing: -0.01em;
+}
+
+.vcm-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.42);
+  transform: translateY(-1px);
+}
+
+.vcm-btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+
+.vcm-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.vcm-btn-primary:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
+}
+
+/* Secondary: Cancel */
+.vcm-btn-secondary {
+  width: 100%;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #475569;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.vcm-btn-secondary:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.vcm-btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.vcm-btn-secondary:focus-visible {
+  outline: 2px solid rgba(100, 116, 139, 0.35);
+  outline-offset: 2px;
+}
+
+/* ── Spinner ────────────────────────────────────────────── */
+.vcm-spinner {
+  animation: vcmSpin 700ms linear infinite;
+  flex-shrink: 0;
+}
+
+/* ── Keyframes ──────────────────────────────────────────── */
+@keyframes vcmBackdropFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes vcmCardScaleIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes vcmSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Responsive: Mobile / Narrow Viewport ───────────────── */
+@media (max-width: 540px) {
+  .vcm-backdrop {
+    padding: 16px;
+  }
+
+  .vcm-card {
+    border-radius: 20px;
+    max-width: 432px;
+  }
+
+  .vcm-body {
+    padding: 20px 18px 18px;
+  }
+
+  .vcm-title {
+    font-size: 20px;
+  }
+
+  .vcm-illustration-ring {
+    width: 54px;
+    height: 54px;
+    border-radius: 16px;
+  }
+
+  .vcm-illustration-core {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+  }
+
+  .vcm-code-row {
+    gap: clamp(5px, 1.8vw, 8px);
+  }
+
+  .vcm-code-input {
+    width: clamp(32px, 10vw, 43px);
+    height: 50px;
+    font-size: 20px;
+    border-radius: 10px;
+  }
+
+  .vcm-meta-row {
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+}
+
+/* ── Short-Viewport Safety ──────────────────────────────── */
+@media (max-height: 640px) {
+  .vcm-illustration {
+    margin-bottom: 8px;
+  }
+
+  .vcm-illustration-ring {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+  }
+
+  .vcm-illustration-core {
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+  }
+
+  .vcm-body {
+    padding: 16px 20px 14px;
+  }
+
+  .vcm-header {
+    margin-bottom: 10px;
+  }
+
+  .vcm-title {
+    font-size: 18px;
+    margin-bottom: 4px;
+  }
+
+  .vcm-code-row {
+    margin-bottom: 10px;
+  }
+
+  .vcm-code-input {
+    height: 46px;
+  }
+
+  .vcm-meta-row {
+    margin-bottom: 10px;
+  }
+
+  .vcm-btn-primary {
+    height: 38px;
+  }
+
+  .vcm-btn-secondary {
+    height: 34px;
+  }
+}
+
+@media (max-width: 360px) {
+  .vcm-body {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+}

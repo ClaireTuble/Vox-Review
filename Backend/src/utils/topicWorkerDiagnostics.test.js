@@ -5,6 +5,7 @@ import {
   getTopicWorkerFailureDetails,
   getSafeTopicRequestMetadata,
   sanitizeTopicWorkerStderr,
+  createTopicWorkerExitError,
 } from "./topicWorkerDiagnostics.js";
 
 test("topic worker failures retain distinct timeout, response, inference, and process outcomes", () => {
@@ -30,6 +31,23 @@ test("topic worker failures retain distinct timeout, response, inference, and pr
   );
 });
 
+test("worker termination by signal is distinct from a worker process exit", () => {
+  const killed = createTopicWorkerExitError(null, "SIGKILL");
+  const exited = createTopicWorkerExitError(2, null);
+
+  assert.deepEqual(
+    getTopicWorkerFailureDetails(killed),
+    { status: 503, code: "TOPIC_WORKER_TERMINATED", failureReason: "worker_terminated" },
+  );
+  assert.equal(killed.signal, "SIGKILL");
+  assert.equal(killed.exitCode, null);
+  assert.deepEqual(
+    getTopicWorkerFailureDetails(exited),
+    { status: 503, code: "TOPIC_WORKER_EXITED", failureReason: "worker_exited" },
+  );
+  assert.equal(exited.exitCode, 2);
+});
+
 test("structured worker stderr preserves safe event metadata and redacts unsafe values", () => {
   const stderr = JSON.stringify({
     event: "review_inference_complete",
@@ -48,6 +66,24 @@ test("structured worker stderr preserves safe event metadata and redacts unsafe 
     reviewCount: 3,
   });
   assert.doesNotMatch(sanitized, /private review phrase|secret-token/);
+});
+
+test("worker memory diagnostics retain RSS while excluding review content", () => {
+  const sanitized = sanitizeTopicWorkerStderr(JSON.stringify({
+    event: "review_inference_start",
+    requestId: "21",
+    reviewCount: 20,
+    rssBytes: 314572800,
+    reviewText: "private review",
+  }));
+
+  assert.deepEqual(JSON.parse(sanitized), {
+    event: "review_inference_start",
+    requestId: "21",
+    reviewCount: 20,
+    rssBytes: 314572800,
+  });
+  assert.doesNotMatch(sanitized, /private review/);
 });
 
 test("unsafe event names and unstructured stderr are replaced with safe metadata", () => {

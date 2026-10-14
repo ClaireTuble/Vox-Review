@@ -131,3 +131,51 @@ test('a different authenticated user refreshes once, but token rotation does not
   );
   assert.equal(shouldRefreshProfileForAuthChange(previousSession, null), false);
 });
+
+test('normalizing a user with blank or omitted last name produces clean profile name without duplicate spaces or undefined', () => {
+  const userWithoutLast = normalizeSupabaseUser({
+    id: 'user-no-last',
+    email: 'claire@example.com',
+    user_metadata: {
+      username: 'clairet',
+      firstName: 'Claire',
+      lastName: '',
+    },
+  });
+
+  assert.equal(userWithoutLast.firstName, 'Claire');
+  assert.equal(userWithoutLast.lastName, '');
+  assert.equal(userWithoutLast.name, 'Claire');
+  assert.equal(userWithoutLast.name.includes('undefined'), false);
+  assert.equal(userWithoutLast.name.includes('  '), false);
+
+  const userOmittedLast = normalizeSupabaseUser({
+    id: 'user-omitted-last',
+    email: 'claire@example.com',
+    user_metadata: {
+      username: 'clairet',
+      firstName: 'Claire',
+    },
+  });
+
+  assert.equal(userOmittedLast.firstName, 'Claire');
+  assert.equal(userOmittedLast.lastName, '');
+  assert.equal(userOmittedLast.name, 'Claire');
+  assert.equal(userOmittedLast.name.includes('undefined'), false);
+  assert.equal(userOmittedLast.name.includes('  '), false);
+
+  const userWhitespaceLast = normalizeSupabaseUser({
+    id: 'user-whitespace-last',
+    email: 'claire@example.com',
+    user_metadata: {
+      username: 'clairet',
+      firstName: 'Claire',
+      lastName: '   ',
+    },
+  });
+
+  assert.equal(userWhitespaceLast.firstName, 'Claire');
+  assert.equal(userWhitespaceLast.name, 'Claire');
+  assert.equal(userWhitespaceLast.name.includes('undefined'), false);
+  assert.equal(userWhitespaceLast.name.includes('  '), false);
+});

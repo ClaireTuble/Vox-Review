@@ -1,7 +1,8 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useVoxLogo } from '../../utils/useVoxLogo.js';
 import authService from '../../services/authService.js';
+import { getRegularUserAfterAuthSync } from '../../services/authSessionSync.js';
 import HeaderLogoutConfirmationModal from './HeaderLogoutConfirmationModal.jsx';
 import '../css/AuthNavigation.css';
 
@@ -15,7 +16,21 @@ export default function AuthNavigation({ activePage = 'after-login' }) {
   const logo = useVoxLogo();
   const navigate = useNavigate();
   const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
-  const currentUser = authService.getCurrentUser();
+  const [currentUser, setCurrentUser] = useState(() => authService.getCurrentUser());
+
+  useEffect(() => {
+    const handleAuthSync = (event) => {
+      const result = getRegularUserAfterAuthSync(
+        event,
+        currentUser,
+        () => authService.getCurrentUser(),
+      );
+      if (result.handled) setCurrentUser(result.user);
+    };
+
+    window.addEventListener('voxreview_auth_sync', handleAuthSync);
+    return () => window.removeEventListener('voxreview_auth_sync', handleAuthSync);
+  }, [currentUser]);
 
   const handleSignOut = async () => {
     await authService.logout('user');

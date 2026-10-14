@@ -4,6 +4,7 @@ import {
   MessageSquare, Tag
 } from 'lucide-react';
 import { aggregateTopicsForReviews } from '../utils/reviewTopics.js';
+import { getEmotionResultDisplay } from '../utils/emotionResultDisplay.js';
 import {
   calculateReviewPriorities,
   filterReviewEntriesByEmotion,
@@ -171,14 +172,14 @@ export default function AnalysisResults({
   /* ── Emotion dataset (driver icons resolved via DRIVER_ICON_MAP) ── */
   const defaultData = {
     totalReviews: normalizedReviews.length > 0 ? normalizedReviews.length : 1420,
-    dominantEmotion: { label: 'Happy', emoji: '😊', percentage: 45, confidence: '98.4%' },
+    dominantEmotion: { label: 'Happy', emoji: '😊', percentage: 45, model: 'SVM' },
     emotions: [
-      { id: 'happy', label: 'Happy', emoji: '😊', percentage: 45, count: 639, confidence: '98.4%', keywords: ['"amazing ANC"', '"super comfortable"', '"battery lasts forever"', '"worth it"'], color: '#EAB308' },
-      { id: 'sad', label: 'Sad', emoji: '😢', percentage: 8, count: 113, confidence: '89.6%', keywords: ['"headache after 1 hr"', '"squeezes too tight"', '"wanted to love these"'], color: '#3B82F6' },
-      { id: 'anger', label: 'Anger', emoji: '😠', percentage: 18, count: 255, confidence: '96.7%', keywords: ['"terrible"', '"waste of money"', '"very disappointed"', '"muffled mic"'], color: '#EF4444' },
-      { id: 'disgust', label: 'Disgust', emoji: '🤢', percentage: 12, count: 170, confidence: '94.5%', keywords: ['"sweaty ear pads"', '"smells like plastic"', '"sticky cushion"'], color: '#16A34A' },
-      { id: 'fear', label: 'Fear', emoji: '😨', percentage: 7, count: 101, confidence: '87.1%', keywords: ['"afraid it will break"', '"worried it is unsafe"', '"unsafe after one use"'], color: '#F97316' },
-      { id: 'sarcastic', label: 'Sarcastic', emoji: '😒', percentage: 10, count: 142, confidence: '91.2%', keywords: ['"great if you love bricks"', '"brilliant case design"', '"sure why not"'], color: '#A855F7' },
+      { id: 'happy', label: 'Happy', emoji: '😊', percentage: 45, count: 639, model: 'SVM', keywords: ['"amazing ANC"', '"super comfortable"', '"battery lasts forever"', '"worth it"'], color: '#EAB308' },
+      { id: 'sad', label: 'Sad', emoji: '😢', percentage: 8, count: 113, model: 'SVM', keywords: ['"headache after 1 hr"', '"squeezes too tight"', '"wanted to love these"'], color: '#3B82F6' },
+      { id: 'anger', label: 'Anger', emoji: '😠', percentage: 18, count: 255, model: 'SVM', keywords: ['"terrible"', '"waste of money"', '"very disappointed"', '"muffled mic"'], color: '#EF4444' },
+      { id: 'disgust', label: 'Disgust', emoji: '🤢', percentage: 12, count: 170, model: 'SVM', keywords: ['"sweaty ear pads"', '"smells like plastic"', '"sticky cushion"'], color: '#16A34A' },
+      { id: 'fear', label: 'Fear', emoji: '😨', percentage: 7, count: 101, model: 'SVM', keywords: ['"afraid it will break"', '"worried it is unsafe"', '"unsafe after one use"'], color: '#F97316' },
+      { id: 'sarcastic', label: 'Sarcastic', emoji: '😒', percentage: 10, count: 142, model: 'SVM', keywords: ['"great if you love bricks"', '"brilliant case design"', '"sure why not"'], color: '#A855F7' },
     ],
     drivers: [
       { id: 'battery', name: 'Battery Performance', score: 92, emotion: 'Happy', emoji: '😊', color: '#EAB308' },
@@ -242,6 +243,8 @@ export default function AnalysisResults({
     ? `Topics discussed in the ${emotionTopicReviewEntries.length} ${activeEmotion.label} reviews.`
     : 'Topics discussed across all analyzed reviews.';
   const activeKeywords = activeEmotion?.keywords || [];
+  const activeEmotionDisplay = getEmotionResultDisplay(activeEmotion, activeKeywords);
+  const dominantEmotionDisplay = getEmotionResultDisplay(data.dominantEmotion, []);
   const topicKeywords = activeTopic?.keywords || [];
   const radius = 50;
   const circumference = 2 * Math.PI * radius;
@@ -352,7 +355,9 @@ export default function AnalysisResults({
           <div className="hero-emotion-metrics">
             <span className="hero-emotion-score">{data.dominantEmotion.percentage}%</span>
             <span className="hero-confidence-badge">
-              High Confidence ({data.dominantEmotion.confidence || '98.4%'})
+              {dominantEmotionDisplay.model
+                ? `Model: ${dominantEmotionDisplay.model}`
+                : 'Confidence unavailable'}
             </span>
           </div>
         </div>
@@ -463,21 +468,23 @@ export default function AnalysisResults({
               </div>
               <div className="intel-confidence-box">
                 <span className="confidence-dot"></span>
-                <span>Confidence: {activeEmotion.confidence || 'SVM'}</span>
+                <span>
+                  {activeEmotionDisplay.model
+                    ? `Model: ${activeEmotionDisplay.model}`
+                    : 'Confidence unavailable'}
+                </span>
               </div>
             </div>
             <div className="intel-keywords-section">
               <span className="intel-label">Emotion Evidence Phrases</span>
               <div className="keywords-tags-row">
-                {activeKeywords.length > 0
-                  ? activeKeywords.map((kw, i) => (
+                {activeEmotionDisplay.evidencePhrases.length > 0
+                  ? activeEmotionDisplay.evidencePhrases.map((kw, i) => (
                       <span key={i} className="keyword-tag">{kw}</span>
                     ))
                   : (
                     <span className="keyword-empty-message">
-                      {activeEmotion.count === 0
-                        ? `No reviews were classified into ${activeEmotion.label}, so no emotion evidence phrases are available.`
-                        : 'No clear phrase-level evidence is available for this emotion.'}
+                      {activeEmotionDisplay.evidenceMessage}
                     </span>
                   )}
               </div>
