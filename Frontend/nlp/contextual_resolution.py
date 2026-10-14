@@ -28,6 +28,10 @@ OVERALL_RE = re.compile(
     r"\b(?:all in all|overall(?: experience)?|in the end|sa huli|worth it|sulit)\b",
     re.IGNORECASE,
 )
+EXPLICIT_OVERALL_MARKER_RE = re.compile(
+    r"\b(?:all in all|overall(?: experience)?|in the end|sa huli)\b",
+    re.IGNORECASE,
+)
 NEGATED_VERDICT_RE = re.compile(
     r"\b(?:not worth it|isn't worth it|is not worth it|hindi (?:na )?worth it|di worth it|"
     r"not happy|isn't happy|hindi (?:ako )?happy|di ako happy|not satisfied|"
@@ -35,13 +39,14 @@ NEGATED_VERDICT_RE = re.compile(
     re.IGNORECASE,
 )
 NEGATED_DEFECT_RE = re.compile(
-    r"\b(?:not|isn't|wasn't|hindi|di|hnd|hndi)\s+(?:(?:really|actually|talaga|na|pa)\s+)?"
+    r"\b(?:not|isn't|wasn't|hindi|di|hnd|hndi|walang)\s+"
+    r"(?:(?:really|actually|talaga|na|pa|naman)\s+)?"
     r"(?:broken|damaged|defective|sira|basag|defect)\b",
     re.IGNORECASE,
 )
 NEGATION_PREFIX_RE = re.compile(
     r"\b(?:not|never|no|isn't|wasn't|aren't|don't|doesn't|didn't|can't|cannot|"
-    r"hindi|di|hnd|hndi|wala)(?:\s+\w+){0,2}\s*$",
+    r"hindi|di|hnd|hndi|wala|walang)(?:\s+\w+){0,2}\s*$",
     re.IGNORECASE,
 )
 
@@ -167,6 +172,8 @@ def _classify_clause(text: str, clause_index: int) -> ContextSignal | None:
         return ContextSignal(3, 0.96 + intensity, clause_index, is_overall, complaint)
     if complaint and accountability:
         return ContextSignal(3, 1.12 + intensity, clause_index, is_overall, True)
+    if EXPLICIT_OVERALL_MARKER_RE.search(clause) and _has_unnegated(HAPPY_RE, clause):
+        return ContextSignal(1, 1.16 + intensity, clause_index, True, False)
     if _has_unnegated(SAD_RE, clause):
         return ContextSignal(2, 0.86 + intensity, clause_index, is_overall, complaint)
     if complaint:
@@ -207,12 +214,14 @@ def _select_context_category(signals: list[ContextSignal]) -> tuple[int | None, 
     if not signals:
         return None, None
 
+    sarcasm = [signal for signal in signals if signal.category == 6]
     overall = [signal for signal in signals if signal.is_overall]
     if overall:
         selected = max(overall, key=lambda signal: (signal.strength, signal.clause_index))
+        if selected.category == 1 and sarcasm:
+            return 6, "clear ironic praise contradicts the described outcome"
         return selected.category, f"the explicit overall verdict expresses {LABELS[selected.category].lower()}"
 
-    sarcasm = [signal for signal in signals if signal.category == 6]
     if sarcasm:
         return 6, "clear ironic praise contradicts the described outcome"
 
