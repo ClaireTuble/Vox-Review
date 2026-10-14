@@ -18,6 +18,7 @@ import svm_model
 from contextual_resolution import (
     DEFAULT_SCORE_MARGIN,
     SCORE_MARGIN_ENV,
+    extract_context_signals,
     get_score_margin,
     resolve_contextual_prediction,
 )
@@ -38,6 +39,13 @@ def resolve(review: str, category: int, *, gap: float = 0.8, competitor: int = 2
         category,
         score_vector(category, gap=gap, competitor=competitor),
     )
+
+
+@pytest.fixture(scope="module")
+def production_model():
+    from svm_pipeline import load_svm_model
+
+    return load_svm_model(svm_model.MODEL_PATH)
 
 
 def test_clear_happy_review_keeps_happy():
@@ -90,6 +98,98 @@ def test_local_negation_does_not_create_happy_defect_or_anger_signals():
     result = resolve("I'm not happy, hindi sira, at wala akong galit.", 1)
 
     assert result["category"] == 2
+
+
+def test_negated_filipino_defect_does_not_override_positive_svm():
+    review = "Maganda ang items, walang damaged naman."
+    result = resolve(review, 1)
+
+    assert result["category"] == 1
+    assert result["svmCategory"] == 1
+    assert result["applied"] is False
+    assert not any(signal.is_complaint for signal in extract_context_signals(review))
+
+
+def test_negated_english_defect_does_not_create_complaint_context():
+    review = "The items were not damaged."
+    signals = extract_context_signals(review)
+    result = resolve(review, 1)
+
+    assert not any(signal.is_complaint for signal in signals)
+    assert result["category"] == 1
+    assert result["svmCategory"] == 1
+
+
+def test_positive_overall_verdict_outranks_preceding_delivery_complaint():
+    result = resolve("Good quality pero late dumating, overall sulit naman.", 6, gap=0.05)
+
+    assert result["category"] == 1
+    assert result["svmCategory"] == 6
+    assert result["applied"] is True
+    assert "overall verdict" in result["explanation"]
+
+
+def test_positive_overall_verdict_does_not_override_clear_sarcasm():
+    review = "Very good, one hour lang gumana. Overall sulit."
+    signals = extract_context_signals(review)
+    result = resolve(review, 1)
+
+    assert any(signal.category == 6 for signal in signals)
+    assert result["category"] == 6
+    assert result["svmCategory"] == 1
+    assert result["applied"] is True
+    assert "ironic praise" in result["explanation"]
+
+
+def test_positive_overall_verdict_without_contradiction_remains_happy():
+    result = resolve("Good quality, overall sulit naman.", 2)
+
+    assert result["category"] == 1
+    assert result["svmCategory"] == 2
+    assert "overall verdict" in result["explanation"]
+
+
+def test_not_worth_it_remains_negative():
+    result = resolve("not worth it.", 1)
+
+    assert result["category"] == 2
+    assert result["svmCategory"] == 1
+    assert result["applied"] is True
+
+
+def test_good_quality_but_late_delivery_remains_ambiguous_negative():
+    result = resolve("good quality pero tagal ma deliver", 2)
+
+    assert result["category"] == 2
+    assert result["svmCategory"] == 2
+    assert result["applied"] is False
+
+
+@pytest.mark.parametrize(
+    ("review", "expected_raw", "expected_final"),
+    [
+        ("Maganda ang items, walang damaged naman.", 1, 1),
+        ("The items were not damaged.", 2, 2),
+        (
+            "lahat ng inorder kong items ay nareceive ang gaganda tas super worth it kasi affordable walang damaged naman sa mga items thank you i will order again soon",
+            1,
+            1,
+        ),
+        ("Good quality pero late dumating, overall sulit naman.", 6, 1),
+        ("Very good, one hour lang gumana. Overall sulit.", 1, 6),
+        ("Very good, one hour lang gumana. Nice.", 6, 6),
+        ("Good quality, overall sulit naman.", 1, 1),
+        ("not worth it.", 3, 2),
+        ("good quality pero tagal ma deliver", 2, 2),
+    ],
+)
+def test_production_model_raw_and_resolved_categories(
+    production_model, review, expected_raw, expected_final
+):
+    result = svm_model.explain_category(review, model=production_model)
+
+    assert result["contextualResolution"]["svmCategory"] == expected_raw
+    assert result["category"] == expected_final
 
 
 def test_but_and_pero_use_overall_verdict_instead_of_clause_order():
@@ -193,3 +293,17 @@ def test_wrapper_returns_final_category_but_keeps_original_svm_drivers(monkeypat
     assert result["contextualResolution"]["svmCategory"] == 1
     assert result["contextualResolution"]["applied"] is True
     assert result["emotionDrivers"] == ["love"]
+
+
+def test_training_id_38_review_stays_happy_after_negated_defect_resolution():
+    review = (
+        "lahat ng inorder kong items ay nareceive ang gaganda tas super worth it "
+        "kasi affordable walang damaged naman sa mga items thank you i will order "
+        "again soon"
+    )
+    result = resolve(review, 1)
+
+    assert result["svmCategory"] == 1
+    assert result["category"] == 1
+    assert result["applied"] is False
+    assert not any(signal.is_complaint for signal in extract_context_signals(review))
