@@ -9,6 +9,8 @@ import {
   getReviewKeywordPhrases,
   getReviewId,
   getReviewText,
+  isSubstantiveReviewText,
+  filterSubstantiveReviews,
   getTopicKeywordCandidates,
 } from './reviewTopics.js';
 
@@ -65,6 +67,23 @@ test('accepts existing alternate review body aliases and ignores non-string fiel
   assert.equal(getReviewText({ body: 'Review body' }), 'Review body');
   assert.equal(getReviewText({ reviewBody: 'Review body field' }), 'Review body field');
   assert.equal(getReviewText({ text: '  ', review: null }), '');
+});
+
+test('metadata-only Lazada entries are not substantive review text', () => {
+  assert.equal(isSubstantiveReviewText('R2026-08-23Helpful(0)'), false);
+  assert.equal(isSubstantiveReviewText('E2026-07-16Helpful(0)'), false);
+  assert.deepEqual(filterSubstantiveReviews([
+    { text: 'R2026-08-23Helpful(0)' },
+    { text: 'E2026-07-16Helpful(0)' },
+    { text: 'A' },
+    { text: '👍' },
+  ]).map(getReviewText), ['A', '👍']);
+});
+
+test('preserves short and emoji-only review text', () => {
+  assert.equal(isSubstantiveReviewText('OK'), true);
+  assert.equal(isSubstantiveReviewText('👍'), true);
+  assert.equal(isSubstantiveReviewText('😂'), true);
 });
 
 test('mixed-sentiment topic keywords retain source spacing, negation, and contractions', () => {

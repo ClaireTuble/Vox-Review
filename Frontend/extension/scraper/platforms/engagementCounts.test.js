@@ -57,6 +57,41 @@ test("Lazada helpful counts are parsed from each matching review card", async ()
   ]);
 });
 
+test("Lazada excludes metadata-only body text and preserves short and emoji reviews", async () => {
+  const bodyTexts = [
+    "R2026-08-23Helpful(0)",
+    "E2026-07-16Helpful(0)",
+    "OK",
+    "👍",
+  ];
+  const cards = bodyTexts.map((text, index) => ({
+    querySelector(selector) {
+      if (selector.includes("user-name")) return element(`Buyer ${index + 1}`);
+      if (selector.includes("title.right")) return element(`2026-08-2${index + 1}`);
+      if (selector.includes("main-content-reviews-item")) return element(text);
+      return null;
+    },
+    cloneNode() {
+      throw new Error("Lazada extraction must not fall back to whole-card text.");
+    },
+  }));
+  const document = {
+    title: "Lazada Product",
+    querySelector: () => null,
+    querySelectorAll(selector) {
+      return selector.includes(".mod-reviews .item") ? cards : [];
+    },
+  };
+  const scrape = await loadScraper("lazada.js", {
+    document,
+    window: { location: { href: "https://www.lazada.com.ph/products/pdp-i1.html", pathname: "/products/pdp-i1.html" } },
+  }, "scrapeLazadaReviews");
+
+  const result = scrape();
+
+  assert.deepEqual(Array.from(result.reviews, (review) => review.text), ["OK", "👍"]);
+});
+
 test("Google Maps likes are parsed from the matching review card button", async () => {
   const cards = [2, 10].map((count, index) => ({
     querySelector(selector) {

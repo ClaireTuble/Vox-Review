@@ -1,4 +1,4 @@
-import { X, ExternalLink, History, Calendar, Globe } from 'lucide-react';
+import { X, History, Calendar, Globe } from 'lucide-react';
 import '../css/modal.css';
 
 const PLATFORM_COLORS = {
@@ -63,10 +63,8 @@ export default function UserHistoryModal({ user, onClose }) {
                 <thead>
                   <tr>
                     <th>Website / Platform</th>
-                    <th>Product Title</th>
                     <th>Activity Type</th>
                     <th>Date &amp; Time</th>
-                    <th>Product URL</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -91,12 +89,6 @@ export default function UserHistoryModal({ user, onClose }) {
                         </td>
 
                         <td>
-                          <span className="history-product-title">
-                            {act.product_title || '—'}
-                          </span>
-                        </td>
-
-                        <td>
                           <span className={`history-type-tag ${isAnalyzed ? 'type-analyzed' : 'type-used'}`}>
                             {act.activity_type || 'Used'}
                           </span>
@@ -107,21 +99,6 @@ export default function UserHistoryModal({ user, onClose }) {
                           {formatDateTime(act.created_at)}
                         </td>
 
-                        <td>
-                          {act.product_url ? (
-                            <a
-                              href={act.product_url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="history-url-link"
-                            >
-                              <span>Open Link</span>
-                              <ExternalLink size={12} />
-                            </a>
-                          ) : (
-                            <span className="history-url-none">—</span>
-                          )}
-                        </td>
                       </tr>
                     );
                   })}

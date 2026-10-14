@@ -1,5 +1,6 @@
 import { getPageKey } from './pageAnalysisStorage.js';
 import { getTopicReviewSetSignature } from '../Users/utils/topicAnalysisRequest.js';
+import { prepareReviewsForAnalysis } from '../Users/utils/reviewLanguage.js';
 
 export const ACTIVE_ANALYSIS_STORAGE_KEY = 'voxreview_active_analysis_states';
 
@@ -254,11 +255,27 @@ export function createAnalysisJobCoordinator({
   }
 
   const coordinator = {
-    start(input) {
+    async start(input) {
       const pageKey = getPageKey(input?.platform, input?.page_url) || input?.pageKey;
       if (!pageKey || !Array.isArray(input?.reviews)) return Promise.resolve({ ok: false, error: 'Invalid analysis context.' });
+      const prepared = await prepareReviewsForAnalysis(input.reviews);
+      const analysisInput = {
+        ...input,
+        reviews: prepared.reviews,
+        skippedReviews: [
+          ...(Array.isArray(input.skippedReviews) ? input.skippedReviews : []),
+          ...prepared.skippedReviews,
+        ],
+      };
+      if (analysisInput.reviews.length === 0) {
+        return {
+          ok: false,
+          error: `No supported-language reviews were available for analysis. ${analysisInput.skippedReviews.length} review(s) were skipped.`,
+          skippedReviews: analysisInput.skippedReviews,
+        };
+      }
       const getStateReviewSignature = getActiveAnalysisReviewSetSignature;
-      const inputReviewSignature = getTopicReviewSetSignature(input.reviews.map((review) => (
+      const inputReviewSignature = getTopicReviewSetSignature(analysisInput.reviews.map((review) => (
         typeof review === 'string'
           ? review
           : review?.text || review?.reviewText || review?.comment || review?.review || ''
@@ -266,19 +283,19 @@ export function createAnalysisJobCoordinator({
 
       if (jobs.has(pageKey)) {
         const runningJob = jobs.get(pageKey);
-        if (input.force || runningJob.state.reviewSetSignature !== inputReviewSignature) {
-          return cancel(pageKey).then(() => coordinator.start(input));
+        if (analysisInput.force || runningJob.state.reviewSetSignature !== inputReviewSignature) {
+          return cancel(pageKey).then(() => coordinator.start(analysisInput));
         }
         return runningJob.ready.then((result) => ({ ...result, started: false }));
       }
 
       const initialState = {
-        ...input,
+        ...analysisInput,
         pageKey,
         reviewSetSignature: inputReviewSignature,
         status: 'analyzing',
         stage: 'svm',
-        runId: input.runId || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        runId: analysisInput.runId || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
         startedAt: Date.now(),
         completedAt: null,
         svmResult: null,
@@ -302,10 +319,18 @@ export function createAnalysisJobCoordinator({
           }
           const sameReviewSet = getStateReviewSignature(existingState) === inputReviewSignature;
           const hasCompletedTopics = Array.isArray(existingState?.topicResult?.results);
-          if (existingState?.status === 'completed' && sameReviewSet && !input.force &&
+          if (existingState?.status === 'completed' && sameReviewSet && !analysisInput.force &&
             (!topicsEnabled || hasCompletedTopics)) {
-            runningJob.state = existingState;
-            const result = { ok: true, started: false, state: existingState };
+            runningJob.state = {
+              ...existingState,
+              skippedReviews: analysisInput.skippedReviews,
+            };
+            const updatedState = await persistState(runningJob.state);
+            if (!isCurrentJob(pageKey, runningJob)) {
+              return { ok: false, error: 'Analysis was cancelled.', state: runningJob.state };
+            }
+            runningJob.state = updatedState;
+            const result = { ok: true, started: false, state: updatedState };
             resolveReady(result);
             return result;
           }
@@ -315,7 +340,7 @@ export function createAnalysisJobCoordinator({
             : sameReviewSet
               ? {
                   ...initialState,
-                  svmResult: input.force ? null : existingState?.svmResult || null,
+                  svmResult: analysisInput.force ? null : existingState?.svmResult || null,
                   topicResult: existingState?.topicResult || null,
                 }
               : initialState;

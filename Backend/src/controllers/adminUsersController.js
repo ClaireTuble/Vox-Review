@@ -102,7 +102,7 @@ async function getAdminUsersWithDependencies(req, res, {
       try {
         const { data: actData } = await userScopedSupabase
           .from("user_activities")
-          .select("*")
+          .select("id, user_id, platform, activity_type, created_at")
           .in("user_id", userIds)
           .order("created_at", { ascending: false });
 
@@ -116,8 +116,6 @@ async function getAdminUsersWithDependencies(req, res, {
               platform: act.platform,
               activity_type: act.activity_type,
               created_at: act.created_at,
-              product_title: act.product_title || null,
-              product_url: act.product_url || null,
             });
           }
         }
