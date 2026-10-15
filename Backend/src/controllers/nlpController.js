@@ -23,6 +23,31 @@ const svmWorkerScript = path.join(nlpDirectory, "svm_worker.py");
 const topicWorkerScript = path.join(nlpDirectory, "topic_worker.py");
 const pythonExecutable = process.env.PYTHON_EXECUTABLE || "python";
 const svmWorkerTimeoutMs = Number(process.env.SVM_WORKER_TIMEOUT_MS || 60000);
+function getPositiveIntegerEnvironmentValue(name, fallback) {
+  const configuredValue = process.env[name];
+  if (configuredValue == null || configuredValue === "") return fallback;
+  const value = Number(configuredValue);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError(`${name} must be a positive integer`);
+  }
+  return value;
+}
+const topicMaxReviews = getPositiveIntegerEnvironmentValue("TOPIC_MAX_REVIEWS", 50);
+const topicMaxReviewChars = getPositiveIntegerEnvironmentValue("TOPIC_MAX_REVIEW_CHARS", 8192);
+
+function getTopicInputLimitError(reviews) {
+  if (!Array.isArray(reviews)) return null;
+  if (reviews.length > topicMaxReviews) {
+    return `Topic request count ${reviews.length} exceeds the maximum of ${topicMaxReviews}.`;
+  }
+  if (reviews.some((review) => (
+    typeof review === "string" && review.length > topicMaxReviewChars
+  ))) {
+    return `A topic review exceeds the ${topicMaxReviewChars}-character limit.`;
+  }
+  return null;
+}
+
 const validCategories = new Set([1, 2, 3, 4, 5, 6]);
 const validTopicLabels = new Set([
   "Quality", "Performance / Functionality", "Features / Content", "Service / Support",
@@ -686,11 +711,12 @@ export async function predictTopics(req, res) {
   const operation = validTopicOperations.has(requestedOperation)
     ? requestedOperation
     : "invalid";
+  const inputLimitError = getTopicInputLimitError(reviews);
   const requestMetadata = getSafeTopicRequestMetadata(req);
   const diagnostics = {
     requestId,
     ...requestMetadata,
-    reviewSetSignature: getTopicReviewSetSignature(reviews),
+    reviewSetSignature: inputLimitError ? null : getTopicReviewSetSignature(reviews),
     reviewCount,
     platform: typeof (req.get?.("x-voxreview-platform") || req.body?.platform) === "string"
       ? (req.get?.("x-voxreview-platform") || req.body?.platform).slice(0, 40)
@@ -708,7 +734,7 @@ export async function predictTopics(req, res) {
     stdoutBytesReceived: 0,
     reviews,
   };
-  const cacheKey = operation === "classify"
+  const cacheKey = !inputLimitError && operation === "classify"
     ? getTopicResultCacheKey({
         pageIdentity: diagnostics.pageIdentity,
         platform: diagnostics.platform,
@@ -762,6 +788,13 @@ export async function predictTopics(req, res) {
   if (!Array.isArray(reviews) || reviews.length === 0 || reviews.length > 500) {
     const failureReason = "reviews must contain between 1 and 500 items";
     return respond(400, { success: false, error: failureReason }, failureReason);
+  }
+  if (inputLimitError) {
+    return respond(413, {
+      success: false,
+      error: inputLimitError,
+      code: "TOPIC_INPUT_LIMIT_EXCEEDED",
+    }, "topic_input_limit_exceeded");
   }
   if (operation === "invalid") {
     const failureReason = "operation must be classify or keyword-scores";

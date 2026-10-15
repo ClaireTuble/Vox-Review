@@ -34,13 +34,17 @@ class FakeTokenizer:
 class FakeModel:
     def __init__(self):
         self.eval_called = False
+        self.batch_sizes = []
+        self.inference_modes = []
 
     def eval(self):
         self.eval_called = True
         return self
 
     def __call__(self, input_ids, **kwargs):
-        hidden = torch.stack((input_ids, input_ids * 2), dim=-1)
+        self.batch_sizes.append(input_ids.shape[0])
+        self.inference_modes.append(torch.is_inference_mode_enabled())
+        hidden = torch.stack((input_ids, input_ids.remainder(7) + 1), dim=-1)
         return type("ModelOutput", (), {"last_hidden_state": hidden})()
 
 
@@ -166,8 +170,9 @@ class TopicProviderTests(unittest.TestCase):
 
     def test_keyword_score_batches_keep_candidate_alignment_and_raw_scores(self):
         candidates = [f"candidate phrase {index}" for index in range(70)]
-        full_scores = predict_topics_batch.classify_reviews(candidates)["results"]
-        keyword_scores = predict_topics_batch.score_topic_candidates(candidates)["results"]
+        with patch.object(predict_topics_batch, "TOPIC_MAX_REVIEWS", len(candidates)):
+            full_scores = predict_topics_batch.classify_reviews(candidates)["results"]
+            keyword_scores = predict_topics_batch.score_topic_candidates(candidates)["results"]
 
         self.assertEqual([result["reviewIndex"] for result in keyword_scores], list(range(70)))
         self.assertEqual(
@@ -291,6 +296,22 @@ class TopicProviderTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     predict_topics_batch.classify_reviews(reviews)
 
+    def test_review_count_and_length_limits_reject_before_model_loading(self):
+        with (
+            patch.object(predict_topics_batch, "TOPIC_MAX_REVIEWS", 50),
+            patch.object(predict_topics_batch, "TOPIC_MAX_REVIEW_CHARS", 8192),
+        ):
+            with self.assertRaisesRegex(ValueError, r"51 reviews.*TOPIC_MAX_REVIEWS is 50"):
+                predict_topics_batch.classify_reviews(["review"] * 51)
+            with self.assertRaisesRegex(
+                ValueError,
+                r"8193 characters; TOPIC_MAX_REVIEW_CHARS is 8192",
+            ):
+                predict_topics_batch.classify_reviews(["x" * 8193])
+
+        predict_topics_batch.AutoTokenizer.from_pretrained.assert_not_called()
+        predict_topics_batch.AutoModel.from_pretrained.assert_not_called()
+
     def test_empty_batch_does_not_load_the_model(self):
         response = predict_topics_batch.classify_reviews([])
 
@@ -315,12 +336,98 @@ class TopicProviderTests(unittest.TestCase):
         self.assertEqual(vectors.shape, (5, 2))
         self.assertTrue(torch.allclose(torch.linalg.vector_norm(vectors, dim=1), torch.ones(5)))
 
+    def test_smaller_inference_batches_preserve_embeddings_and_input_order(self):
+        texts = [f"review {index} " + ("x" * index) for index in range(20)]
+        with patch.object(predict_topics_batch, "TOPIC_BATCH_SIZE", 16):
+            reference = _encode_texts(
+                texts,
+                predict_topics_batch.REVIEW_PREFIX,
+                self.tokenizer,
+                self.model,
+            )
+        self.assertEqual(self.model.batch_sizes, [16, 4])
+        self.assertEqual(
+            [text for batch in self.tokenizer.batches for text in batch],
+            [predict_topics_batch.REVIEW_PREFIX + text for text in texts],
+        )
+
+        self.tokenizer.batches.clear()
+        self.model.batch_sizes.clear()
+        with patch.object(predict_topics_batch, "TOPIC_BATCH_SIZE", 4):
+            chunked = _encode_texts(
+                texts,
+                predict_topics_batch.REVIEW_PREFIX,
+                self.tokenizer,
+                self.model,
+            )
+
+        self.assertEqual(self.model.batch_sizes, [4, 4, 4, 4, 4])
+        self.assertEqual(
+            [text for batch in self.tokenizer.batches for text in batch],
+            [predict_topics_batch.REVIEW_PREFIX + text for text in texts],
+        )
+        self.assertTrue(torch.equal(chunked, reference))
+        self.assertTrue(all(self.model.inference_modes))
+
+    def test_smaller_inference_batches_preserve_classification_output_and_order(self):
+        reviews = [f"Review {index} " + ("x" * index) for index in range(20)]
+        with (
+            patch.object(predict_topics_batch, "encode_texts", _encode_texts),
+            patch.object(predict_topics_batch, "TOPIC_BATCH_SIZE", 16),
+        ):
+            reference = predict_topics_batch.classify_reviews(reviews)
+
+        with (
+            patch.object(predict_topics_batch, "_tokenizer", None),
+            patch.object(predict_topics_batch, "_model", None),
+            patch.object(predict_topics_batch, "_topic_embeddings", None),
+            patch.object(predict_topics_batch, "encode_texts", _encode_texts),
+            patch.object(predict_topics_batch, "TOPIC_BATCH_SIZE", 4),
+        ):
+            chunked = predict_topics_batch.classify_reviews(reviews)
+
+        self.assertEqual(chunked, reference)
+        self.assertEqual(
+            [result["reviewIndex"] for result in chunked["results"]],
+            list(range(len(reviews))),
+        )
+
+    def test_large_request_uses_four_review_chunks_and_preserves_duplicates_and_results(self):
+        reviews = [f"Unique Steam review {index}" for index in range(50)]
+        reviews[19] = reviews[3]
+        with (
+            patch.object(predict_topics_batch, "encode_texts", _encode_texts),
+            patch.object(predict_topics_batch, "TOPIC_BATCH_SIZE", 4),
+            patch.object(predict_topics_batch, "log_model_event"),
+        ):
+            response = predict_topics_batch.classify_reviews(reviews, "Steam")
+
+        self.assertEqual(
+            self.model.batch_sizes,
+            [4, 4, 3, *([4] * 12), 2],
+        )
+        self.assertEqual(
+            [result["reviewIndex"] for result in response["results"]],
+            list(range(50)),
+        )
+        self.assertEqual(response["results"][3]["topicScores"], response["results"][19]["topicScores"])
+        self.assertTrue(all(
+            len(result["topicScores"]) == len(TOPIC_LABELS)
+            for result in response["results"]
+        ))
+        self.assertTrue(all(
+            all(topic["label"] in TOPIC_LABELS for topic in result["topics"])
+            for result in response["results"]
+        ))
+
     def test_unpaired_surrogates_are_sanitized_and_unicode_is_preserved(self):
         malformed = predict_topics_batch.sanitize_unpaired_surrogates("Review \ud800 text")
         self.assertEqual(malformed, "Review \ufffd text")
+        ordinary = "Ganda \u2764\ufe0f\U0001f60a"
+        self.assertIs(predict_topics_batch.sanitize_unpaired_surrogates(ordinary), ordinary)
         self.assertEqual(
-            predict_topics_batch.sanitize_unpaired_surrogates("Ganda \u2764\ufe0f\U0001f60a"),
-            "Ganda \u2764\ufe0f\U0001f60a",
+            predict_topics_batch.sanitize_unpaired_surrogates(ordinary),
+            ordinary,
         )
 
 

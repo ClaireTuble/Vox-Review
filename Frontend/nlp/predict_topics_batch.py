@@ -22,7 +22,9 @@ from topic_taxonomy import (
     TOPIC_MODEL_NAME,
 )
 
-TOPIC_BATCH_SIZE = int(os.getenv("TOPIC_BATCH_SIZE", "16"))
+TOPIC_BATCH_SIZE = int(os.getenv("TOPIC_BATCH_SIZE", "4"))
+TOPIC_MAX_REVIEWS = int(os.getenv("TOPIC_MAX_REVIEWS", "50"))
+TOPIC_MAX_REVIEW_CHARS = int(os.getenv("TOPIC_MAX_REVIEW_CHARS", "8192"))
 TOPIC_KEYWORD_BATCH_SIZE = 64
 MAX_TORCH_THREADS = 8
 MAX_LENGTH = 512
@@ -90,8 +92,11 @@ def encode_texts(
         with torch.inference_mode():
             hidden = model(**tokens).last_hidden_state
             mask = tokens["attention_mask"].unsqueeze(-1).to(dtype=hidden.dtype)
-            pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
-            embeddings.append(functional.normalize(pooled, p=2, dim=1))
+            hidden.mul_(mask)
+            pooled = hidden.sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+            normalized = functional.normalize(pooled, p=2, dim=1)
+            embeddings.append(normalized)
+            del tokens, hidden, mask, pooled, normalized
     return torch.cat(embeddings, dim=0)
 
 
@@ -236,7 +241,31 @@ def get_topic_embeddings():
 
 
 def sanitize_unpaired_surrogates(text: str) -> str:
+    if not any("\ud800" <= character <= "\udfff" for character in text):
+        return text
     return text.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "replace")
+
+
+def validate_topic_reviews(reviews: list[str]) -> None:
+    if not isinstance(reviews, list) or any(
+        not isinstance(review, str) or not review.strip()
+        for review in reviews
+    ):
+        raise ValueError("reviews must be a list of non-empty strings")
+    if TOPIC_MAX_REVIEWS < 1:
+        raise ValueError("TOPIC_MAX_REVIEWS must be at least 1")
+    if TOPIC_MAX_REVIEW_CHARS < 1:
+        raise ValueError("TOPIC_MAX_REVIEW_CHARS must be at least 1")
+    if len(reviews) > TOPIC_MAX_REVIEWS:
+        raise ValueError(
+            f"received {len(reviews)} reviews; TOPIC_MAX_REVIEWS is {TOPIC_MAX_REVIEWS}"
+        )
+    for index, review in enumerate(reviews):
+        if len(review) > TOPIC_MAX_REVIEW_CHARS:
+            raise ValueError(
+                f"review {index} has {len(review)} characters; "
+                f"TOPIC_MAX_REVIEW_CHARS is {TOPIC_MAX_REVIEW_CHARS}"
+            )
 
 
 def select_top_two(scores: torch.Tensor) -> list[int]:
@@ -247,11 +276,7 @@ def select_top_two(scores: torch.Tensor) -> list[int]:
 
 
 def classify_reviews(reviews: list[str], platform: str | None = None) -> dict:
-    if not isinstance(reviews, list) or any(
-        not isinstance(review, str) or not review.strip()
-        for review in reviews
-    ):
-        raise ValueError("reviews must be a list of non-empty strings")
+    validate_topic_reviews(reviews)
     if TOPIC_BATCH_SIZE < 1:
         raise ValueError("TOPIC_BATCH_SIZE must be at least 1")
 
@@ -270,6 +295,7 @@ def classify_reviews(reviews: list[str], platform: str | None = None) -> dict:
     log_model_event(
         "review_inference_start",
         reviewCount=len(reviews),
+        batchSize=TOPIC_BATCH_SIZE,
         torchNumThreads=torch.get_num_threads(),
     )
     with torch.inference_mode():
@@ -334,11 +360,7 @@ def classify_reviews(reviews: list[str], platform: str | None = None) -> dict:
 
 
 def score_topic_candidates(reviews: list[str]) -> dict:
-    if not isinstance(reviews, list) or any(
-        not isinstance(review, str) or not review.strip()
-        for review in reviews
-    ):
-        raise ValueError("reviews must be a list of non-empty strings")
+    validate_topic_reviews(reviews)
     if TOPIC_KEYWORD_BATCH_SIZE < 1:
         raise ValueError("TOPIC_KEYWORD_BATCH_SIZE must be at least 1")
 
