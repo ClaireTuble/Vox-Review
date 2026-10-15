@@ -44,6 +44,7 @@ import {
   createTopicAnalysisRequestCoordinator,
   getTopicReviewSetSignature,
   createTopicRequestTimeout,
+  requestTopicKeywordScoresInBatches,
   requestTopicAnalysis as sendTopicAnalysisRequest,
 } from '../utils/topicAnalysisRequest.js';
 import { createUnsavedChangesGuard } from '../utils/unsavedChangesGuard.js';
@@ -604,30 +605,35 @@ export default function PopupPage() {
     let timeout;
     const scoreCandidates = async () => {
       const keywordScores = {};
-      for (let start = 0; start < candidateTerms.length; start += 500) {
-        const batch = candidateTerms.slice(start, start + 500);
-        timeout = createTopicRequestTimeout(controller, batch.length);
-        const payload = await requestTopicAnalysis(
-          batch,
-          controller.signal,
-          getPlatformLabel(detectedPlatform),
-          'topic-keyword-scoring',
-          activeContextRef.current.pageKey || currentAnalysisRecord?.pageKey,
-          false,
-          'keyword-scores',
-        );
-        timeout.clear();
-        timeout = null;
-        if (!hasValidTopicKeywordScores(payload, batch.length)) {
-          throw new Error('E5 topic keyword scores were missing or invalid.');
-        }
-        payload.results.forEach((result, index) => {
-          const key = batch[index].toLocaleLowerCase();
-          keywordScores[key] = Object.fromEntries(
-            result.topicScores.map(({ label, score }) => [label, score]),
-          );
-        });
+      const payload = await requestTopicKeywordScoresInBatches(
+        candidateTerms,
+        async (batch) => {
+          timeout = createTopicRequestTimeout(controller, batch.length);
+          try {
+            return await requestTopicAnalysis(
+              batch,
+              controller.signal,
+              getPlatformLabel(detectedPlatform),
+              'topic-keyword-scoring',
+              activeContextRef.current.pageKey || currentAnalysisRecord?.pageKey,
+              false,
+              'keyword-scores',
+            );
+          } finally {
+            timeout?.clear();
+            timeout = null;
+          }
+        },
+      );
+      if (!hasValidTopicKeywordScores(payload, candidateTerms.length)) {
+        throw new Error('E5 topic keyword scores were missing or invalid.');
       }
+      payload.results.forEach((result) => {
+        const key = candidateTerms[result.reviewIndex].toLocaleLowerCase();
+        keywordScores[key] = Object.fromEntries(
+          result.topicScores.map(({ label, score }) => [label, score]),
+        );
+      });
       applyKeywordScores(keywordScores);
     };
 

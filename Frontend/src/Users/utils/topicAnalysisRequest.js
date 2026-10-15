@@ -3,6 +3,7 @@ import { API_BASE_URL } from '../../services/apiConfig.js';
 export const TOPIC_ANALYSIS_PATH = '/api/nlp/topics/predict';
 export const TOPIC_REQUEST_TIMEOUT_BASE_MS = 180_000;
 export const TOPIC_REQUEST_TIMEOUT_PER_REVIEW_MS = 12_000;
+export const TOPIC_KEYWORD_SCORE_BATCH_SIZE = 50;
 let nextTopicRequestSequence = 0;
 
 export function getTopicReviewSetSignature(reviews) {
@@ -187,6 +188,51 @@ function hasValidTopicKeywordScoreResponse(payload, expectedReviewCount) {
         Number.isFinite(topic.score)
       ))
     ));
+}
+
+export async function requestTopicKeywordScoresInBatches(
+  candidates,
+  requestBatch,
+  batchSize = TOPIC_KEYWORD_SCORE_BATCH_SIZE,
+) {
+  if (!Array.isArray(candidates)) throw new TypeError('Topic keyword candidates must be an array.');
+  if (typeof requestBatch !== 'function') throw new TypeError('A topic keyword batch requester is required.');
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1) {
+    throw new RangeError('Topic keyword batch size must be a positive integer.');
+  }
+
+  const results = [];
+  const scoreBatch = async (batch, resultOffset) => {
+    let payload;
+    try {
+      payload = await requestBatch(batch);
+    } catch (error) {
+      if (error?.httpStatus !== 413 ||
+        error?.code !== 'TOPIC_INPUT_LIMIT_EXCEEDED' ||
+        batch.length < 2) {
+        throw error;
+      }
+      const splitIndex = Math.ceil(batch.length / 2);
+      await scoreBatch(batch.slice(0, splitIndex), resultOffset);
+      await scoreBatch(batch.slice(splitIndex), resultOffset + splitIndex);
+      return;
+    }
+
+    if (!hasValidTopicKeywordScoreResponse(payload, batch.length)) {
+      throw Object.assign(
+        new Error('Topic keyword scoring returned an invalid batch response.'),
+        { code: 'TOPIC_WORKER_INVALID_RESPONSE' },
+      );
+    }
+    payload.results.forEach((result, index) => {
+      results[resultOffset + index] = { ...result, reviewIndex: resultOffset + index };
+    });
+  };
+
+  for (let start = 0; start < candidates.length; start += batchSize) {
+    await scoreBatch(candidates.slice(start, start + batchSize), start);
+  }
+  return { results };
 }
 
 function safeErrorCode(value) {

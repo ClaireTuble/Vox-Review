@@ -6,8 +6,29 @@ import {
   getTopicAnalysisUrl,
   getTopicReviewSetSignature,
   getTopicRequestTimeoutMs,
+  requestTopicKeywordScoresInBatches,
   requestTopicAnalysis,
 } from './topicAnalysisRequest.js';
+
+const TOPIC_LABELS = [
+  'Quality', 'Performance / Functionality', 'Features / Content',
+  'Service / Support', 'Delivery / Transaction', 'Price / Value',
+  'Usability / Experience', 'Accuracy / Expectations',
+  'Availability / Accessibility', 'Environment / Location', 'Other / General',
+];
+
+function makeKeywordScoreResponse(candidates) {
+  return {
+    success: true,
+    results: candidates.map((candidate, reviewIndex) => ({
+      reviewIndex,
+      topicScores: TOPIC_LABELS.map((label, topicIndex) => ({
+        label,
+        score: (Number(candidate.split('-').at(-1)) + topicIndex) / 1000,
+      })),
+    })),
+  };
+}
 
 test('deduplicates identical page review sets and reuses only successful results', async () => {
   let calls = 0;
@@ -278,6 +299,108 @@ test('keyword scoring requests use the raw-score operation response shape', asyn
   assert.equal(JSON.parse(requestOptions.body).operation, 'keyword-scores');
   assert.equal(result.results[0].topicScores.length, 11);
   assert.equal(result.results[0].topics, undefined);
+});
+
+test('splits 253 keyword candidates at the backend review limit and restores global indexes', async () => {
+  const candidates = Array.from({ length: 253 }, (_, index) => `candidate-${index}`);
+  const batchSizes = [];
+  const response = await requestTopicKeywordScoresInBatches(candidates, async (batch) => {
+    batchSizes.push(batch.length);
+    return makeKeywordScoreResponse(batch);
+  });
+
+  assert.deepEqual(batchSizes, [50, 50, 50, 50, 50, 3]);
+  assert.equal(response.results.length, candidates.length);
+  assert.deepEqual(
+    response.results.map(({ reviewIndex }) => reviewIndex),
+    candidates.map((_, index) => index),
+  );
+  assert.equal(response.results[50].topicScores[0].score, 0.05);
+  assert.equal(response.results[252].topicScores[0].score, 0.252);
+});
+
+test('splits a batch again after HTTP 413 and keeps candidate-to-score alignment', async () => {
+  const candidates = Array.from({ length: 27 }, (_, index) => `candidate-${index}`);
+  const attemptedBatchSizes = [];
+  const successfulBatchSizes = [];
+  const response = await requestTopicKeywordScoresInBatches(
+    candidates,
+    async (batch) => {
+      attemptedBatchSizes.push(batch.length);
+      if (batch.length > 8) {
+        throw Object.assign(new Error('Topic request count exceeds configured limit.'), {
+          httpStatus: 413,
+          code: 'TOPIC_INPUT_LIMIT_EXCEEDED',
+        });
+      }
+      successfulBatchSizes.push(batch.length);
+      return makeKeywordScoreResponse(batch);
+    },
+    27,
+  );
+
+  assert.ok(attemptedBatchSizes.includes(27));
+  assert.ok(attemptedBatchSizes.every((size) => size <= 27));
+  assert.deepEqual(successfulBatchSizes, [7, 7, 7, 6]);
+  assert.ok(successfulBatchSizes.every((size) => size <= 8));
+  assert.equal(response.results.length, candidates.length);
+  response.results.forEach((result, index) => {
+    assert.equal(result.reviewIndex, index);
+    assert.equal(result.topicScores[0].score, index / 1000);
+  });
+});
+
+test('does not return partial keyword scores when a required batch fails', async () => {
+  let calls = 0;
+  await assert.rejects(
+    requestTopicKeywordScoresInBatches(
+      Array.from({ length: 51 }, (_, index) => `candidate-${index}`),
+      async (batch) => {
+        calls += 1;
+        if (calls > 1) {
+          throw Object.assign(new Error('Keyword worker unavailable.'), {
+            httpStatus: 503,
+            code: 'TOPIC_WORKER_UNAVAILABLE',
+          });
+        }
+        return makeKeywordScoreResponse(batch);
+      },
+    ),
+    { httpStatus: 503, code: 'TOPIC_WORKER_UNAVAILABLE' },
+  );
+  assert.equal(calls, 2);
+});
+
+test('reports HTTP 413 topic input limits without logging candidate text', async () => {
+  const originalWarn = console.warn;
+  let warning;
+  console.warn = (...args) => { warning = args; };
+  try {
+    await assert.rejects(
+      requestTopicAnalysis(['Private keyword candidate.'], 'steam', {
+        clientRequestId: 'steam-keyword-limit',
+        operation: 'keyword-scores',
+        requestContext: 'topic-keyword-scoring',
+        fetchImpl: async () => ({
+          ok: false,
+          status: 413,
+          json: async () => ({
+            success: false,
+            code: 'TOPIC_INPUT_LIMIT_EXCEEDED',
+            error: 'Topic request count exceeds the configured maximum.',
+          }),
+        }),
+      }),
+      (error) => error.httpStatus === 413 && error.code === 'TOPIC_INPUT_LIMIT_EXCEEDED',
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warning[1].status, 413);
+  assert.equal(warning[1].code, 'TOPIC_INPUT_LIMIT_EXCEEDED');
+  assert.equal(warning[1].operation, 'keyword-scores');
+  assert.equal(JSON.stringify(warning).includes('Private keyword candidate.'), false);
 });
 
 test('an explicit forced refresh is forwarded to the backend cache boundary', async () => {
