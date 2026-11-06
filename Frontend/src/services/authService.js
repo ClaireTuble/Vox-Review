@@ -2,6 +2,11 @@ import { adminSupabase, supabase } from '../lib/supabase.js';
 import { APP_BASE_URL } from './appConfig.js';
 import { API_BASE_URL } from './apiConfig.js';
 import {
+  changeSuperAdminPassword,
+  revokeSuperAdminRefreshTokens,
+  signOutCurrentSuperAdminSession,
+} from '../SuperAdmin/utils/securitySettings.js';
+import {
   buildProfileUser,
   normalizeSupabaseUser,
 } from './userProfileSync.js';
@@ -438,8 +443,7 @@ supabase.auth.onAuthStateChange((event, session) => {
   } else if (!googleOAuthSessionGate.canPersistRegularUserSession()) {
     return;
   } else if (event === 'INITIAL_SESSION' && !session) {
-    localStorage.removeItem(USER_AUTH_STORAGE_KEY);
-    lastRegularUserId = null;
+    console.info('VoxReview auth: INITIAL_SESSION reported no session; preserving the local session mirror.');
   } else if (session?.user && session.access_token) {
     persistRegularUserSession(session, { clearLogoutMarker: event === 'SIGNED_IN' });
     if (event === 'INITIAL_SESSION') {
@@ -531,7 +535,7 @@ export const authService = {
       }
 
       if (data.user?.app_metadata?.role !== 'superadmin') {
-        await adminSupabase.auth.signOut();
+        await adminSupabase.auth.signOut({ scope: 'local' });
         throw new Error('Access denied. This login is for administrators only.');
       }
 
@@ -758,7 +762,7 @@ export const authService = {
         }
       }
 
-      await adminSupabase.auth.signOut();
+      await signOutCurrentSuperAdminSession(adminSupabase.auth);
       localStorage.removeItem(SUPERADMIN_AUTH_STORAGE_KEY);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('voxreview_superadmin_auth_sync', { detail: null }));
@@ -1344,7 +1348,7 @@ export const authService = {
 
       const { data: userData, error: userError } = await adminSupabase.auth.getUser();
       if (userError || userData.user?.app_metadata?.role !== 'superadmin') {
-        await adminSupabase.auth.signOut();
+        await adminSupabase.auth.signOut({ scope: 'local' });
         localStorage.removeItem(SUPERADMIN_AUTH_STORAGE_KEY);
         return null;
       }
@@ -1357,6 +1361,18 @@ export const authService = {
     } catch {
       localStorage.removeItem(SUPERADMIN_AUTH_STORAGE_KEY);
       return null;
+    }
+  },
+
+  changeSuperAdminPassword: async (currentPassword, newPassword) => (
+    changeSuperAdminPassword(adminSupabase.auth, currentPassword, newPassword)
+  ),
+
+  revokeSuperAdminRefreshTokens: async () => {
+    await revokeSuperAdminRefreshTokens(adminSupabase.auth);
+    localStorage.removeItem(SUPERADMIN_AUTH_STORAGE_KEY);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('voxreview_superadmin_auth_sync', { detail: null }));
     }
   },
 

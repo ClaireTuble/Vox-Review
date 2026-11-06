@@ -88,6 +88,11 @@ test("authorized Super Admin can still retrieve user history and activity", asyn
     "/api/admin/users",
     createRequireSuperAdmin({
       getUser: async () => ({ data: { user: admin }, error: null }),
+      getTokenClaims: () => ({
+        sub: admin.id,
+        session_id: "8c6eb37c-32d1-4f2a-9d65-44bc3a0509c7",
+      }),
+      getSessionStatus: async () => ({ data: true, error: null }),
     }),
     handler,
   );
