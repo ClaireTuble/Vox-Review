@@ -122,15 +122,13 @@ export async function createNotification({
 }
 
 /**
- * Extract IP address from a request object (Express).
+ * Use Express's resolved client address; forwarding headers are untrusted unless
+ * Express is explicitly configured with verified proxy addresses or ranges.
+ * Do not enable broad trust-proxy settings for production ingress.
  */
 export function extractClientIp(req) {
   if (!req) return null;
   return (
-    req.get?.("x-forwarded-for")?.split(",")[0]?.trim() ||
-    req.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() ||
-    req.get?.("x-client-ip") ||
-    req.headers?.["x-client-ip"] ||
     req.ip ||
     req.socket?.remoteAddress ||
     req.connection?.remoteAddress ||

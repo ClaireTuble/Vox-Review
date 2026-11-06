@@ -1,9 +1,20 @@
 import { LogOut } from 'lucide-react';
 import '../SuperAdmin/css/modal.css';
 
-export default function LogoutConfirmationModal({ onCancel, onConfirm }) {
+export default function LogoutConfirmationModal({
+  onCancel,
+  onConfirm,
+  submitting = false,
+  error = '',
+}) {
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onCancel}>
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={() => {
+        if (!submitting) onCancel();
+      }}
+    >
       <div
         className="modal-content-card"
         role="dialog"
@@ -23,13 +34,20 @@ export default function LogoutConfirmationModal({ onCancel, onConfirm }) {
             </div>
           </div>
         </div>
+        {error && <p role="alert" className="platform-confirmation-error">{error}</p>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 24px' }}>
-          <button type="button" className="modal-close-btn" onClick={onCancel}>
+          <button
+            type="button"
+            className="modal-close-btn"
+            onClick={onCancel}
+            disabled={submitting}
+          >
             Cancel
           </button>
           <button
             type="button"
             onClick={onConfirm}
+            disabled={submitting}
             style={{
               border: '1px solid rgba(248, 113, 113, 0.35)',
               borderRadius: '8px',
@@ -40,7 +58,7 @@ export default function LogoutConfirmationModal({ onCancel, onConfirm }) {
               fontWeight: 700,
             }}
           >
-            Log Out
+            {submitting ? 'Signing out…' : 'Log Out'}
           </button>
         </div>
       </div>

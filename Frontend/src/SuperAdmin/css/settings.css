@@ -209,6 +209,7 @@
 .settings-content-area {
   flex: 1;
   min-width: 0;
+  max-width: 960px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -454,6 +455,56 @@
   color: #60a5fa;
 }
 
+.submit-password-btn:disabled,
+.control-btn:disabled,
+.open-logs-btn:disabled,
+.settings-danger-action:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.settings-content-area button:focus-visible,
+.settings-content-area select:focus-visible,
+.settings-confirmation-dialog button:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 3px;
+}
+
+.setting-informational-badge {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.settings-confirmation-dialog {
+  width: min(480px, calc(100vw - 32px));
+}
+
+.settings-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px 20px;
+}
+
+.settings-danger-action {
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.22);
+  color: #fecaca;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 /* Responsive adjust for mobile */
 @media (max-width: 900px) {
   .settings-layout-wrapper {
@@ -474,5 +525,24 @@
   .logs-link-banner {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .settings-card-panel {
+    padding: 18px;
+  }
+
+  .account-status-right {
+    flex-wrap: wrap;
+  }
+
+  .settings-dialog-actions {
+    flex-wrap: wrap;
+    padding: 14px 18px 18px;
+  }
+
+  .settings-dialog-actions > button {
+    flex: 1 1 auto;
   }
 }
