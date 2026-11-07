@@ -39,7 +39,7 @@ export default function NoReviewsView({ platform = '', onRescan, isRescanning = 
           <li>View the generated results.</li>
         </ol>
         <p className="guidance-footer-note">
-          VoxReview currently supports Shopee, Lazada, Google Maps, Google Play Store, and Steam. Additional websites will be supported in future updates.
+          VoxReview currently supports Shopee, Lazada, Google Play Store, and Steam. Additional websites will be supported in future updates.
         </p>
       </div>
 

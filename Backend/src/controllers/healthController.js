@@ -6,7 +6,6 @@ import { createNotification } from "../utils/auditLogger.js";
 const PLATFORM_META = {
   shopee:     { name: "Shopee",            category: "E-Commerce",    domain: "shopee.ph" },
   lazada:     { name: "Lazada",            category: "E-Commerce",    domain: "lazada.com.ph" },
-  google:     { name: "Google Maps",       category: "Places & Maps", domain: "google.com/maps" },
   googleplay: { name: "Google Play Store", category: "Mobile Apps",   domain: "play.google.com" },
   steam:      { name: "Steam",             category: "Gaming",        domain: "store.steampowered.com" },
 };
@@ -235,6 +234,7 @@ export async function reportHealth(req, res) {
 
 export function isPlatformActive(platformKey) {
   const code = getPlatformCode({ platform: platformKey });
+  if (!VALID_PLATFORMS.includes(code)) return false;
   const item = memoryHealthStore.get(code);
   if (!item) return true;
   return item.platformStatus !== "Disabled" && item.is_active !== false;

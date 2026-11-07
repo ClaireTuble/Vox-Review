@@ -6,7 +6,6 @@ import {
   WifiOff,
   Loader2,
   Store,
-  MapPin,
   Smartphone,
   Gamepad2,
   ArrowRight,
@@ -19,15 +18,17 @@ import {
   togglePlatformActive,
   getCachedPlatformHealth,
   FALLBACK_PLATFORMS,
+  filterSupportedPlatforms,
 } from '../data/platforms.js';
 import PlatformDisableConfirmationModal from '../components/PlatformDisableConfirmationModal.jsx';
-import { mockCurrentUser } from '../data/users.js';
+import authService from '../../services/authService.js';
 import '../css/dashboard.css';
 import '../css/sidebar.css';
 import '../css/header.css';
 import '../css/cards.css';
 import '../css/tables.css';
 import '../css/responsive.css';
+import '../css/settings.css';
 
 const PLATFORM_META = {
   shopee: {
@@ -41,12 +42,6 @@ const PLATFORM_META = {
     domain: 'lazada.com.ph',
     category: 'E-Commerce',
     description: 'Product reviews and ratings from Lazada online shopping pages.',
-  },
-  google: {
-    icon: MapPin,
-    domain: 'google.com/maps',
-    category: 'Places & Maps',
-    description: 'Business, place, and location reviews on Google Maps.',
   },
   googleplay: {
     icon: Smartphone,
@@ -66,17 +61,31 @@ const HEALTH_POLL_INTERVAL = 30_000;
 
 export default function PlatformSettings({ activeTab, setActiveTab, onSignOut }) {
   const cachedData = getCachedPlatformHealth();
-  const [platforms, setPlatforms] = useState(cachedData || FALLBACK_PLATFORMS);
+  const [platforms, setPlatforms] = useState(filterSupportedPlatforms(cachedData || FALLBACK_PLATFORMS).map((platform) => (
+    typeof platform.is_active === 'boolean'
+      ? platform
+      : { ...platform, platformStatus: 'Unknown', is_active: undefined }
+  )));
   const [loading, setLoading] = useState(!cachedData);
   const [toggleLoading, setToggleLoading] = useState({});
-  const [backendAvailable, setBackendAvailable] = useState(true);
+  const [backendAvailable, setBackendAvailable] = useState(false);
   const [actionNotice, setActionNotice] = useState(null);
   const [platformPendingDisable, setPlatformPendingDisable] = useState(null);
+  const currentUser = authService.getCurrentSuperAdminUser();
+  const displayName = currentUser?.user_metadata?.full_name
+    || currentUser?.user_metadata?.name
+    || currentUser?.user_metadata?.username
+    || currentUser?.email;
+  const profileUser = {
+    name: typeof displayName === 'string' && displayName.trim() ? displayName : 'Name not provided',
+    email: typeof currentUser?.email === 'string' && currentUser.email.trim()
+      ? currentUser.email
+      : 'Email not provided',
+  };
 
   const getPlatformCode = (platform) => platform.platform || ({
     Shopee: 'shopee',
     Lazada: 'lazada',
-    'Google Maps': 'google',
     'Google Play Store': 'googleplay',
     Steam: 'steam',
   }[platform.name]);
@@ -127,7 +136,8 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
   };
 
   const handleTogglePlatform = async (platform) => {
-    const currentIsActive = platform.platformStatus !== 'Disabled' && platform.is_active !== false;
+    if (!backendAvailable || typeof platform.is_active !== 'boolean') return;
+    const currentIsActive = platform.is_active;
     if (currentIsActive) {
       setPlatformPendingDisable(platform);
       return;
@@ -154,7 +164,11 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
         const data = await fetchPlatformHealth();
         if (mounted) {
           if (Array.isArray(data) && data.length > 0) {
-            setPlatforms(data);
+            setPlatforms(filterSupportedPlatforms(data).map((platform) => (
+              typeof platform.is_active === 'boolean'
+                ? platform
+                : { ...platform, platformStatus: 'Unknown', is_active: undefined }
+            )));
           }
           setBackendAvailable(true);
         }
@@ -174,10 +188,9 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
   }, []);
 
   const totalPlatforms = platforms.length;
-  const activePlatformsCount = platforms.filter(
-    (p) => p.platformStatus !== 'Disabled' && p.is_active !== false
-  ).length;
-  const disabledPlatformsCount = totalPlatforms - activePlatformsCount;
+  const activePlatformsCount = platforms.filter((p) => p.is_active === true).length;
+  const disabledPlatformsCount = platforms.filter((p) => p.is_active === false).length;
+  const unknownPlatformsCount = totalPlatforms - activePlatformsCount - disabledPlatformsCount;
 
   return (
     <div className="superadmin-page-container">
@@ -187,7 +200,7 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
         <Header
           title="Platform Settings"
           subtitle="Manage which supported platforms are available for review analysis."
-          user={mockCurrentUser}
+          user={profileUser}
           onNavigate={setActiveTab}
         />
 
@@ -210,7 +223,7 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
             {!backendAvailable && (
               <div className="health-warning-banner">
                 <WifiOff size={15} />
-                <span>Unable to reach platform management service. Showing last known configuration.</span>
+                <span>Unable to reach platform management service. Displayed values may be last known; changes are disabled until the service is available.</span>
               </div>
             )}
 
@@ -227,6 +240,10 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
               <div className="mgmt-metric-badge disabled-badge">
                 <span className="metric-num">{disabledPlatformsCount}</span>
                 <span className="metric-label">Disabled</span>
+              </div>
+              <div className="mgmt-metric-badge">
+                <span className="metric-num">{unknownPlatformsCount}</span>
+                <span className="metric-label">Unknown</span>
               </div>
 
               <div className="mgmt-health-cta">
@@ -265,13 +282,14 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
                 };
                 const PlatformIcon = meta.icon;
                 const isToggling = !!toggleLoading[platform.name];
-                const isActive = platform.platformStatus !== 'Disabled' && platform.is_active !== false;
+                const availabilityKnown = typeof platform.is_active === 'boolean';
+                const isActive = platform.is_active === true;
                 const rawHealth = platform.scrapingStatus || platform.status || 'Unavailable';
 
                 return (
                   <div
                     key={platform.name}
-                    className={`platform-mgmt-card ${isActive ? 'is-active' : 'is-disabled'}`}
+                    className={`platform-mgmt-card ${!availabilityKnown ? 'is-unknown' : isActive ? 'is-active' : 'is-disabled'}`}
                   >
                     {/* Card Top: Icon, Name, Domain, Category */}
                     <div className="mgmt-card-header">
@@ -297,14 +315,16 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
                       <div className="mgmt-availability-info">
                         <span className="mgmt-control-label">Platform Availability</span>
                         <div className="mgmt-status-line">
-                          <span className={`mgmt-status-indicator ${isActive ? 'status-dot-active' : 'status-dot-disabled'}`} />
-                          <span className={`mgmt-status-text ${isActive ? 'text-active' : 'text-disabled'}`}>
-                            {isActive ? 'Active' : 'Disabled'}
+                          <span className={`mgmt-status-indicator ${!availabilityKnown ? '' : isActive ? 'status-dot-active' : 'status-dot-disabled'}`} />
+                          <span className={`mgmt-status-text ${!availabilityKnown ? '' : isActive ? 'text-active' : 'text-disabled'}`}>
+                            {!availabilityKnown ? 'Unknown' : isActive ? 'Active' : 'Disabled'}
                           </span>
                           <span className="mgmt-status-subtext">
-                            {isActive
-                              ? '• Available for user scraping & analysis'
-                              : '• Blocked from scraping & analysis'}
+                            {!availabilityKnown
+                              ? '• Live availability configuration is unavailable'
+                              : isActive
+                                ? '• Available for user scraping & analysis'
+                                : '• Blocked from scraping & analysis'}
                           </span>
                         </div>
                       </div>
@@ -314,7 +334,7 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
                         type="button"
                         className={`mgmt-toggle-switch ${isActive ? 'on' : 'off'}`}
                         onClick={() => handleTogglePlatform(platform)}
-                        disabled={isToggling}
+                        disabled={isToggling || !backendAvailable || !availabilityKnown}
                         title={`Click to ${isActive ? 'Disable' : 'Enable'} ${platform.name}`}
                         aria-label={`Toggle ${platform.name} availability`}
                       >
@@ -324,7 +344,7 @@ export default function PlatformSettings({ activeTab, setActiveTab, onSignOut })
                           <span className="mgmt-toggle-thumb" />
                         )}
                         <span className="mgmt-toggle-text">
-                          {isToggling ? 'Updating…' : (isActive ? 'Active' : 'Disabled')}
+                          {isToggling ? 'Updating…' : !availabilityKnown ? 'Unknown' : (isActive ? 'Active' : 'Disabled')}
                         </span>
                       </button>
                     </div>

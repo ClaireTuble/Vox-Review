@@ -4,9 +4,6 @@ import supabase from "../config/supabase.js";
 const PLATFORM_ALIASES = new Map([
   ["shopee", "shopee"],
   ["lazada", "lazada"],
-  ["google", "google"],
-  ["googlemaps", "google"],
-  ["googlereviews", "google"],
   ["googleplay", "googleplay"],
   ["googleplaystore", "googleplay"],
   ["steam", "steam"],
@@ -109,7 +106,6 @@ export function createGetPlatformAvailability({
       const names = {
         shopee: "Shopee",
         lazada: "Lazada",
-        google: "Google Maps",
         googleplay: "Google Play Store",
         steam: "Steam",
       };

@@ -7,6 +7,12 @@ from typing import Any
 
 ENVIRONMENT_LOCATION = "Environment / Location"
 DELIVERY_TRANSACTION = "Delivery / Transaction"
+SUPPORTED_PLATFORMS = frozenset({
+    "shopee",
+    "lazada",
+    "google play store",
+    "steam",
+})
 
 _TRANSACTION_EVIDENCE = re.compile(
     r"\b(?:"
@@ -52,16 +58,13 @@ _NEGATED_EVIDENCE_PREFIX = re.compile(
 
 
 def normalize_platform(platform: str | None) -> str | None:
-    """Normalize supported platform identifiers while preserving unknowns."""
+    """Normalize supported platform identifiers without promoting unknowns."""
     if not isinstance(platform, str) or not platform.strip():
         return None
 
     normalized = platform.strip().lower().replace("_", " ").replace("-", " ")
     normalized = " ".join(normalized.split())
     aliases = {
-        "google": "google maps",
-        "google reviews": "google maps",
-        "maps": "google maps",
         "google play": "google play store",
         "googleplay": "google play store",
     }
@@ -100,10 +103,10 @@ def is_topic_applicable_for_platform(
 ) -> bool:
     """Check only the two topics with established platform applicability rules."""
     normalized_platform = normalize_platform(platform)
+    if normalized_platform is not None and normalized_platform not in SUPPORTED_PLATFORMS:
+        return False
 
     if topic_label == ENVIRONMENT_LOCATION:
-        if normalized_platform == "google maps":
-            return True
         if normalized_platform in {
             "shopee",
             "lazada",
@@ -111,10 +114,8 @@ def is_topic_applicable_for_platform(
             "steam",
         }:
             return has_physical_location_evidence(review_text, normalized_platform)
-
     if topic_label == DELIVERY_TRANSACTION:
         if normalized_platform in {
-            "google maps",
             "google play store",
             "steam",
         }:

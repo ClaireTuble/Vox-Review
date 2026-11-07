@@ -42,21 +42,22 @@ async function callAvailabilityMiddleware(middleware, platform) {
   return { statusCode, payload, nextCalled, req };
 }
 
-test("normalizes every supported platform name and API key", () => {
+test("normalizes supported platform names and rejects retired Google Maps aliases", () => {
   assert.deepEqual([
     normalizePlatformKey("Shopee"),
     normalizePlatformKey("Lazada"),
-    normalizePlatformKey("Google Maps"),
     normalizePlatformKey("Google Play Store"),
     normalizePlatformKey("Steam"),
-  ], ["shopee", "lazada", "google", "googleplay", "steam"]);
+  ], ["shopee", "lazada", "googleplay", "steam"]);
+  assert.equal(normalizePlatformKey("Google Maps"), null);
+  assert.equal(normalizePlatformKey("googlemaps"), null);
+  assert.equal(normalizePlatformKey("googlereviews"), null);
 });
 
-test("database availability blocks disabled platforms and keeps the other four usable", async () => {
+test("database availability blocks disabled platforms without affecting supported platforms", async () => {
   const rows = new Map([
     ["shopee", { platform: "shopee", is_active: true }],
     ["lazada", { platform: "lazada", is_active: true }],
-    ["google", { platform: "google", is_active: true }],
     ["googleplay", { platform: "googleplay", is_active: true }],
     ["steam", { platform: "steam", is_active: true }],
   ]);
@@ -65,7 +66,6 @@ test("database availability blocks disabled platforms and keeps the other four u
   const platforms = [
     ["shopee", "Shopee"],
     ["lazada", "Lazada"],
-    ["google", "Google Maps"],
     ["googleplay", "Google Play Store"],
     ["steam", "Steam"],
   ];
@@ -88,6 +88,42 @@ test("database availability blocks disabled platforms and keeps the other four u
     const reenabled = await callAvailabilityMiddleware(middleware, disabledName);
     assert.equal(reenabled.nextCalled, true, `${disabledName} should work after re-enabling`);
   }
+});
+
+test("Google Maps aliases are rejected before checking database availability", async () => {
+  let availabilityChecks = 0;
+  const middleware = createRequirePlatformAvailable({
+    checkAvailability: async () => {
+      availabilityChecks += 1;
+      return true;
+    },
+  });
+
+  for (const platform of ["Google Maps", "googlemaps", "googlereviews", "google"]) {
+    const result = await callAvailabilityMiddleware(middleware, platform);
+    assert.equal(result.statusCode, 400);
+    assert.equal(result.payload.error, "INVALID_PLATFORM");
+    assert.equal(result.nextCalled, false);
+  }
+  assert.equal(availabilityChecks, 0);
+
+  let endpointStatus = null;
+  let endpointPayload = null;
+  const endpoint = createGetPlatformAvailability({
+    checkAvailability: async () => {
+      availabilityChecks += 1;
+      return true;
+    },
+  });
+  await endpoint({ params: { platformKey: "googlemaps" } }, {
+    status(code) {
+      endpointStatus = code;
+      return { json(body) { endpointPayload = body; return body; } };
+    },
+  });
+  assert.equal(endpointStatus, 400);
+  assert.equal(endpointPayload.error, "INVALID_PLATFORM");
+  assert.equal(availabilityChecks, 0);
 });
 
 test("database health fields do not override Super Admin availability", async () => {
@@ -136,7 +172,6 @@ test("availability endpoint reports canonical platform names and the database-co
   const platforms = [
     ["shopee", "Shopee"],
     ["lazada", "Lazada"],
-    ["google", "Google Maps"],
     ["googleplay", "Google Play Store"],
     ["steam", "Steam"],
   ];

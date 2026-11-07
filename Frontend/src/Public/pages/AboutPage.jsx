@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Brain, Shield, Zap, Globe, BarChart3, Users, BookmarkCheck, RefreshCw, Star, CheckCircle, ArrowRight, Store, MapPin, Smartphone, Gamepad2, Heart } from 'lucide-react';
+import { Brain, Shield, Zap, Globe, BarChart3, Users, BookmarkCheck, RefreshCw, Star, CheckCircle, ArrowRight, Store, Smartphone, Gamepad2, Heart } from 'lucide-react';
 import { useVoxLogo } from '../../utils/useVoxLogo.js';
 import Navigation from '../components/Navigation.jsx';
 import '../css/AboutPage.css';
@@ -145,7 +145,7 @@ export default function AboutPage() {
             <div className="step-number">2</div>
             <div className="step-content">
               <h4>Browse Supported Platforms</h4>
-              <p>Visit any supported page on Shopee, Lazada, Google Maps, Google Play Store, or Steam.</p>
+              <p>Visit any supported page on Shopee, Lazada, Google Play Store, or Steam.</p>
             </div>
           </div>
 
@@ -174,9 +174,9 @@ export default function AboutPage() {
             <Globe size={14} />
             Supported Platforms
           </div>
-          <h2 className="section-title">Works Across 5 Supported Platforms</h2>
+          <h2 className="section-title">Works Across 4 Supported Platforms</h2>
           <p className="section-description">
-            VoxReview integrates seamlessly with supported shopping, place, mobile app, and gaming platforms.
+            VoxReview integrates seamlessly with Shopee, Lazada, Google Play Store, and Steam.
           </p>
         </div>
 
@@ -193,13 +193,6 @@ export default function AboutPage() {
               <Store size={28} />
             </div>
             <h4>Lazada</h4>
-          </div>
-
-          <div className="platform-card">
-            <div className="platform-icon">
-              <MapPin size={28} />
-            </div>
-            <h4>Google Maps</h4>
           </div>
 
           <div className="platform-card">
@@ -271,7 +264,7 @@ export default function AboutPage() {
         <div className="team-section">
           <h3>Customer Feedback Intelligence</h3>
           <p>
-            VoxReview is a customer feedback analysis platform that helps users understand large amounts of online reviews more efficiently. It analyzes customer feedback, identifies emotions and discussion topics, and helps users prioritize reviews that may require attention across shopping, place, app, and gaming platforms.
+            VoxReview is a customer feedback analysis platform that helps users understand large amounts of online reviews more efficiently. It analyzes customer feedback, identifies emotions and discussion topics, and helps users prioritize reviews that may require attention across shopping, mobile app, and gaming platforms.
           </p>
         </div>
       </section>
@@ -284,7 +277,7 @@ export default function AboutPage() {
             <span>VoxReview</span>
           </div>
           <p className="footer-text">
-            Customer feedback analysis platform for shopping, place, app, and gaming platforms.
+            Customer feedback analysis platform for shopping, mobile app, and gaming platforms.
           </p>
           <div className="footer-links">
             <Link to="/" className="footer-link">Home</Link>

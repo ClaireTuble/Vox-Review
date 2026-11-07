@@ -72,22 +72,6 @@
     },
     {
       "matches": [
-        "https://www.google.com/maps/*",
-        "https://maps.google.com/*",
-        "https://*.google.com/maps/*",
-        "https://*.google.com.ph/maps/*",
-        "https://maps.google.com.ph/*"
-      ],
-      "js": [
-        "scraper/detector.js",
-        "scraper/platforms/google.js",
-        "scraper/scraperManager.js",
-        "content.js"
-      ],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": [
         "https://play.google.com/*"
       ],
       "js": [

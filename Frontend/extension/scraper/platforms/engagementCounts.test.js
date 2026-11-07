@@ -92,37 +92,6 @@ test("Lazada excludes metadata-only body text and preserves short and emoji revi
   assert.deepEqual(Array.from(result.reviews, (review) => review.text), ["OK", "👍"]);
 });
 
-test("Google Maps likes are parsed from the matching review card button", async () => {
-  const cards = [2, 10].map((count, index) => ({
-    querySelector(selector) {
-      if (selector === ".wiI7pd") return element(`Maps review ${index + 1}`);
-      if (selector === "button.gllhef") {
-        return element(String(count), { title: `${count} likes`, "aria-label": `${count} likes` });
-      }
-      return null;
-    },
-    querySelectorAll: () => [],
-  }));
-  const document = {
-    title: "Google Place",
-    querySelector: () => null,
-    querySelectorAll(selector) {
-      return selector === ".jftiEf" ? cards : [];
-    },
-  };
-  const scrape = await loadScraper("google.js", {
-    document,
-    window: { location: { href: "https://www.google.com/maps/place/Test", pathname: "/maps/place/Test" } },
-  }, "scrapeGoogleReviews");
-
-  const result = scrape();
-
-  assert.deepEqual(Array.from(result.reviews, (review) => [review.text, review.helpfulCount]), [
-    ["Maps review 1", 2],
-    ["Maps review 2", 10],
-  ]);
-});
-
 test("Google Play thumbs-up counts use the matching review card data attribute", async () => {
   const cards = [
     { id: "play-1", count: "6026", text: "Play review 1" },

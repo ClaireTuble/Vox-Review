@@ -1,6 +1,6 @@
 import { Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { Store, MapPin, Smartphone, Gamepad2, ExternalLink, CheckCircle2, Globe, FileText, Puzzle, Sparkles, Info } from 'lucide-react';
+import { Store, Smartphone, Gamepad2, ExternalLink, CheckCircle2, Globe, FileText, Puzzle, Sparkles, Info } from 'lucide-react';
 import AuthNavigation from '../components/AuthNavigation.jsx';
 import { useVoxLogo } from '../../utils/useVoxLogo.js';
 import authService from '../../services/authService.js';
@@ -23,14 +23,6 @@ const SUPPORTED_WEBSITES = [
     buttonText: 'Open Lazada',
     iconClass: 'lazada',
     Icon: Store,
-  },
-  {
-    name: 'Google Maps',
-    url: 'https://maps.google.com/',
-    description: 'Analyze reviews from businesses and places on Google Maps.',
-    buttonText: 'Open Google Maps',
-    iconClass: 'maps',
-    Icon: MapPin,
   },
   {
     name: 'Google Play',
@@ -132,7 +124,7 @@ export default function AfterLogPage() {
         <div className="afterlog-section-header">
           <h2 className="afterlog-section-title">Supported Websites</h2>
           <p className="afterlog-section-subtitle">
-            Select any supported platform to browse products, places, apps, or games with customer reviews.
+            Select any supported platform to browse products, apps, or games with customer reviews.
           </p>
         </div>
 
@@ -211,7 +203,7 @@ export default function AfterLogPage() {
             <span className="footer-title">VoxReview</span>
           </div>
           <p className="footer-copy">
-            © {new Date().getFullYear()} VoxReview. AI-Powered Review Analysis for Shopping, Place, and App Platforms. All rights reserved.
+            © {new Date().getFullYear()} VoxReview. AI-Powered Review Analysis for Shopping, Mobile App, and Gaming Platforms. All rights reserved.
           </p>
         </div>
       </footer>

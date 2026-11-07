@@ -1,5 +1,8 @@
 import authService from '../../services/authService.js';
 import { API_BASE_URL } from '../../services/apiConfig.js';
+import { filterSupportedPlatforms, isSupportedPlatformCode } from '../utils/platforms.js';
+
+export { filterSupportedPlatforms };
 
 let cachedPlatforms = null;
 
@@ -12,6 +15,9 @@ export function getCachedPlatformHealth() {
 }
 
 export function requestPlatformHealth(platform) {
+  if (!isSupportedPlatformCode(platform)) {
+    return Promise.reject(new Error('Health checks are unavailable for unsupported platforms.'));
+  }
   if (typeof window === 'undefined') {
     return Promise.reject(new Error('Health checks require a browser page.'));
   }
@@ -54,8 +60,8 @@ export async function fetchPlatformHealth() {
   if (res.ok) {
     const data = await res.json();
     if (data.success) {
-      cachedPlatforms = data.platforms;
-      return data.platforms;
+      cachedPlatforms = filterSupportedPlatforms(data.platforms);
+      return cachedPlatforms;
     }
   }
 
@@ -89,24 +95,6 @@ export const FALLBACK_PLATFORMS = [
     name: 'Lazada',
     category: 'E-Commerce',
     domain: 'lazada.com.ph',
-    supportStatus: 'Supported',
-    platformStatus: 'Active',
-    scrapingStatus: 'Unavailable',
-    lastChecked: 'Never',
-    lastSuccessfulCheck: 'Never',
-    errorCount: 0,
-    lastError: null,
-    errorStatus: null,
-    errorStage: null,
-    errorMessage: null,
-    status: 'Unavailable',
-    statusBg: 'rgba(107,114,128,0.08)',
-    statusColor: '#9CA3AF',
-  },
-  {
-    name: 'Google Maps',
-    category: 'Places & Maps',
-    domain: 'google.com/maps',
     supportStatus: 'Supported',
     platformStatus: 'Active',
     scrapingStatus: 'Unavailable',
@@ -163,7 +151,7 @@ export const FALLBACK_PLATFORMS = [
  * Toggles a platform's is_active state via the Super Admin API.
  * Requires a valid Super Admin access token.
  *
- * @param {string} platformKey - e.g. 'shopee', 'lazada', 'google', 'googleplay', 'steam'
+ * @param {string} platformKey - a supported platform code
  * @param {string} [accessToken] - Super Admin JWT (auto-fetched if not provided)
  * @param {boolean|null} [desiredStatus=null] - true → Active, false → Disabled, null → toggle
  * @param {string|null} [confirmationPassword=null] - Super Admin password for disabling
@@ -175,6 +163,9 @@ export async function togglePlatformActive(
   desiredStatus = null,
   confirmationPassword = null,
 ) {
+  if (!isSupportedPlatformCode(platformKey)) {
+    throw new Error('Platform availability cannot be changed for unsupported platforms.');
+  }
   let token = accessToken;
   if (!token) {
     token = await authService.getSuperAdminAccessToken();
