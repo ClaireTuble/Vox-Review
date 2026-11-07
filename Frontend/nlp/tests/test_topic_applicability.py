@@ -11,8 +11,10 @@ from topic_applicability import (
 
 class TopicApplicabilityTests(unittest.TestCase):
     def test_normalizes_platform_names_received_from_frontend(self):
-        self.assertEqual(normalize_platform("google"), "google maps")
-        self.assertEqual(normalize_platform("Google Reviews"), "google maps")
+        self.assertEqual(normalize_platform("google"), "google")
+        self.assertEqual(normalize_platform("Google Reviews"), "google reviews")
+        self.assertEqual(normalize_platform("maps"), "maps")
+        self.assertEqual(normalize_platform("Google Maps"), "google maps")
         self.assertEqual(normalize_platform("googleplay"), "google play store")
         self.assertEqual(normalize_platform("Google Play Store"), "google play store")
         self.assertEqual(normalize_platform("Steam"), "steam")
@@ -77,23 +79,48 @@ class TopicApplicabilityTests(unittest.TestCase):
             "Payment failed when I tried to purchase the expansion."
         ))
 
-    def test_google_maps_environment_remains_applicable_without_text_cue(self):
+    def test_google_maps_names_are_rejected_as_unsupported(self):
+        for platform in (
+            "Google Maps",
+            "google",
+            "Google Reviews",
+            "maps",
+            "googlemaps",
+            "googlereviews",
+        ):
+            with self.subTest(platform=platform):
+                self.assertFalse(is_topic_applicable_for_platform(
+                    "Environment / Location",
+                    platform,
+                    "Friendly staff and great service.",
+                ))
+                self.assertFalse(is_topic_applicable_for_platform(
+                    "Delivery / Transaction",
+                    platform,
+                    "They charged my card twice for the reservation.",
+                ))
+                self.assertEqual(
+                    apply_platform_applicability(
+                        [
+                            {"label": "Environment / Location", "score": 0.81},
+                            {"label": "Delivery / Transaction", "score": 0.80},
+                        ],
+                        "A review with location and payment details.",
+                        platform,
+                    ),
+                    [],
+                )
+
+    def test_unknown_platforms_fail_closed_but_missing_platform_is_unchanged(self):
+        self.assertFalse(is_topic_applicable_for_platform(
+            "Environment / Location",
+            "unknown-platform",
+            "A virtual game environment.",
+        ))
         self.assertTrue(is_topic_applicable_for_platform(
             "Environment / Location",
-            "Google Maps",
-            "Friendly staff and great service.",
-        ))
-
-    def test_google_maps_delivery_requires_transaction_evidence(self):
-        self.assertFalse(is_topic_applicable_for_platform(
-            "Delivery / Transaction",
-            "Google Maps",
-            "The staff were friendly and the dining room was clean.",
-        ))
-        self.assertTrue(is_topic_applicable_for_platform(
-            "Delivery / Transaction",
-            "Google Maps",
-            "They charged my card twice for the reservation.",
+            None,
+            "A virtual game environment.",
         ))
 
     def test_physical_place_evidence_is_required_on_digital_platforms(self):
@@ -161,17 +188,13 @@ class TopicApplicabilityTests(unittest.TestCase):
             [{"label": "Delivery / Transaction", "score": 0.84}],
         )
 
-    def test_other_topics_and_unknown_platforms_are_not_filtered(self):
+    def test_other_topics_on_supported_platforms_are_not_filtered(self):
         self.assertTrue(is_topic_applicable_for_platform(
             "Quality",
             "Steam",
             "A product is durable.",
         ))
-        self.assertTrue(is_topic_applicable_for_platform(
-            "Environment / Location",
-            "unknown-platform",
-            "A virtual game environment.",
-        ))
+        self.assertTrue(is_topic_applicable_for_platform("Other / General", "Shopee", "Works well."))
 
 
 if __name__ == "__main__":

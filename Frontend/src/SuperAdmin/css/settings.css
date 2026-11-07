@@ -546,3 +546,25 @@
     flex: 1 1 auto;
   }
 }
+
+.platform-mgmt-card.is-unknown {
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+.mgmt-toggle-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.mgmt-toggle-switch:focus-visible,
+.mgmt-goto-health-btn:focus-visible,
+.mgmt-view-health-btn:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 3px;
+}
+
+@media (max-width: 900px) {
+  .platform-mgmt-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  }
+}

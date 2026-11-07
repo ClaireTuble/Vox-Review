@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Sparkles, Download, ArrowRight, Brain, Globe, BookmarkCheck, BarChart3, Store, MapPin, Lock, CheckCircle2, Smartphone, Gamepad2 } from 'lucide-react';
+import { Sparkles, Download, ArrowRight, Brain, Globe, BookmarkCheck, BarChart3, Store, Lock, CheckCircle2, Smartphone, Gamepad2 } from 'lucide-react';
 import Navigation from '../components/Navigation.jsx';
 import { useVoxLogo, logoDark } from '../../utils/useVoxLogo.js';
 import '../css/LandingPage.css';
@@ -61,9 +61,6 @@ export default function LandingPage() {
                 <Store size={13} className="plat-icon lazada" /> Lazada
               </span>
               <span className="platform-tag">
-                <MapPin size={13} className="plat-icon maps" /> Google Maps
-              </span>
-              <span className="platform-tag">
                 <Smartphone size={13} className="plat-icon play" /> Google Play Store
               </span>
               <span className="platform-tag">
@@ -104,7 +101,7 @@ export default function LandingPage() {
             </div>
             <h3 className="why-card-title">Supported Platforms</h3>
             <p className="why-card-desc">
-              Seamlessly analyze reviews across Shopee, Lazada, Google Maps, Google Play Store, and Steam directly on the page.
+              Seamlessly analyze reviews across Shopee, Lazada, Google Play Store, and Steam directly on the page.
             </p>
           </div>
 
@@ -244,4 +241,3 @@ export default function LandingPage() {
     </div>
   );
 }
-

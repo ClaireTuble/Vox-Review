@@ -2,7 +2,7 @@
  * scraperManager.js
  *
  * Routes the scrape call to the correct platform scraper.
- * Only supported platforms are listed here.
+ * Only platforms with registered scrapers are listed here.
  * Agoda is intentionally excluded (disabled, not deleted).
  */
 function scrapeReviews(platform) {
@@ -13,9 +13,6 @@ function scrapeReviews(platform) {
 
         case "lazada":
             return scrapeLazadaReviews();
-
-        case "google":
-            return scrapeGoogleReviews();
 
         case "googleplay":
             return scrapeGooglePlayReviews();

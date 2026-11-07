@@ -6,6 +6,7 @@ import {
   reportHealth,
   getHealthStatus,
   memoryHealthStore,
+  VALID_PLATFORMS,
 } from "./healthController.js";
 import { createAdminPlatformController } from "./adminPlatformController.js";
 import { isPlatformEnabled } from "../middleware/requirePlatformAvailable.js";
@@ -14,7 +15,6 @@ test("Super Admin platform management & health status unit tests", async (t) => 
   const platformNames = new Map([
     ["shopee", "Shopee"],
     ["lazada", "Lazada"],
-    ["google", "Google Maps"],
     ["googleplay", "Google Play Store"],
     ["steam", "Steam"],
   ]);
@@ -47,15 +47,51 @@ test("Super Admin platform management & health status unit tests", async (t) => 
   };
 
   // Setup: reset health store to default active state
-  for (const code of ["shopee", "lazada", "google", "googleplay", "steam"]) {
+  for (const code of ["shopee", "lazada", "googleplay", "steam"]) {
     await togglePlatformStatus(code, true, databaseClient);
   }
+  assert.deepEqual(VALID_PLATFORMS, ["shopee", "lazada", "googleplay", "steam"]);
 
   await t.test("1. Super Admin can disable a platform", async () => {
     const updated = await togglePlatformStatus("shopee", false, databaseClient);
     assert.equal(updated.platformStatus, "Disabled");
     assert.equal(updated.is_active, false);
     assert.equal(isPlatformActive("shopee"), false);
+  });
+
+  await t.test("Google Maps cannot be toggled or report health", async () => {
+    await assert.rejects(
+      togglePlatformStatus("google", true, databaseClient),
+      /Invalid platform: google/,
+    );
+    assert.equal(isPlatformActive("google"), false);
+
+    let statusCode = null;
+    await reportHealth({ body: { platform: "google", status: "Working" } }, {
+      status(code) {
+        statusCode = code;
+        return { json: (payload) => payload };
+      },
+    });
+    assert.equal(statusCode, 400);
+    assert.equal(memoryHealthStore.has("google"), false);
+
+    const toggleAdminPlatformStatus = createAdminPlatformController({
+      toggleStatus: (platformKey, desiredStatus) => togglePlatformStatus(platformKey, desiredStatus, databaseClient),
+      verifyConfirmation: async () => true,
+      writeAuditLog: async () => true,
+    });
+    await toggleAdminPlatformStatus({
+      params: { platformKey: "google" },
+      body: { is_active: true },
+      authUser: { id: "admin-123", email: "superadmin@voxreview.ai" },
+    }, {
+      status(code) {
+        statusCode = code;
+        return { json: (payload) => payload };
+      },
+    });
+    assert.equal(statusCode, 400);
   });
 
   await t.test("2. Super Admin can enable a platform", async () => {
@@ -105,18 +141,7 @@ test("Super Admin platform management & health status unit tests", async (t) => 
   });
 
   await t.test("6. Health status remains independent from Active/Disabled status", async () => {
-    assert.equal(Object.hasOwn(memoryHealthStore.get("google"), "nlpStatus"), false);
-
-    // 6a. Active + Warning
-    await togglePlatformStatus("google", true, databaseClient);
-    const mockReqWarning = {
-      body: {
-        platform: "google",
-        status: "Warning",
-        errorStage: "Review Extraction",
-        errorMessage: "No reviews found in DOM",
-      },
-    };
+    const mockReqWarning = { body: { platform: "googleplay", status: "Warning" } };
     let responsePayload = null;
     const mockRes = {
       status: (code) => ({
@@ -128,13 +153,13 @@ test("Super Admin platform management & health status unit tests", async (t) => 
     };
 
     await reportHealth(mockReqWarning, mockRes);
-    const googleHealth = memoryHealthStore.get("google");
-    assert.equal(googleHealth.platformStatus, "Active");
-    assert.equal(googleHealth.status, "Warning");
-    assert.equal(googleHealth.scrapingStatus, "Warning");
-    assert.equal(Object.hasOwn(googleHealth, "nlpStatus"), false);
+    const playHealthWarning = memoryHealthStore.get("googleplay");
+    assert.equal(playHealthWarning.platformStatus, "Active");
+    assert.equal(playHealthWarning.status, "Warning");
+    assert.equal(playHealthWarning.scrapingStatus, "Warning");
+    assert.equal(Object.hasOwn(playHealthWarning, "nlpStatus"), false);
 
-    // 6b. Disabled + Working (Disable platform while health is Working)
+    // Disabled + Working (Disable platform while health is Working)
     await reportHealth({
       body: {
         platform: "googleplay",
@@ -156,7 +181,6 @@ test("Super Admin platform management & health status unit tests", async (t) => 
     await togglePlatformStatus("steam", false, databaseClient);
     assert.equal(isPlatformActive("steam"), false);
     assert.equal(isPlatformActive("shopee"), true);
-    assert.equal(isPlatformActive("google"), true);
     assert.equal(isPlatformActive("lazada"), true);
     // Re-enable steam
     await togglePlatformStatus("steam", true, databaseClient);
@@ -236,7 +260,7 @@ test("Super Admin platform management & health status unit tests", async (t) => 
     assert.equal(await isPlatformEnabled("steam", databaseClient), true);
   });
 
-  await t.test("all five database platform rows can be disabled and re-enabled independently", async () => {
+  await t.test("all four supported database platform rows can be disabled and re-enabled independently", async () => {
     for (const platformKey of platformNames.keys()) {
       await togglePlatformStatus(platformKey, true, databaseClient);
     }
@@ -272,7 +296,7 @@ test("Super Admin platform management & health status unit tests", async (t) => 
       await callController(platformKey, true);
       assert.equal(await isPlatformEnabled(platformKey, databaseClient), true);
     }
-    assert.equal(auditEvents.length, 10);
+    assert.equal(auditEvents.length, 8);
   });
 
   await t.test("empty or incorrect security confirmation never updates availability or writes audit", async () => {

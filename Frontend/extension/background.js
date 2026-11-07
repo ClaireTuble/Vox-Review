@@ -722,7 +722,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const scraperFileByPlatform = {
       shopee: "scraper/platforms/shopee.js",
       lazada: "scraper/platforms/lazada.js",
-      google: "scraper/platforms/google.js",
       googleplay: "scraper/platforms/googlePlay.js",
       steam: "scraper/platforms/steam.js",
     };

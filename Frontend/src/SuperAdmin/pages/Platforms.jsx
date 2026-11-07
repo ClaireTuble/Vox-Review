@@ -3,7 +3,7 @@ import { CheckCircle2, AlertCircle, Globe, Activity, Layers, Clock, ShieldCheck,
 import Header from '../components/Header.jsx';
 import Sidebar from '../components/Sidebar.jsx';
 import TopActions from '../components/TopActions.jsx';
-import { fetchPlatformHealth, requestPlatformHealth, getCachedPlatformHealth, FALLBACK_PLATFORMS } from '../data/platforms.js';
+import { fetchPlatformHealth, requestPlatformHealth, getCachedPlatformHealth, FALLBACK_PLATFORMS, filterSupportedPlatforms } from '../data/platforms.js';
 import { mockCurrentUser } from '../data/users.js';
 import '../css/dashboard.css';
 import '../css/sidebar.css';
@@ -24,7 +24,7 @@ const HEALTH_POLL_INTERVAL = 30_000; // 30 seconds
 
 export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
   const cachedData = getCachedPlatformHealth();
-  const [platforms, setPlatforms] = useState(cachedData || FALLBACK_PLATFORMS);
+  const [platforms, setPlatforms] = useState(filterSupportedPlatforms(cachedData || FALLBACK_PLATFORMS));
   const [loading, setLoading] = useState(!cachedData);
   const [platformLoading, setPlatformLoading] = useState({});
   const [backendAvailable, setBackendAvailable] = useState(true);
@@ -32,7 +32,6 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
   const getPlatformCode = (platform) => platform.platform || ({
     Shopee: 'shopee',
     Lazada: 'lazada',
-    'Google Maps': 'google',
     'Google Play Store': 'googleplay',
     Steam: 'steam',
   }[platform.name]);
@@ -46,7 +45,7 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
     try {
       await requestPlatformHealth(platformCode);
       const refreshedPlatforms = await fetchPlatformHealth();
-      setPlatforms(refreshedPlatforms);
+      setPlatforms(filterSupportedPlatforms(refreshedPlatforms));
       setBackendAvailable(true);
     } catch (err) {
       console.warn('VoxReview: Active health check failed:', err.message);
@@ -73,7 +72,7 @@ export default function Platforms({ activeTab, setActiveTab, onSignOut }) {
         const data = await fetchPlatformHealth();
         if (mounted) {
           if (Array.isArray(data) && data.length > 0) {
-            setPlatforms(data);
+            setPlatforms(filterSupportedPlatforms(data));
           }
           setBackendAvailable(true);
         }

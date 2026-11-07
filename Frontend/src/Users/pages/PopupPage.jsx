@@ -23,6 +23,7 @@ import NoReviewsView from '../components/NoReviewsView.jsx';
 import PlatformUnavailableView from '../components/PlatformUnavailableView.jsx';
 import LogoutConfirmationModalExtension from '../components/LogoutConfirmationModalExtension.jsx';
 import UnsavedChangesConfirmationModal from '../components/UnsavedChangesConfirmationModal.jsx';
+import { detectPlatformFromUrl } from '../utils/platformDetection.js';
 import {
   aggregateTopicsForReviews,
   filterSubstantiveReviews,
@@ -168,8 +169,6 @@ function getPlatformLabel(platform) {
 function getAvailabilityPlatformKey(platform) {
   const normalized = String(platform || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   return ({
-    googlemaps: 'google',
-    googlereviews: 'google',
     googleplaystore: 'googleplay',
     googleplay: 'googleplay',
     shopee: 'shopee',
@@ -179,6 +178,8 @@ function getAvailabilityPlatformKey(platform) {
 }
 
 function getPlatformDisplayName(platform) {
+  const normalized = String(platform || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (['google', 'googlemaps', 'googlereviews'].includes(normalized)) return 'Google Maps';
   const names = {
     google: 'Google Maps',
     googleplay: 'Google Play Store',
@@ -391,53 +392,6 @@ async function resolveCurrentActiveTab() {
       });
     });
   });
-}
-
-/**
- * General URL rule for website support detection.
- * Evaluates the hostname/URL of the active tab.
- * If the hostname is NOT in the supported list -> returns 'unknown'.
- * Platform support is determined SOLELY by this detector.
- */
-function detectPlatformFromUrl(urlStr) {
-  if (!urlStr) return 'unknown';
-  try {
-    const url = new URL(urlStr);
-    const host = url.hostname.toLowerCase();
-    const path = url.pathname.toLowerCase();
-
-    // Steam Store (store.steampowered.com)
-    if (host === 'store.steampowered.com' || host.endsWith('.steampowered.com') || host.includes('steampowered.com')) {
-      return 'steam';
-    }
-
-    // Google Play Store
-    if (host === 'play.google.com' || host.startsWith('play.google.') || host.includes('play.google')) {
-      return 'googleplay';
-    }
-
-    // Shopee
-    if (host.includes('shopee')) {
-      return 'shopee';
-    }
-
-    // Lazada
-    if (host.includes('lazada')) {
-      return 'lazada';
-    }
-
-    // Google Maps
-    if (
-      (host === 'www.google.com' || host === 'maps.google.com' || host.endsWith('.google.com') || host.endsWith('.google.com.ph') || host.includes('google.')) &&
-      (path.startsWith('/maps') || host.startsWith('maps.'))
-    ) {
-      return 'google';
-    }
-
-    return 'unknown';
-  } catch (err) {
-    return 'unknown';
-  }
 }
 
 export default function PopupPage() {

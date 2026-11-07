@@ -1,4 +1,4 @@
-import { Globe, AlertCircle, Layers, HelpCircle, Store, MapPin, Smartphone, Check, Gamepad2 } from 'lucide-react';
+import { Globe, AlertCircle, Layers, HelpCircle, Store, Smartphone, Check, Gamepad2 } from 'lucide-react';
 import '../css/UnsupportedSiteView.css';
 
 const SUPPORTED_PLATFORMS = [
@@ -11,11 +11,6 @@ const SUPPORTED_PLATFORMS = [
     name: 'Lazada',
     Icon: Store,
     domain: 'lazada.com.ph',
-  },
-  {
-    name: 'Google Maps',
-    Icon: MapPin,
-    domain: 'google.com/maps',
   },
   {
     name: 'Google Play Store',
