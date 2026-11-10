@@ -56,7 +56,7 @@ function decryptPayload(encryptedStr) {
 /**
  * Send transactional email via Brevo API
  */
-async function sendBrevoEmail({ toEmail, subject, htmlContent, textContent, errorMessage = "Failed to send verification email. Please try again later." }) {
+export async function sendBrevoEmail({ toEmail, subject, htmlContent, textContent, errorMessage = "Failed to send verification email. Please try again later." }) {
   const brevoApiKey = process.env.BREVO_API_KEY;
   if (!brevoApiKey) {
     console.warn("[VerificationService] BREVO_API_KEY is missing. Email delivery is unavailable.");

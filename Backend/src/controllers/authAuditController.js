@@ -1,5 +1,33 @@
-import { createAuditLog, createNotification } from "../utils/auditLogger.js";
-import { extractClientIp, extractDeviceInfo } from "../utils/auditLogger.js";
+import {
+  createAuditLog,
+  createNotification,
+  extractClientIp,
+  extractDeviceInfo,
+  extractUserAgent,
+  revokeSuperAdminSession,
+} from "../utils/auditLogger.js";
+
+export async function revokeSuperAdminSessionOrRespond({
+  adminId,
+  sessionId,
+  res,
+  revokeSession = revokeSuperAdminSession,
+  logger = console,
+}) {
+  try {
+    await revokeSession({ admin_id: adminId, session_id: sessionId });
+    return true;
+  } catch (error) {
+    logger.error("[AuthAuditController] Could not mark Super Admin session revoked.", {
+      code: error?.code || null,
+    });
+    res.status(503).json({
+      success: false,
+      error: "The Super Admin session could not be revoked. Please retry logout.",
+    });
+    return false;
+  }
+}
 
 /**
  * Log a successful Super Admin login.
@@ -13,6 +41,7 @@ export async function logSuperAdminLoginSuccess(req, res) {
     const adminUserId = authUser?.id || null;
     const ip = extractClientIp(req);
     const device = extractDeviceInfo(req);
+    const userAgent = extractUserAgent(req);
 
     await createAuditLog({
       action: "super_admin_login",
@@ -23,6 +52,8 @@ export async function logSuperAdminLoginSuccess(req, res) {
       resource_type: "Authentication",
       ip_address: ip,
       device: device,
+      session_id: req.sessionId,
+      user_agent: userAgent,
       details: `Super Admin login successful for ${adminEmail}`,
     });
 
@@ -44,38 +75,71 @@ export async function logSuperAdminLoginSuccess(req, res) {
  * Called when a Super Admin logs out.
  * Protected by requireSuperAdmin middleware.
  */
-export async function logSuperAdminLogout(req, res) {
-  try {
-    const authUser = req.authUser;
-    const adminEmail = authUser?.email || "unknown@admin.internal";
-    const adminUserId = authUser?.id || null;
-    const ip = extractClientIp(req);
-    const device = extractDeviceInfo(req);
+export function createSuperAdminLogoutHandler({
+  createAuditLogImpl = createAuditLog,
+  revokeSessionImpl = revokeSuperAdminSession,
+  logger = console,
+} = {}) {
+  return async function logSuperAdminLogout(req, res) {
+    try {
+      const authUser = req.authUser;
+      const adminEmail = authUser?.email || "unknown@admin.internal";
+      const adminUserId = authUser?.id || null;
+      const ip = extractClientIp(req);
+      const device = extractDeviceInfo(req);
+      const userAgent = extractUserAgent(req);
 
-    await createAuditLog({
-      action: "super_admin_logout",
-      status: "Successful",
-      event_type: "Authentication",
-      admin_user_id: adminUserId,
-      admin_email: adminEmail,
-      resource_type: "Authentication",
-      ip_address: ip,
-      device: device,
-      details: `Super Admin logout for ${adminEmail}`,
-    });
+      await createAuditLogImpl({
+        action: "super_admin_logout",
+        status: "Warning",
+        event_type: "Authentication",
+        admin_user_id: adminUserId,
+        admin_email: adminEmail,
+        resource_type: "Authentication",
+        ip_address: ip,
+        device,
+        session_id: req.sessionId,
+        user_agent: userAgent,
+        details: `Super Admin logout requested for ${adminEmail}; durable revocation is pending.`,
+      });
 
-    return res.status(200).json({
-      success: true,
-      message: "Logout recorded.",
-    });
-  } catch (err) {
-    console.error("[AuthAuditController] Log logout error:", err.message);
-    return res.status(500).json({
-      success: false,
-      error: "Failed to record logout.",
-    });
-  }
+      const revocationSucceeded = await revokeSuperAdminSessionOrRespond({
+        adminId: authUser.id,
+        sessionId: req.sessionId,
+        res,
+        revokeSession: revokeSessionImpl,
+        logger,
+      });
+      if (!revocationSucceeded) return;
+
+      await createAuditLogImpl({
+        action: "super_admin_logout",
+        status: "Successful",
+        event_type: "Authentication",
+        admin_user_id: adminUserId,
+        admin_email: adminEmail,
+        resource_type: "Authentication",
+        ip_address: ip,
+        device,
+        session_id: req.sessionId,
+        user_agent: userAgent,
+        details: `Super Admin logout for ${adminEmail}`,
+      });
+      return res.status(200).json({
+        success: true,
+        message: "Logout recorded.",
+      });
+    } catch (err) {
+      logger.error("[AuthAuditController] Log logout error:", err.message);
+      return res.status(500).json({
+        success: false,
+        error: "Failed to record logout.",
+      });
+    }
+  };
 }
+
+export const logSuperAdminLogout = createSuperAdminLogoutHandler();
 
 /**
  * Log a failed Super Admin login attempt.

@@ -503,6 +503,98 @@ export function openWebAppAuth(route = '/login') {
 }
 
 export const authService = {
+  initiateSuperAdminLogin: async (email, password) => {
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    const response = await fetch(`${API_BASE_URL}/api/admin/auth/login-init`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: normalizedEmail, password }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'Failed to initiate Super Admin authentication.');
+    }
+    return {
+      mfaRequired: true,
+      challengeToken: data.challengeToken,
+      expiresInSeconds: data.expiresInSeconds,
+      adminEmail: data.adminEmail,
+    };
+  },
+
+  verifySuperAdminTwoFactor: async ({ email, password, challengeToken, otp }) => {
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    const { data, error } = await adminSupabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    });
+    if (error) throw new Error(error.message || 'Failed to establish administrator session.');
+
+    const sessionUser = data.session?.user || data.user;
+    if (
+      !data.session?.access_token ||
+      !data.session?.refresh_token ||
+      !sessionUser?.id ||
+      sessionUser.app_metadata?.role !== 'superadmin'
+    ) {
+      await signOutCurrentSuperAdminSession(adminSupabase.auth);
+      throw new Error('The Super Admin session could not be established. Please log in again.');
+    }
+
+    let response;
+    try {
+      response = await fetch(`${API_BASE_URL}/api/admin/auth/verify-otp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${data.session.access_token}`,
+        },
+        body: JSON.stringify({ challengeToken, otp }),
+      });
+    } catch (verificationError) {
+      await signOutCurrentSuperAdminSession(adminSupabase.auth);
+      throw verificationError;
+    }
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) {
+      await signOutCurrentSuperAdminSession(adminSupabase.auth);
+      throw new Error(result.error || 'Two-factor verification failed.');
+    }
+    if (result.user?.role !== 'superadmin' || result.user?.id !== sessionUser.id) {
+      await signOutCurrentSuperAdminSession(adminSupabase.auth);
+      throw new Error('The verified administrator identity is missing or invalid.');
+    }
+
+    const session = persistSuperAdminSession(data.session);
+    if (!session) {
+      await signOutCurrentSuperAdminSession(adminSupabase.auth);
+      throw new Error('The verified Super Admin session could not be saved. Please log in again.');
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('voxreview_superadmin_auth_sync', { detail: session }));
+    }
+    try {
+      const auditResponse = await fetch(`${API_BASE_URL}/api/admin/log-login-success`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${data.session.access_token}`,
+        },
+      });
+      if (!auditResponse.ok) {
+        console.warn('VoxReview: Super Admin login succeeded, but its audit event was not recorded.', {
+          status: auditResponse.status,
+        });
+      }
+    } catch (auditError) {
+      console.warn('VoxReview: Super Admin login succeeded, but its audit event could not be sent.', {
+        message: auditError?.message || null,
+      });
+    }
+    return { success: true, session, role: 'superadmin' };
+  },
+
   /**
   * Login for regular users and the isolated Super Admin portal.
    */
@@ -511,64 +603,14 @@ export const authService = {
     const desiredRole = role === 'superadmin' ? 'superadmin' : 'user';
 
     if (desiredRole === 'user' && normalizedEmail === 'admin@test.com') {
-      throw new Error('This account is reserved for the Super Admin portal. Use /admin/login instead.');
+      throw new Error('This account is reserved for the Super Admin portal. Use /superadmin/login instead.');
     }
-
     if (desiredRole === 'superadmin') {
-      const { data, error } = await adminSupabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
-
-      if (error) {
-        // Log failed login attempt
-        try {
-          await fetch(`${API_BASE_URL}/api/admin/log-login-failed`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: normalizedEmail }),
-          }).catch(() => {});
-        } catch {
-          // Silently fail; don't break auth flow if audit logging fails
-        }
-        throw new Error(error.message || 'Authentication failed.');
-      }
-
-      if (data.user?.app_metadata?.role !== 'superadmin') {
-        await adminSupabase.auth.signOut({ scope: 'local' });
-        throw new Error('Access denied. This login is for administrators only.');
-      }
-
-      const session = persistSuperAdminSession(data.session);
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('voxreview_superadmin_auth_sync', { detail: session }));
-      }
-
-      // Log successful login attempt after session is established
-      try {
-        await fetch(`${API_BASE_URL}/api/admin/log-login-success`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${data.session?.access_token || ''}`,
-          },
-        }).catch(() => {});
-      } catch {
-        // Silently fail; don't break auth flow if audit logging fails
-      }
-
-      return { success: true, session, role: 'superadmin' };
+      throw new Error('Super Admins must sign in through the OTP verification flow.');
     }
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
-      password,
-    });
-
-    if (error) {
-      throw new Error(error.message || 'Authentication failed.');
-    }
-
+    const { data, error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
+    if (error) throw new Error(error.message || 'Authentication failed.');
     const session = persistRegularUserSession(data.session, { clearLogoutMarker: true });
     return { success: true, session };
   },
@@ -742,30 +784,59 @@ export const authService = {
    */
   logout: async (role = 'user') => {
     if (role === 'superadmin') {
-      // Get the current token before clearing session
-      const rawSession = localStorage.getItem(SUPERADMIN_AUTH_STORAGE_KEY);
-      const sessionData = rawSession ? JSON.parse(rawSession) : null;
+      let sessionData = null;
+      let revocationError = null;
+      try {
+        const rawSession = localStorage.getItem(SUPERADMIN_AUTH_STORAGE_KEY);
+        sessionData = rawSession ? JSON.parse(rawSession) : null;
+      } catch (error) {
+        revocationError = error;
+        console.error('VoxReview: Stored Super Admin session could not be read for revocation.', {
+          message: error?.message || null,
+        });
+      }
       const token = sessionData?.access_token || null;
-
-      // Log the logout event (if token is available)
-      if (token) {
+      if (!token) {
+        revocationError = revocationError || new Error(
+          'No authenticated Super Admin token was available for server-side revocation.',
+        );
+      } else {
         try {
-          await fetch(`${API_BASE_URL}/api/admin/log-logout`, {
+          const response = await fetch(`${API_BASE_URL}/api/admin/log-logout`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`,
+              Authorization: `Bearer ${token}`,
             },
-          }).catch(() => {});
-        } catch {
-          // Silently fail; don't break logout flow if audit logging fails
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok || !result.success) {
+            revocationError = new Error(result.error || 'The server could not revoke this Super Admin session.');
+          }
+        } catch (error) {
+          revocationError = error;
+          console.error('VoxReview: Super Admin session revocation request failed.', {
+            message: error?.message || null,
+          });
         }
       }
 
-      await signOutCurrentSuperAdminSession(adminSupabase.auth);
+      let localSignOutError = null;
+      try {
+        await signOutCurrentSuperAdminSession(adminSupabase.auth);
+      } catch (error) {
+        localSignOutError = error;
+        console.error('VoxReview: Local Super Admin sign-out failed.', { code: error?.code || null });
+      }
       localStorage.removeItem(SUPERADMIN_AUTH_STORAGE_KEY);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('voxreview_superadmin_auth_sync', { detail: null }));
+      }
+      if (revocationError) {
+        throw new Error(`This device was signed out locally, but server-side session revocation failed: ${revocationError.message}`);
+      }
+      if (localSignOutError) {
+        throw new Error(`The server session was revoked, but local sign-out failed: ${localSignOutError.message}`);
       }
       return;
     }
@@ -1342,31 +1413,156 @@ export const authService = {
   verifySuperAdminSession: async () => {
     try {
       const { data: sessionData, error: sessionError } = await adminSupabase.auth.getSession();
-      if (sessionError || !sessionData.session) {
-        return null;
-      }
+      if (sessionError) throw sessionError;
+      if (!sessionData.session?.access_token) return null;
 
-      const { data: userData, error: userError } = await adminSupabase.auth.getUser();
-      if (userError || userData.user?.app_metadata?.role !== 'superadmin') {
-        await adminSupabase.auth.signOut({ scope: 'local' });
+      const { data: userData, error: userError } = await adminSupabase.auth.getUser(
+        sessionData.session.access_token,
+      );
+      if (userError) throw userError;
+      if (userData.user?.app_metadata?.role !== 'superadmin') {
         localStorage.removeItem(SUPERADMIN_AUTH_STORAGE_KEY);
         return null;
       }
 
-      const session = persistSuperAdminSession({
-        ...sessionData.session,
-        user: userData.user,
+      const response = await fetch(`${API_BASE_URL}/api/admin/auth/session`, {
+        headers: { Authorization: `Bearer ${sessionData.session.access_token}` },
       });
+      if (response.status === 401 || response.status === 403) {
+        localStorage.removeItem(SUPERADMIN_AUTH_STORAGE_KEY);
+        return null;
+      }
+      if (!response.ok) {
+        const verificationError = new Error('Super Admin session verification is temporarily unavailable.');
+        verificationError.status = response.status;
+        throw verificationError;
+      }
+      const verification = await response.json().catch(() => ({}));
+      if (
+        !verification.success ||
+        verification.user?.id !== userData.user.id ||
+        verification.user?.role !== 'superadmin'
+      ) {
+        localStorage.removeItem(SUPERADMIN_AUTH_STORAGE_KEY);
+        return null;
+      }
+
+      const session = persistSuperAdminSession({ ...sessionData.session, user: userData.user });
       return session?.user || null;
-    } catch {
-      localStorage.removeItem(SUPERADMIN_AUTH_STORAGE_KEY);
-      return null;
+    } catch (error) {
+      console.warn('VoxReview: Super Admin session verification failed.', {
+        code: error?.code || null,
+        status: error?.status || null,
+      });
+      throw error;
     }
   },
 
   changeSuperAdminPassword: async (currentPassword, newPassword) => (
     changeSuperAdminPassword(adminSupabase.auth, currentPassword, newPassword)
   ),
+
+  requestSuperAdminPasswordChangeOtp: async () => {
+    const token = await authService.getSuperAdminAccessToken();
+    if (!token) throw new Error('An authenticated Super Admin session is required.');
+
+    const response = await fetch(`${API_BASE_URL}/api/admin/auth/password-change/request-otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) {
+      const error = new Error(
+        response.status === 429
+          ? 'Too many security requests. Please wait a few minutes before trying again.'
+          : data.error || 'Failed to dispatch verification code.',
+      );
+      error.status = response.status;
+      error.retryAfterSeconds = data.retryAfterSeconds || data.retryAfter;
+      throw error;
+    }
+    return data;
+  },
+
+  verifySuperAdminPasswordChangeOtp: async ({ challengeToken, otp }) => {
+    const token = await authService.getSuperAdminAccessToken();
+    if (!token) throw new Error('An authenticated Super Admin session is required.');
+
+    const response = await fetch(`${API_BASE_URL}/api/admin/auth/password-change/verify-otp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ challengeToken, otp }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) {
+      const error = new Error(
+        response.status === 429
+          ? 'Too many security requests. Please wait a few minutes before trying again.'
+          : data.error || 'Verification code failed.',
+      );
+      error.status = response.status;
+      error.retryAfterSeconds = data.retryAfterSeconds || data.retryAfter;
+      throw error;
+    }
+    return data;
+  },
+
+  confirmSuperAdminPasswordChange: async ({ passwordChangeToken, newPassword, confirmPassword }) => {
+    const token = await authService.getSuperAdminAccessToken();
+    if (!token) throw new Error('An authenticated Super Admin session is required.');
+
+    const response = await fetch(`${API_BASE_URL}/api/admin/auth/password-change/confirm`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ passwordChangeToken, newPassword, confirmPassword }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) {
+      const error = new Error(
+        response.status === 429
+          ? 'Too many security requests. Please wait a few minutes before trying again.'
+          : data.error || 'Password update failed.',
+      );
+      error.status = response.status;
+      error.retryAfterSeconds = data.retryAfterSeconds || data.retryAfter;
+      throw error;
+    }
+
+    const { data: sessionData } = await adminSupabase.auth.getSession();
+    if (sessionData?.session) persistSuperAdminSession(sessionData.session);
+    return data;
+  },
+
+  recordSuperAdminSessionChoice: async (choice) => {
+    const token = await authService.getSuperAdminAccessToken();
+    if (!token) throw new Error('An authenticated Super Admin session is required.');
+
+    const response = await fetch(`${API_BASE_URL}/api/admin/auth/password-change/session-choice`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ choice }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || 'Failed to record device session selection.');
+    }
+    if (choice === 'logout_all') {
+      await authService.revokeSuperAdminRefreshTokens();
+    }
+    return data;
+  },
 
   revokeSuperAdminRefreshTokens: async () => {
     await revokeSuperAdminRefreshTokens(adminSupabase.auth);

@@ -33,6 +33,8 @@ export async function createAuditLog({
   resource_type = null,
   device = null,
   ip_address = null,
+  session_id = null,
+  user_agent = null,
   details = null,
 }) {
   try {
@@ -48,6 +50,8 @@ export async function createAuditLog({
       resource_type,
       device,
       ip_address,
+      session_id,
+      user_agent,
       details,
     });
 
@@ -65,6 +69,47 @@ export async function createAuditLog({
       console.error("[AuditLogger] Exception while creating audit log:", err.message);
     }
     return false;
+  }
+}
+
+export async function touchSuperAdminSession({
+  admin_id,
+  session_id,
+  ip_address = null,
+  user_agent = null,
+}) {
+  const auditSupabase = getAuditSupabase();
+  const { error } = await auditSupabase
+    .from("superadmin_otp_sessions")
+    .update({
+      ip_address,
+      user_agent,
+      last_active_at: new Date().toISOString(),
+    })
+    .eq("admin_user_id", admin_id)
+    .eq("session_id", session_id)
+    .is("revoked_at", null);
+  if (error) {
+    console.error("[AuditLogger] Failed to update Super Admin session activity:", error.message);
+    throw new Error("Super Admin session activity could not be recorded.");
+  }
+}
+
+export async function revokeSuperAdminSession({
+  admin_id,
+  session_id,
+  allSessions = false,
+}) {
+  const auditSupabase = getAuditSupabase();
+  let query = auditSupabase.from("superadmin_otp_sessions")
+    .update({ revoked_at: new Date().toISOString() })
+    .eq("admin_user_id", admin_id)
+    .is("revoked_at", null);
+  if (!allSessions) query = query.eq("session_id", session_id);
+  const { error } = await query;
+  if (error) {
+    console.error("[AuditLogger] Failed to record Super Admin session revocation:", error.message);
+    throw new Error("Super Admin session revocation could not be recorded.");
   }
 }
 
@@ -150,4 +195,12 @@ export function extractDeviceInfo(req) {
   if (userAgent.includes("Firefox")) return "Firefox";
   if (userAgent.includes("Edge")) return "Edge";
   return userAgent.substring(0, 50);
+}
+
+export function extractUserAgent(req) {
+  if (!req) return null;
+  const userAgent = req.get?.("user-agent") || req.headers?.["user-agent"] || "";
+  return typeof userAgent === "string" && userAgent.trim()
+    ? userAgent.trim().slice(0, 512)
+    : null;
 }
