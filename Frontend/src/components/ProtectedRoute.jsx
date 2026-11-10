@@ -12,6 +12,8 @@ export default function ProtectedRoute({ children, allowedRole }) {
   const location = useLocation();
   const currentRole = authService.checkRole();
   const [adminUser, setAdminUser] = useState(undefined);
+  const [adminVerificationError, setAdminVerificationError] = useState(null);
+  const [adminVerificationAttempt, setAdminVerificationAttempt] = useState(0);
 
   const isUserAuthenticated = authService.isAuthenticated();
 
@@ -19,20 +21,56 @@ export default function ProtectedRoute({ children, allowedRole }) {
     if (allowedRole !== 'superadmin') return undefined;
 
     let active = true;
-    authService.verifySuperAdminSession().then((user) => {
-      if (active) setAdminUser(user || null);
-    });
+    authService.verifySuperAdminSession()
+      .then((user) => {
+        if (active) setAdminUser(user || null);
+      })
+      .catch((error) => {
+        console.warn('VoxReview: Super Admin session verification is temporarily unavailable.', {
+          code: error?.code || null,
+          status: error?.status || null,
+        });
+        if (active) setAdminVerificationError(error);
+      });
 
-    return () => { active = false; };
-  }, [allowedRole]);
+    const handleAuthSync = (event) => {
+      if (!event.detail) {
+        setAdminVerificationError(null);
+        setAdminUser(null);
+      }
+    };
+    window.addEventListener('voxreview_superadmin_auth_sync', handleAuthSync);
+
+    return () => {
+      active = false;
+      window.removeEventListener('voxreview_superadmin_auth_sync', handleAuthSync);
+    };
+  }, [allowedRole, adminVerificationAttempt]);
 
   if (allowedRole === 'superadmin') {
     if (adminUser === undefined) {
+      if (adminVerificationError) {
+        return (
+          <div role="alert">
+            <p>Unable to verify your Super Admin session right now.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setAdminUser(undefined);
+                setAdminVerificationError(null);
+                setAdminVerificationAttempt((attempt) => attempt + 1);
+              }}
+            >
+              Retry verification
+            </button>
+          </div>
+        );
+      }
       return null;
     }
 
     if (!adminUser) {
-      return <Navigate to="/admin/login" state={{ from: location }} replace />;
+      return <Navigate to="/superadmin/login" state={{ from: location }} replace />;
     }
 
     return children;

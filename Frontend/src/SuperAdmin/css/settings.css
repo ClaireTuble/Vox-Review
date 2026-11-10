@@ -371,6 +371,99 @@
   color: #64748b;
 }
 
+/* Password Input Wrapper with Right-Aligned Eye Toggle */
+.sa-password-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.sa-password-input {
+  padding-right: 42px !important;
+}
+
+.sa-password-eye-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #64748b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 6px;
+  transition: color 0.15s ease, background-color 0.15s ease;
+  z-index: 2;
+}
+
+.sa-password-eye-btn:hover:not(:disabled) {
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.sa-password-eye-btn:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  color: #93c5fd;
+}
+
+.sa-password-eye-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Password Strength Indicator */
+.sa-password-strength-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.sa-password-strength-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  height: 4px;
+}
+
+.sa-strength-segment {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 2px;
+  height: 100%;
+  transition: background-color 0.25s ease;
+}
+
+.sa-strength-segment.weak {
+  background: #ef4444;
+}
+
+.sa-strength-segment.fair {
+  background: #f59e0b;
+}
+
+.sa-strength-segment.good {
+  background: #3b82f6;
+}
+
+.sa-strength-segment.strong {
+  background: #10b981;
+}
+
+.sa-password-strength-label {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.sa-password-strength-label strong {
+  color: #cbd5e1;
+}
+
 .form-actions-row {
   display: flex;
   align-items: center;
@@ -396,6 +489,297 @@
 .submit-password-btn:hover {
   background: #1d4ed8;
   box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+}
+
+/* Super Admin Multi-Step Flow Styles */
+.sa-flow-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sa-flow-intro-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.sa-flow-intro-icon {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  padding: 10px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sa-flow-intro-text strong {
+  display: block;
+  font-size: 14px;
+  color: #f1f5f9;
+  margin-bottom: 4px;
+}
+
+.sa-flow-intro-text p {
+  margin: 0;
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+.sa-flow-intro-text p strong {
+  display: inline;
+  color: #e2e8f0;
+}
+
+.sa-flow-info-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: #e0f2fe;
+  font-size: 13px;
+}
+
+.sa-flow-box-icon {
+  color: #38bdf8;
+  flex-shrink: 0;
+}
+
+.sa-otp-single-input {
+  font-family: monospace;
+  font-size: 20px !important;
+  letter-spacing: 6px;
+  text-align: center;
+  padding: 10px 14px !important;
+}
+
+.sa-otp-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sa-flow-verified-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 10px;
+  padding: 12px 16px;
+  color: #a7f3d0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Post-Change Session Management Options */
+.sa-session-choice-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 8px;
+}
+
+.sa-session-choice-icon-wrap {
+  flex-shrink: 0;
+}
+
+.sa-session-success-icon {
+  color: #10b981;
+}
+
+.sa-session-choice-header h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.sa-session-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 10px;
+}
+
+.sa-session-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  transition: all 0.2s ease;
+}
+
+.sa-session-card:hover {
+  border-color: rgba(148, 163, 184, 0.4);
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.sa-session-card.highlighted-danger {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.sa-session-card.highlighted-danger:hover {
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.sa-session-card-top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sa-session-card-top h5 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.sa-session-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sa-session-badge.badge-active {
+  background: rgba(59, 130, 246, 0.16);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.sa-session-badge.badge-danger {
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.sa-session-card-body {
+  margin: 0;
+  font-size: 12.5px;
+  color: #94a3b8;
+  line-height: 1.55;
+  flex: 1;
+}
+
+.sa-btn-danger {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+  border-color: #b91c1c !important;
+  font-weight: 700 !important;
+}
+
+.sa-btn-danger:hover:not(:disabled) {
+  background: #b91c1c !important;
+  box-shadow: 0 4px 14px rgba(220, 38, 38, 0.4) !important;
+}
+
+.submit-password-btn:disabled,
+.control-btn:disabled,
+.open-logs-btn:disabled,
+.settings-danger-action:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.settings-content-area button:focus-visible,
+.settings-content-area select:focus-visible,
+.settings-confirmation-dialog button:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 3px;
+}
+
+.setting-informational-badge {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.settings-confirmation-dialog {
+  width: min(480px, calc(100vw - 32px));
+}
+
+.settings-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px 20px;
+}
+
+.settings-danger-action {
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.22);
+  color: #fecaca;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.platform-language-policy {
+  max-width: none;
+  margin-top: 8px;
+}
+
+.platform-language-policy ul {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding-left: 20px;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.platform-mgmt-card.is-unknown {
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+.mgmt-toggle-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.mgmt-toggle-switch:focus-visible,
+.mgmt-goto-health-btn:focus-visible,
+.mgmt-view-health-btn:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 3px;
 }
 
 /* Activity Logs Link Banner */
@@ -455,56 +839,6 @@
   color: #60a5fa;
 }
 
-.submit-password-btn:disabled,
-.control-btn:disabled,
-.open-logs-btn:disabled,
-.settings-danger-action:disabled {
-  cursor: wait;
-  opacity: 0.65;
-}
-
-.settings-content-area button:focus-visible,
-.settings-content-area select:focus-visible,
-.settings-confirmation-dialog button:focus-visible {
-  outline: 2px solid #93c5fd;
-  outline-offset: 3px;
-}
-
-.setting-informational-badge {
-  flex-shrink: 0;
-  padding: 6px 10px;
-  border: 1px solid rgba(96, 165, 250, 0.24);
-  border-radius: 999px;
-  background: rgba(37, 99, 235, 0.1);
-  color: #bfdbfe;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.settings-confirmation-dialog {
-  width: min(480px, calc(100vw - 32px));
-}
-
-.settings-dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 16px 24px 20px;
-}
-
-.settings-danger-action {
-  min-height: 36px;
-  padding: 8px 14px;
-  border: 1px solid rgba(248, 113, 113, 0.4);
-  border-radius: 8px;
-  background: rgba(220, 38, 38, 0.22);
-  color: #fecaca;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
 /* Responsive adjust for mobile */
 @media (max-width: 900px) {
   .settings-layout-wrapper {
@@ -526,6 +860,10 @@
     flex-direction: column;
     align-items: flex-start;
   }
+
+  .platform-mgmt-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  }
 }
 
 @media (max-width: 560px) {
@@ -544,27 +882,5 @@
 
   .settings-dialog-actions > button {
     flex: 1 1 auto;
-  }
-}
-
-.platform-mgmt-card.is-unknown {
-  border-color: rgba(148, 163, 184, 0.22);
-}
-
-.mgmt-toggle-switch:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.mgmt-toggle-switch:focus-visible,
-.mgmt-goto-health-btn:focus-visible,
-.mgmt-view-health-btn:focus-visible {
-  outline: 2px solid #93c5fd;
-  outline-offset: 3px;
-}
-
-@media (max-width: 900px) {
-  .platform-mgmt-grid {
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
   }
 }

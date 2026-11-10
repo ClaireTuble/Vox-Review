@@ -9,7 +9,55 @@ export function validatePasswordChange({ currentPassword, newPassword, confirmPa
   if (newPassword !== confirmPassword) {
     return 'New passwords do not match.';
   }
+  if (newPassword.length < 8) {
+    return 'New password must be at least 8 characters long.';
+  }
+  if (!/[a-z]/i.test(newPassword) || !/\d/.test(newPassword)) {
+    return 'New password must contain at least one letter and one number.';
+  }
+  if (newPassword === currentPassword) {
+    return 'New password must differ from your current password.';
+  }
   return null;
+}
+
+export function validateNewPassword({ newPassword, confirmPassword }) {
+  if (!newPassword || !confirmPassword) {
+    return 'Complete all password fields.';
+  }
+  if (newPassword !== confirmPassword) {
+    return 'New passwords do not match.';
+  }
+  if (newPassword.length < 8) {
+    return 'New password must be at least 8 characters long.';
+  }
+  if (!/[a-z]/i.test(newPassword) || !/\d/.test(newPassword)) {
+    return 'New password must contain at least one letter and one number.';
+  }
+  return null;
+}
+
+export function getPasswordStrength(pwd) {
+  if (!pwd) return { strength: 0, label: '' };
+  let strength = 0;
+  if (pwd.length >= 8) strength++;
+  if (pwd.match(/[a-z]/) && pwd.match(/[A-Z]/)) strength++;
+  if (pwd.match(/\d/)) strength++;
+  if (pwd.match(/[^a-zA-Z\d]/)) strength++;
+
+  const labels = ['Weak', 'Fair', 'Good', 'Strong'];
+  return {
+    strength,
+    label: strength > 0 ? labels[strength - 1] : 'Weak',
+  };
+}
+
+export function resolvePasswordInputType(isVisible) {
+  return isVisible ? 'text' : 'password';
+}
+
+export function resolvePasswordToggleLabel(isVisible, fieldLabel = 'password') {
+  return isVisible ? `Hide ${fieldLabel}` : `Show ${fieldLabel}`;
 }
 
 export async function changeSuperAdminPassword(auth, currentPassword, newPassword) {
@@ -73,7 +121,7 @@ export function inactivityStorageKey(userId) {
 
 export function getSessionTimeoutPreference(storage, userId, now = Date.now()) {
   const raw = storage.getItem(inactivityStorageKey(userId));
-  if (raw === null) {
+  if (!raw) {
     return { minutes: DEFAULT_SESSION_TIMEOUT_MINUTES, lastActivityAt: now };
   }
 
@@ -117,24 +165,24 @@ export function startSuperAdminInactivityMonitor({
   }
 
   const key = inactivityStorageKey(userId);
-  if (storage.getItem(key) === null) {
-    saveSessionTimeoutPreference(storage, userId, DEFAULT_SESSION_TIMEOUT_MINUTES, now());
-  }
-  const initialPreference = getSessionTimeoutPreference(storage, userId, now());
   let timer = null;
   let stopped = false;
-  let cleanupComplete = false;
   let expired = false;
   let lastMoveCheckAt = 0;
-  const listeners = [];
+  const activityHandlers = new Map();
+
+  if (!storage.getItem(key)) {
+    saveSessionTimeoutPreference(storage, userId, DEFAULT_SESSION_TIMEOUT_MINUTES, now());
+  }
 
   const readPreference = () => getSessionTimeoutPreference(storage, userId, now());
   const stopTimer = () => {
     if (timer !== null) cancel(timer);
     timer = null;
   };
-  const checkTimeout = (preference = readPreference()) => {
+  const checkTimeout = () => {
     if (stopped || expired) return true;
+    const preference = readPreference();
     const remaining = preference.minutes * 60_000 - (now() - preference.lastActivityAt);
     if (remaining <= 0) {
       expired = true;
@@ -146,42 +194,6 @@ export function startSuperAdminInactivityMonitor({
     timer = schedule(checkTimeout, remaining);
     return false;
   };
-  const addListener = (target, eventName, handler, options) => {
-    listeners.push({ target, eventName, handler });
-    target.addEventListener(eventName, handler, options);
-  };
-  const cleanup = () => {
-    if (cleanupComplete) return [];
-    cleanupComplete = true;
-    stopped = true;
-    const cleanupErrors = [];
-
-    if (timer !== null) {
-      const activeTimer = timer;
-      timer = null;
-      try {
-        cancel(activeTimer);
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
-    }
-
-    for (const { target, eventName, handler } of listeners.reverse()) {
-      try {
-        target.removeEventListener(eventName, handler);
-      } catch (error) {
-        cleanupErrors.push(error);
-      }
-    }
-    listeners.length = 0;
-    return cleanupErrors;
-  };
-  const cleanupOrThrow = (errors, message) => {
-    if (errors.length > 0) {
-      throw new AggregateError(errors, message);
-    }
-  };
-
   const recordActivity = () => {
     if (documentObject.visibilityState === 'hidden' || checkTimeout()) return;
     const preference = readPreference();
@@ -201,36 +213,54 @@ export function startSuperAdminInactivityMonitor({
   };
 
   const activityEvents = ['pointerdown', 'pointermove', 'keydown', 'scroll', 'touchstart'];
-  try {
-    activityEvents.forEach((eventName) => {
-      const handler = eventName === 'pointermove'
-        ? () => {
-          if (now() - lastMoveCheckAt < 1_000) return;
-          lastMoveCheckAt = now();
-          recordActivity();
-        }
-        : recordActivity;
-      addListener(windowObject, eventName, handler, { passive: true });
-    });
-    addListener(windowObject, 'focus', handleVisibility);
-    addListener(windowObject, 'pageshow', handleVisibility);
-    addListener(windowObject, 'storage', handleStorage);
-    addListener(windowObject, 'voxreview_superadmin_timeout_change', () => checkTimeout());
-    checkTimeout(initialPreference);
-    addListener(documentObject, 'visibilitychange', handleVisibility);
-  } catch (initializationError) {
-    const cleanupErrors = cleanup();
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError(
-        [initializationError, ...cleanupErrors],
-        'Super Admin inactivity monitor initialization and cleanup failed.',
-        { cause: initializationError },
-      );
-    }
-    throw initializationError;
-  }
+  activityEvents.forEach((eventName) => {
+    const handler = eventName === 'pointermove'
+      ? () => {
+        if (now() - lastMoveCheckAt < 1_000) return;
+        lastMoveCheckAt = now();
+        recordActivity();
+      }
+      : recordActivity;
+    windowObject.addEventListener(eventName, handler, { passive: true });
+    activityHandlers.set(eventName, handler);
+  });
+  windowObject.addEventListener('focus', handleVisibility);
+  windowObject.addEventListener('pageshow', handleVisibility);
+  windowObject.addEventListener('storage', handleStorage);
+  windowObject.addEventListener('voxreview_superadmin_timeout_change', checkTimeout);
+  documentObject.addEventListener('visibilitychange', handleVisibility);
+  checkTimeout();
 
   return () => {
-    cleanupOrThrow(cleanup(), 'Super Admin inactivity monitor cleanup failed.');
+    stopped = true;
+    stopTimer();
+    activityEvents.forEach((eventName) => windowObject.removeEventListener(
+      eventName,
+      activityHandlers.get(eventName),
+    ));
+    windowObject.removeEventListener('focus', handleVisibility);
+    windowObject.removeEventListener('pageshow', handleVisibility);
+    windowObject.removeEventListener('storage', handleStorage);
+    windowObject.removeEventListener('voxreview_superadmin_timeout_change', checkTimeout);
+    documentObject.removeEventListener('visibilitychange', handleVisibility);
+  };
+}
+
+export function getSessionChoiceModalConfig(variant) {
+  if (variant === 'logout_all') {
+    return {
+      title: 'Log Out All Devices?',
+      message: 'This will sign you out of VoxReview Super Admin on ALL devices, including this current browser. You must log in again with your email, password, and verification code.',
+      confirmButtonText: 'Yes, Log Out All',
+      cancelButtonText: 'Cancel',
+      isDanger: true,
+    };
+  }
+  return {
+    title: 'Keep Devices Signed In?',
+    message: 'Keep your existing authenticated devices signed in where supported. Your password change may automatically revoke other sessions depending on Supabase Auth behavior.',
+    confirmButtonText: 'Confirm and Continue',
+    cancelButtonText: 'Cancel',
+    isDanger: false,
   };
 }

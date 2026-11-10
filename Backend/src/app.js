@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import healthRoutes from "./routes/healthRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
+import adminAuthRoutes from "./routes/adminAuthRoutes.js";
 import userActivityRoutes from "./routes/userActivityRoutes.js";
 import userProfileRoutes from "./routes/userProfileRoutes.js";
 import verificationRoutes from "./routes/verificationRoutes.js";
@@ -15,6 +16,7 @@ app.use(express.json({ limit: "7mb" }));
 
 // Routes
 app.use("/api/health", healthRoutes);
+app.use("/api/admin/auth", adminAuthRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/user/activity", userActivityRoutes);
 app.use("/api/user", userProfileRoutes);

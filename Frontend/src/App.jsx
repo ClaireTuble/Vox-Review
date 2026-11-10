@@ -14,6 +14,8 @@ export const appRoutes = [
   { path: '/login', element: <AuthPage initialMode="login" /> },
   { path: '/register', element: <AuthPage initialMode="register" /> },
   { path: '/admin/login', element: <SuperAdminLoginPage /> },
+  { path: '/superadmin/login', element: <SuperAdminLoginPage /> },
+  { path: '/superadmin', element: <Navigate to="/superadmin/login" replace /> },
   {
     path: '/after-login',
     element: (

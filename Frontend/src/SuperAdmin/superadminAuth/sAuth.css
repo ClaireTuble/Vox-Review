@@ -247,6 +247,13 @@
   color: #CBD5E1;
 }
 
+.sa-eye:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  color: #93c5fd;
+  border-radius: 4px;
+}
+
 /* Options Row */
 .sa-options-row {
   display: flex;
@@ -511,6 +518,71 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+/* ── 2FA OTP Code Inputs ── */
+.sa-otp-inputs {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin: 18px 0;
+}
+
+.sa-otp-digit {
+  width: 48px;
+  height: 54px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: #38BDF8;
+  background: #0F172A;
+  border: 1.5px solid #334155;
+  border-radius: 10px;
+  outline: none;
+  transition: all 0.2s ease;
+  font-family: monospace;
+}
+
+.sa-otp-digit:focus {
+  border-color: #38BDF8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25);
+  background: #1E293B;
+}
+
+.sa-otp-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #94A3B8;
+}
+
+.sa-otp-timer {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sa-link-button {
+  background: none;
+  border: none;
+  color: #818CF8;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  transition: color 0.15s;
+}
+
+.sa-link-button:hover:not(:disabled) {
+  color: #A5B4FC;
+}
+
+.sa-link-button:disabled {
+  color: #475569;
+  cursor: not-allowed;
+  text-decoration: none;
 }
 
 /* ── Responsive Breakdown ──────────────────────────────── */
