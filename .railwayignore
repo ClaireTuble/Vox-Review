@@ -1,6 +1,7 @@
 # Deny all paths, then allow only the staging Docker build inputs.
 *
 !/.dockerignore
+!/Dockerfile
 !/Dockerfile.staging
 !/.railwayignore
 !/requirements-svm.txt

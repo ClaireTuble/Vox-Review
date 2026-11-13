@@ -41,6 +41,9 @@ COPY Frontend/nlp/svm_worker.py \
     Frontend/nlp/config.py \
     Frontend/nlp/dataset.py \
     Frontend/nlp/validation.py \
+    Frontend/nlp/hybrid_emotion_worker.py \
+    Frontend/nlp/predict_hybrid_emotion_batch.py \
+    Frontend/nlp/hybrid_emotion_classifier.py \
     ./Frontend/nlp/
 COPY Frontend/nlp/topic_worker.py \
     Frontend/nlp/predict_topics_batch.py \
@@ -65,6 +68,18 @@ RUN set -eu; \
     python -c "import predict_topics_batch; import topic_refinement; import topic_applicability; import topic_taxonomy"
 COPY Frontend/nlp/preprocessing/preprocess.py ./Frontend/nlp/preprocessing/
 COPY Frontend/nlp/models/svm_model.joblib ./Frontend/nlp/models/
+COPY Frontend/nlp/models/hybrid_emotion_model.joblib ./Frontend/nlp/models/
+
+RUN set -eu; \
+    artifact=/app/Frontend/nlp/models/hybrid_emotion_model.joblib; \
+    if ! printf '%s  %s\n' \
+        '7bb99751451f878083d2c8da615dc4f0f230f7684dc92fd82f9e71806d6d2861' \
+        "$artifact" | sha256sum --check --status; then \
+        echo "Hybrid emotion artifact SHA-256 mismatch for $artifact" >&2; \
+        exit 1; \
+    fi; \
+    cd /app/Frontend/nlp; \
+    python -c "import hybrid_emotion_worker; import predict_hybrid_emotion_batch; import hybrid_emotion_classifier"
 
 WORKDIR /app/Backend
 
