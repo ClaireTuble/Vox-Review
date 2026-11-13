@@ -1,41 +1,71 @@
 import { getPageKey } from './pageAnalysisStorage.js';
 import { getTopicReviewSetSignature } from '../Users/utils/topicAnalysisRequest.js';
 import { prepareReviewsForAnalysis } from '../Users/utils/reviewLanguage.js';
+import {
+  filterSubstantiveReviews,
+  getReviewText as extractReviewText,
+  isSubstantiveReviewText,
+} from '../Users/utils/reviewTopics.js';
+import {
+  createAnalysisReviewSample,
+  DEFAULT_ANALYSIS_REVIEW_BATCH_SIZE,
+  mergeSvmBatchResponses,
+  mergeTopicBatchResponses,
+  requestReviewBatches,
+} from '../Users/utils/analysisReviewBatching.js';
+import {
+  ensureLegacyReviewPrivacyMigration,
+  sanitizeActiveAnalysisState,
+  sanitizeLegacyActiveAnalysisMap,
+} from './legacyReviewPrivacyMigration.js';
+import {
+  detectRepeatedReviewText,
+  runSuspiciousReviewCheck,
+} from '../Users/utils/suspiciousReviewDetection.js';
 
 export const ACTIVE_ANALYSIS_STORAGE_KEY = 'voxreview_active_analysis_states';
 
 function readStorage(key) {
-  if (globalThis.chrome?.storage?.local) {
-    return new Promise((resolve, reject) => {
-      globalThis.chrome.storage.local.get([key], (result) => {
-        if (globalThis.chrome.runtime?.lastError) {
-          reject(new Error(globalThis.chrome.runtime.lastError.message));
-          return;
-        }
-        resolve(result?.[key] || {});
+  return ensureLegacyReviewPrivacyMigration().then(() => {
+    if (globalThis.chrome?.storage?.local) {
+      return new Promise((resolve, reject) => {
+        globalThis.chrome.storage.local.get([key], (result) => {
+          if (globalThis.chrome.runtime?.lastError) {
+            reject(new Error('Stored review data could not be safely privacy-migrated.'));
+            return;
+          }
+          const value = result?.[key];
+          resolve(value === undefined ? {} : sanitizeLegacyActiveAnalysisMap(value));
+        });
       });
-    });
-  }
+    }
 
-  try {
-    return Promise.resolve(JSON.parse(localStorage.getItem(key) || '{}'));
-  } catch {
-    return Promise.resolve({});
-  }
+    try {
+      const raw = localStorage.getItem(key);
+      const value = raw === null ? {} : JSON.parse(raw);
+      return sanitizeLegacyActiveAnalysisMap(value);
+    } catch {
+      throw new Error('Stored review data could not be safely privacy-migrated.');
+    }
+  });
 }
 
-function writeStorage(key, value) {
+async function writeStorage(key, value) {
+  await ensureLegacyReviewPrivacyMigration();
+  const safeValue = key === ACTIVE_ANALYSIS_STORAGE_KEY
+    ? sanitizeLegacyActiveAnalysisMap(value)
+    : value;
   if (globalThis.chrome?.storage?.local) {
     return new Promise((resolve, reject) => {
-      globalThis.chrome.storage.local.set({ [key]: value }, () => {
-        if (globalThis.chrome.runtime?.lastError) reject(new Error(globalThis.chrome.runtime.lastError.message));
+      globalThis.chrome.storage.local.set({ [key]: safeValue }, () => {
+        if (globalThis.chrome.runtime?.lastError) reject(new Error('Stored review data could not be safely privacy-migrated.'));
         else resolve();
       });
     });
   }
 
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    localStorage.setItem(key, JSON.stringify(safeValue));
     return Promise.resolve();
   } catch (error) {
     return Promise.reject(error);
@@ -54,22 +84,23 @@ export async function getActiveAnalysisForPage(pageKey) {
 
 export async function setActiveAnalysisState(state) {
   if (!state?.platform || !state?.page_url) return null;
-  const pageKey = getPageKey(state.platform, state.page_url) || state.pageKey;
+  const safeState = sanitizeActiveAnalysisState(state);
+  const pageKey = getPageKey(safeState.platform, safeState.page_url) || safeState.pageKey;
   if (!pageKey) return null;
 
   const states = await getActiveAnalysisStates();
   const existingState = states[pageKey];
   const sameReviewSet = getActiveAnalysisReviewSetSignature(existingState) &&
     getActiveAnalysisReviewSetSignature(existingState) ===
-      getActiveAnalysisReviewSetSignature(state);
+      getActiveAnalysisReviewSetSignature(safeState);
   const existingTopicResult = existingState?.topicResult;
   const hasExistingSuccessfulTopics = sameReviewSet && hasCompletedTopicResult(existingState);
-  const hasIncomingSuccessfulTopics = hasCompletedTopicResult(state);
-  const updatedState = { ...existingState, ...state, pageKey, updatedAt: Date.now() };
+  const hasIncomingSuccessfulTopics = hasCompletedTopicResult(safeState);
+  const updatedState = sanitizeActiveAnalysisState({ ...existingState, ...safeState, pageKey, updatedAt: Date.now() });
   if (hasExistingSuccessfulTopics && !hasIncomingSuccessfulTopics) {
     updatedState.topicResult = existingTopicResult;
     updatedState.topicError = null;
-    if (existingState.status === 'completed' && state.status === 'completed') {
+    if (existingState.status === 'completed' && safeState.status === 'completed') {
       updatedState.runId = existingState.runId;
       updatedState.completedAt = existingState.completedAt;
     }
@@ -113,7 +144,22 @@ function hasCompletedTopicResult(state) {
   return Array.isArray(state?.reviews) &&
     Array.isArray(state?.topicResult?.results) &&
     state.topicResult.results.length === state.reviews.length &&
-    state.topicResult.results.every((result) => Array.isArray(result?.topics));
+    state.topicResult.results.every((result, index) => (
+      (result?.reviewIndex == null || result.reviewIndex === index) &&
+      Array.isArray(result?.topics) &&
+      result.topics.every((topic) => (
+        typeof topic?.label === 'string' &&
+        typeof topic.score === 'number' &&
+        Number.isFinite(topic.score)
+      ))
+    ));
+}
+
+function hasCompletedSvmResult(state) {
+  return Array.isArray(state?.reviews) &&
+    Array.isArray(state?.svmResult?.predictions) &&
+    state.svmResult.predictions.length === state.reviews.length &&
+    state.svmResult.predictions.every((category) => [1, 2, 3, 4, 5, 6].includes(category));
 }
 
 export function getMatchingSavedTopicResult(activeState, savedAnalysis) {
@@ -140,6 +186,9 @@ export function createAnalysisJobCoordinator({
   requestSvm,
   requestTopics,
   topicsEnabled = true,
+  suspiciousReviewDetector = detectRepeatedReviewText,
+  maxSteamReviews,
+  batchSize = DEFAULT_ANALYSIS_REVIEW_BATCH_SIZE,
   onCompleted = () => {},
 }) {
   const jobs = new Map();
@@ -161,18 +210,69 @@ export function createAnalysisJobCoordinator({
       const reviewTexts = initialState.reviews.map((review) => (
         typeof review === 'string' ? review : review?.text || review?.reviewText || review?.comment || review?.review || ''
       ));
-      const svmResult = initialState.svmResult || await requestSvm(
-        reviewTexts,
-        initialState.platform,
-        runningJob.controller.signal,
-      );
+      const reportProgress = async (stage, progress) => {
+        if (!isCurrentJob(pageKey, runningJob)) return;
+        runningJob.state = {
+          ...runningJob.state,
+          stage,
+          analysisProgress: { ...progress, stage },
+        };
+        await persistState(runningJob.state);
+      };
+      let svmResult = initialState.svmResult || null;
+      if (!svmResult) {
+        const svmResponses = await requestReviewBatches(reviewTexts, {
+          batchSize: initialState.analysisSampleInfo.batchSize,
+          signal: runningJob.controller.signal,
+          request: (batch) => requestSvm(
+            batch,
+            initialState.platform,
+            runningJob.controller.signal,
+          ),
+          onProgress: (progress) => reportProgress('svm', progress),
+        });
+        svmResult = mergeSvmBatchResponses(svmResponses, reviewTexts.length);
+      }
       if (!isCurrentJob(pageKey, runningJob)) return runningJob.state;
       if (!Array.isArray(svmResult?.predictions) ||
         svmResult.predictions.length !== initialState.reviews.length ||
         svmResult.predictions.some((category) => ![1, 2, 3, 4, 5, 6].includes(category))) {
         throw new Error('SVM returned an invalid Category prediction payload.');
       }
-      runningJob.state = { ...initialState, svmResult, stage: topicsEnabled ? 'topics' : 'complete' };
+      const suspiciousReviewDetection = await runSuspiciousReviewCheck(initialState.reviews, {
+        enabled: initialState.suspiciousReviewDetectionEnabled === true,
+        detector: suspiciousReviewDetector,
+        signal: runningJob.controller.signal,
+      });
+      if (!isCurrentJob(pageKey, runningJob)) return runningJob.state;
+      let completedSampleInfo = {
+        ...initialState.analysisSampleInfo,
+        analyzedReviewCount: reviewTexts.length,
+        failedReviewCount: 0,
+        cancelledReviewCount: 0,
+        topicFailedReviewCount: 0,
+      };
+      const topicProgress = {
+        stage: 'topics',
+        completedReviews: 0,
+        totalReviews: reviewTexts.length,
+        completedBatches: 0,
+        totalBatches: Math.ceil(reviewTexts.length / initialState.analysisSampleInfo.batchSize),
+        batchSize: initialState.analysisSampleInfo.batchSize,
+      };
+      runningJob.state = {
+        ...initialState,
+        svmResult,
+        suspiciousReviewDetection,
+        analysisSampleInfo: completedSampleInfo,
+        stage: topicsEnabled ? 'topics' : 'complete',
+        analysisProgress: topicsEnabled ? topicProgress : {
+          ...topicProgress,
+          stage: 'complete',
+          completedReviews: reviewTexts.length,
+          completedBatches: topicProgress.totalBatches,
+        },
+      };
       await persistState(runningJob.state);
       if (!isCurrentJob(pageKey, runningJob)) return runningJob.state;
 
@@ -180,19 +280,39 @@ export function createAnalysisJobCoordinator({
       let topicError = initialState.topicError || null;
       if (topicsEnabled && (!topicResult || initialState.force)) {
         try {
-          topicResult = await requestTopics(
-            reviewTexts,
-            initialState.platform,
-            runningJob.controller.signal,
-            {
-              pageKey,
-              requestContext: initialState.requestContext || 'background-analysis',
-              force: Boolean(initialState.force),
-            },
-          );
+          const topicResponses = await requestReviewBatches(reviewTexts, {
+            batchSize: initialState.analysisSampleInfo.batchSize,
+            signal: runningJob.controller.signal,
+            request: (batch) => requestTopics(
+              batch,
+              initialState.platform,
+              runningJob.controller.signal,
+              {
+                pageKey,
+                requestContext: initialState.requestContext || 'background-analysis',
+                force: Boolean(initialState.force),
+              },
+            ),
+            onProgress: (progress) => reportProgress('topics', progress),
+          });
+          topicResult = mergeTopicBatchResponses(topicResponses, reviewTexts.length);
         } catch (error) {
           if (!isCurrentJob(pageKey, runningJob)) return runningJob.state;
-          topicError = error?.message || 'Review topic analysis unavailable.';
+          const diagnostics = [];
+          if (Number.isInteger(error?.httpStatus) && error.httpStatus >= 100 && error.httpStatus <= 599) {
+            diagnostics.push(`HTTP ${error.httpStatus}`);
+          }
+          if (typeof error?.code === 'string' && /^[A-Za-z0-9_-]{1,80}$/u.test(error.code)) {
+            diagnostics.push(`code ${error.code}`);
+          }
+          topicError = [
+            error?.message || 'Review topic analysis unavailable.',
+            diagnostics.length ? diagnostics.join(', ') : null,
+          ].filter(Boolean).join(' — ');
+          completedSampleInfo = {
+            ...completedSampleInfo,
+            topicFailedReviewCount: reviewTexts.length,
+          };
         }
       }
       if (!isCurrentJob(pageKey, runningJob)) return runningJob.state;
@@ -204,6 +324,16 @@ export function createAnalysisJobCoordinator({
         svmResult,
         topicResult,
         topicError,
+        suspiciousReviewDetection,
+        analysisSampleInfo: completedSampleInfo,
+        analysisProgress: {
+          stage: 'complete',
+          completedReviews: reviewTexts.length,
+          totalReviews: reviewTexts.length,
+          completedBatches: Math.ceil(reviewTexts.length / initialState.analysisSampleInfo.batchSize),
+          totalBatches: Math.ceil(reviewTexts.length / initialState.analysisSampleInfo.batchSize),
+          batchSize: initialState.analysisSampleInfo.batchSize,
+        },
         completedAt: Date.now(),
       };
       const completedState = await persistState(runningJob.state);
@@ -223,6 +353,12 @@ export function createAnalysisJobCoordinator({
         status: 'error',
         stage: 'error',
         error: error?.message || 'Emotion analysis failed.',
+        analysisSampleInfo: {
+          ...initialState.analysisSampleInfo,
+          analyzedReviewCount: 0,
+          failedReviewCount: initialState.reviews.length,
+          cancelledReviewCount: 0,
+        },
         completedAt: Date.now(),
       };
       return persistState(runningJob.state);
@@ -243,6 +379,16 @@ export function createAnalysisJobCoordinator({
       status: 'cancelled',
       stage: 'cancelled',
       error: null,
+      analysisSampleInfo: {
+        ...runningJob.state.analysisSampleInfo,
+        analyzedReviewCount: hasCompletedSvmResult(runningJob.state)
+          ? runningJob.state.reviews.length
+          : 0,
+        failedReviewCount: 0,
+        cancelledReviewCount: hasCompletedSvmResult(runningJob.state)
+          ? 0
+          : runningJob.state.reviews.length,
+      },
       completedAt: Date.now(),
     };
     runningJob.resolveReady({
@@ -258,12 +404,52 @@ export function createAnalysisJobCoordinator({
     async start(input) {
       const pageKey = getPageKey(input?.platform, input?.page_url) || input?.pageKey;
       if (!pageKey || !Array.isArray(input?.reviews)) return Promise.resolve({ ok: false, error: 'Invalid analysis context.' });
-      const prepared = await prepareReviewsForAnalysis(input.reviews);
+      const sample = input.analysisSampleInfo
+        ? { reviews: input.reviews, sampleInfo: input.analysisSampleInfo }
+        : createAnalysisReviewSample(input.reviews, {
+            platform: input.platform,
+            offset: input.sampleOffset || 0,
+            maxSteamReviews,
+            batchSize,
+            sourceReviewCount: input.sourceReviewCount ?? input.reviews.length,
+          });
+      const substantiveReviews = filterSubstantiveReviews(sample.reviews);
+      const emptyReviewRecords = sample.reviews.filter((review) => (
+        !isSubstantiveReviewText(extractReviewText(review))
+      ));
+      const prepared = await prepareReviewsForAnalysis(substantiveReviews);
+      const inputSkippedReviews = Array.isArray(input.skippedReviews) ? input.skippedReviews : [];
+      const emptyReviewSkips = emptyReviewRecords.map((review) => ({
+        review,
+        status: 'skipped',
+        reason: 'empty_review',
+      }));
+      const analysisSampleInfo = {
+        ...sample.sampleInfo,
+        sourceReviewCount: input.sourceReviewCount ?? sample.sampleInfo.sourceReviewCount,
+        extractedReviewCount: input.sourceReviewCount ?? sample.sampleInfo.extractedReviewCount ?? sample.sampleInfo.sourceReviewCount,
+        emptyReviewCount: Math.max(
+          sample.sampleInfo.emptyReviewCount || 0,
+          inputSkippedReviews.filter((entry) => entry?.reason === 'empty_review').length +
+            emptyReviewRecords.length,
+        ),
+        supportedReviewCount: prepared.supportedReviewCount,
+        uncertainReviewCount: prepared.uncertainReviewCount,
+        analyzedReviewCount: 0,
+        failedReviewCount: 0,
+        cancelledReviewCount: 0,
+        topicFailedReviewCount: 0,
+        unsupportedReviewCount: inputSkippedReviews.filter((entry) => (
+          entry?.reason === 'unsupported_language'
+        )).length + prepared.skippedReviews.length,
+      };
       const analysisInput = {
         ...input,
         reviews: prepared.reviews,
+        analysisSampleInfo,
         skippedReviews: [
-          ...(Array.isArray(input.skippedReviews) ? input.skippedReviews : []),
+          ...inputSkippedReviews,
+          ...emptyReviewSkips,
           ...prepared.skippedReviews,
         ],
       };
@@ -300,8 +486,23 @@ export function createAnalysisJobCoordinator({
         completedAt: null,
         svmResult: null,
         topicResult: null,
+        suspiciousReviewDetection: {
+          status: analysisInput.suspiciousReviewDetectionEnabled === true ? 'unavailable' : 'disabled',
+          reason: analysisInput.suspiciousReviewDetectionEnabled === true ? 'detector_not_configured' : 'not_enabled',
+          evaluatedCount: 0,
+          results: [],
+        },
         error: null,
         topicError: null,
+        analysisSampleInfo,
+        analysisProgress: {
+          stage: 'svm',
+          completedReviews: 0,
+          totalReviews: analysisInput.reviews.length,
+          completedBatches: 0,
+          totalBatches: Math.ceil(analysisInput.reviews.length / analysisSampleInfo.batchSize),
+          batchSize: analysisSampleInfo.batchSize,
+        },
       };
       let resolveReady;
       const runningJob = {
@@ -318,12 +519,28 @@ export function createAnalysisJobCoordinator({
             return { ok: false, error: 'Analysis was cancelled.', state: runningJob.state };
           }
           const sameReviewSet = getStateReviewSignature(existingState) === inputReviewSignature;
-          const hasCompletedTopics = Array.isArray(existingState?.topicResult?.results);
-          if (existingState?.status === 'completed' && sameReviewSet && !analysisInput.force &&
+          const hasCompletedTopics = hasCompletedTopicResult(existingState);
+          const hasCompletedSvm = hasCompletedSvmResult(existingState);
+          if (existingState?.status === 'completed' && sameReviewSet && hasCompletedSvm && !analysisInput.force &&
             (!topicsEnabled || hasCompletedTopics)) {
+            const suspiciousReviewDetection = await runSuspiciousReviewCheck(analysisInput.reviews, {
+              enabled: analysisInput.suspiciousReviewDetectionEnabled === true,
+              detector: suspiciousReviewDetector,
+              signal: runningJob.controller.signal,
+            });
             runningJob.state = {
               ...existingState,
+              suspiciousReviewDetection,
+              suspiciousReviewDetectionEnabled: analysisInput.suspiciousReviewDetectionEnabled === true,
+              excludeFlaggedFromEmotion: analysisInput.excludeFlaggedFromEmotion === true,
               skippedReviews: analysisInput.skippedReviews,
+              analysisSampleInfo: {
+                ...analysisSampleInfo,
+                analyzedReviewCount: prepared.reviews.length,
+                failedReviewCount: 0,
+                cancelledReviewCount: 0,
+                topicFailedReviewCount: existingState.topicError ? prepared.reviews.length : 0,
+              },
             };
             const updatedState = await persistState(runningJob.state);
             if (!isCurrentJob(pageKey, runningJob)) {
@@ -336,12 +553,34 @@ export function createAnalysisJobCoordinator({
           }
 
           const stateToRun = existingState?.status === 'analyzing' && sameReviewSet
-            ? { ...existingState, pageKey, reviewSetSignature: inputReviewSignature }
+            ? {
+                ...existingState,
+                pageKey,
+                reviewSetSignature: inputReviewSignature,
+                suspiciousReviewDetectionEnabled: analysisInput.suspiciousReviewDetectionEnabled === true,
+                excludeFlaggedFromEmotion: analysisInput.excludeFlaggedFromEmotion === true,
+                skippedReviews: analysisInput.skippedReviews,
+                analysisSampleInfo: {
+                  ...analysisSampleInfo,
+                  analyzedReviewCount: hasCompletedSvm ? prepared.reviews.length : 0,
+                },
+                topicResult: hasCompletedTopics ? existingState.topicResult : null,
+                topicError: null,
+              }
             : sameReviewSet
               ? {
                   ...initialState,
-                  svmResult: analysisInput.force ? null : existingState?.svmResult || null,
-                  topicResult: existingState?.topicResult || null,
+                  suspiciousReviewDetectionEnabled: analysisInput.suspiciousReviewDetectionEnabled === true,
+                  excludeFlaggedFromEmotion: analysisInput.excludeFlaggedFromEmotion === true,
+                  svmResult: analysisInput.force || !hasCompletedSvm ? null : existingState.svmResult,
+                  analysisSampleInfo: {
+                    ...analysisSampleInfo,
+                    analyzedReviewCount: !analysisInput.force && hasCompletedSvm
+                      ? prepared.reviews.length
+                      : 0,
+                  },
+                  topicResult: hasCompletedTopics ? existingState.topicResult : null,
+                  topicError: null,
                 }
               : initialState;
           runningJob.state = stateToRun;

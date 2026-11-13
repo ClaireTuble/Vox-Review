@@ -7,7 +7,6 @@ import '../css/modal.css';
 const PLATFORM_BADGE_STYLES = {
   'Shopee':            { bg: 'rgba(251,146,60,0.15)',   color: '#fb923c', border: '1px solid rgba(251,146,60,0.25)' },
   'Lazada':            { bg: 'rgba(192,132,252,0.15)',   color: '#c084fc', border: '1px solid rgba(192,132,252,0.25)' },
-  'Google Maps':       { bg: 'rgba(96,165,250,0.15)',    color: '#60a5fa', border: '1px solid rgba(96,165,250,0.25)' },
   'Google Play Store': { bg: 'rgba(110,231,183,0.15)',   color: '#6ee7b7', border: '1px solid rgba(110,231,183,0.25)' },
   'Steam':             { bg: 'rgba(129,140,248,0.15)',   color: '#818cf8', border: '1px solid rgba(129,140,248,0.25)' },
 };

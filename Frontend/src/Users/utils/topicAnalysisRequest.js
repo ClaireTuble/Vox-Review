@@ -1,8 +1,11 @@
 import { API_BASE_URL } from '../../services/apiConfig.js';
+import { sanitizeReviewTextList } from '../../services/privacyRedaction.js';
+import { getTopicAssignmentCounts } from './reviewTopics.js';
 
 export const TOPIC_ANALYSIS_PATH = '/api/nlp/topics/predict';
 export const TOPIC_REQUEST_TIMEOUT_BASE_MS = 180_000;
 export const TOPIC_REQUEST_TIMEOUT_PER_REVIEW_MS = 12_000;
+export const TOPIC_KEYWORD_SCORE_BATCH_SIZE = 50;
 let nextTopicRequestSequence = 0;
 
 export function getTopicReviewSetSignature(reviews) {
@@ -108,7 +111,7 @@ export function createTopicAnalysisRequestCoordinator({
           });
           return result;
         }, (error) => {
-          console.warn('VoxReview: Topic analysis request completed.', {
+          console.warn('VoxReview: Topic analysis request failed.', {
             requestId,
             pageKey,
             reviewCount: reviews.length,
@@ -119,7 +122,10 @@ export function createTopicAnalysisRequestCoordinator({
             httpStatus: error?.httpStatus ?? null,
             status: error?.httpStatus ?? null,
             code: safeErrorCode(error?.code),
-            failureReason: getTopicFailureReason(error, { signal }),
+            failureReason: getTopicFailureReason(error, {
+              response: error?.response ?? null,
+              signal,
+            }),
             outcome: 'failure',
           });
           throw error;
@@ -189,28 +195,117 @@ function hasValidTopicKeywordScoreResponse(payload, expectedReviewCount) {
     ));
 }
 
+export function getMissingTopicKeywordCandidates(candidates, keywordScores) {
+  if (!Array.isArray(candidates)) throw new TypeError('Topic keyword candidates must be an array.');
+  return candidates.filter((candidate) => {
+    const scores = keywordScores?.[candidate.toLocaleLowerCase()];
+    return !scores ||
+      [...VALID_TOPIC_LABELS].some((label) => !Number.isFinite(scores[label]));
+  });
+}
+
+export async function requestTopicKeywordScoresInBatches(
+  candidates,
+  requestBatch,
+  batchSize = TOPIC_KEYWORD_SCORE_BATCH_SIZE,
+) {
+  if (!Array.isArray(candidates)) throw new TypeError('Topic keyword candidates must be an array.');
+  if (typeof requestBatch !== 'function') throw new TypeError('A topic keyword batch requester is required.');
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1) {
+    throw new RangeError('Topic keyword batch size must be a positive integer.');
+  }
+
+  const results = [];
+  const scoreBatch = async (batch, resultOffset) => {
+    let payload;
+    try {
+      payload = await requestBatch(batch);
+    } catch (error) {
+      if (error?.httpStatus !== 413 ||
+        error?.code !== 'TOPIC_INPUT_LIMIT_EXCEEDED' ||
+        batch.length < 2) {
+        throw error;
+      }
+      const splitIndex = Math.ceil(batch.length / 2);
+      await scoreBatch(batch.slice(0, splitIndex), resultOffset);
+      await scoreBatch(batch.slice(splitIndex), resultOffset + splitIndex);
+      return;
+    }
+
+    if (!hasValidTopicKeywordScoreResponse(payload, batch.length)) {
+      throw Object.assign(
+        new Error('Topic keyword scoring returned an invalid batch response.'),
+        { code: 'TOPIC_WORKER_INVALID_RESPONSE' },
+      );
+    }
+    payload.results.forEach((result, index) => {
+      results[resultOffset + index] = { ...result, reviewIndex: resultOffset + index };
+    });
+  };
+
+  for (let start = 0; start < candidates.length; start += batchSize) {
+    await scoreBatch(candidates.slice(start, start + batchSize), start);
+  }
+  return { results };
+}
+
+export async function runTopicKeywordScoring({
+  candidates,
+  requestBatch,
+  isCurrent,
+  onStatusChange,
+  onSuccess,
+  batchSize = TOPIC_KEYWORD_SCORE_BATCH_SIZE,
+}) {
+  const isOperationCurrent = typeof isCurrent === 'function' ? isCurrent : () => true;
+  if (!isOperationCurrent()) return false;
+  onStatusChange?.('loading');
+
+  try {
+    const payload = await requestTopicKeywordScoresInBatches(
+      candidates,
+      requestBatch,
+      batchSize,
+    );
+    if (!isOperationCurrent()) return false;
+    const successValue = onSuccess?.(payload);
+    if (!isOperationCurrent()) return false;
+    onStatusChange?.('success', successValue);
+    return true;
+  } catch (error) {
+    if (isOperationCurrent()) onStatusChange?.('error');
+    throw error;
+  }
+}
+
 function safeErrorCode(value) {
   const code = String(value || '');
   return /^[A-Za-z0-9_-]{1,100}$/.test(code) ? code : null;
 }
 
-function getTopicFailureReason(error, { response = null, signal = null } = {}) {
+export function getTopicFailureReason(error, { response = null, signal = null } = {}) {
+  const actualResponse = response || error?.response || null;
+  const status = actualResponse?.status ?? error?.httpStatus ?? null;
+
   if (error?.name === 'TimeoutError' || signal?.reason?.name === 'TimeoutError') {
     return 'request_timeout';
   }
   if (error?.name === 'AbortError' || signal?.aborted) return 'caller_cancelled';
-  if (error?.code === 'TOPIC_WORKER_TIMEOUT' || response?.status === 504) return 'worker_timeout';
+  if (error?.code === 'TOPIC_WORKER_TIMEOUT' || status === 504) return 'worker_timeout';
   if (
     error?.code === 'TOPIC_WORKER_INVALID_RESPONSE' ||
     error?.code === 'TOPIC_RESPONSE_SHAPE_MISMATCH' ||
-    response?.status === 502
+    status === 502
   ) return 'response_shape_mismatch';
   if (error?.code === 'TOPIC_INFERENCE_FAILED') return 'inference_failure';
+  if (error?.code === 'TOPIC_WORKER_TERMINATED') return 'worker_terminated';
+  if (error?.code === 'TOPIC_WORKER_EXITED') return 'worker_exited';
   if (error?.code === 'TOPIC_WORKER_UNAVAILABLE') return 'worker_unavailable';
   if (error?.code === 'TOPIC_REQUEST_CANCELLED') return 'shared_computation_cancelled';
   if (error?.code === 'TOPIC_RESPONSE_INVALID_JSON') return 'invalid_json';
-  if (response && !response.ok) return 'http_error';
-  if (response) return 'invalid_response';
+  if (actualResponse && !actualResponse.ok) return 'http_error';
+  if (actualResponse) return 'invalid_response';
+  if (typeof status === 'number' && status >= 400) return 'http_error';
   return 'network_error';
 }
 
@@ -239,6 +334,7 @@ export async function requestTopicAnalysis(
   let payload = null;
 
   try {
+    const sanitizedReviews = sanitizeReviewTextList(reviews);
     response = await fetchImpl(url, {
       method: 'POST',
       headers: {
@@ -255,7 +351,7 @@ export async function requestTopicAnalysis(
         ...(force ? { 'X-VoxReview-Force-Refresh': 'true' } : {}),
       },
       body: JSON.stringify({
-        reviews,
+        reviews: sanitizedReviews,
         platform: platformKey,
         ...(operation === 'classify' ? {} : { operation }),
       }),
@@ -281,6 +377,7 @@ export async function requestTopicAnalysis(
       error.code = safeErrorCode(payload?.code || payload?.error) ||
         (response.ok && payload?.success === true ? 'TOPIC_RESPONSE_SHAPE_MISMATCH' : null);
       error.httpStatus = response.status;
+      error.response = response;
       throw error;
     }
     console.info('VoxReview: Topic analysis transport completed.', {
@@ -289,7 +386,7 @@ export async function requestTopicAnalysis(
       httpStatus: response.status,
       durationMs: Date.now() - requestStartedAt,
       reviewCount: reviews.length,
-      resultCount: payload.results.length,
+      ...getTopicAssignmentCounts(payload),
       operation,
       outcome: 'success',
     });
@@ -297,6 +394,9 @@ export async function requestTopicAnalysis(
   } catch (error) {
     if (error && typeof error === 'object' && error.httpStatus == null && response) {
       error.httpStatus = response.status;
+    }
+    if (error && typeof error === 'object' && error.response == null && response) {
+      error.response = response;
     }
     const details = error?.name === 'TimeoutError' || signal?.reason?.name === 'TimeoutError'
       ? 'timeout'
@@ -312,6 +412,7 @@ export async function requestTopicAnalysis(
       requestId: clientRequestId,
       requestContext,
       clientRequestId,
+      platform: platformKey,
       operation,
       durationMs: Date.now() - requestStartedAt,
       abortSource: signal?.reason?.name === 'TimeoutError'
@@ -322,6 +423,9 @@ export async function requestTopicAnalysis(
       httpStatus: error?.httpStatus ?? response?.status ?? null,
       status: response?.status ?? null,
       code: safeErrorCode(error?.code || payload?.error),
+      errorName: typeof error?.name === 'string' ? error.name : null,
+      errorMessage: String(error?.message || payload?.message || payload?.error || 'Unknown topic request failure.')
+        .slice(0, 300),
       failureReason: getTopicFailureReason(error, { response, signal }),
       details,
       reviewCount: Array.isArray(reviews) ? reviews.length : 0,

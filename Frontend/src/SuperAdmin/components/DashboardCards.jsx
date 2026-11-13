@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import { Users, Puzzle, BarChart3, Globe } from 'lucide-react';
 import StatisticCard from './StatisticCard.jsx';
+import { FALLBACK_PLATFORMS } from '../data/platforms.js';
 import '../css/cards.css';
+
+// FALLBACK_PLATFORMS is the canonical client-side registry of all supported
+// platforms. When the API has not yet responded (stats is null), use its
+// length as the floor so the card never flashes a misleading 0.
+const CANONICAL_PLATFORM_COUNT = FALLBACK_PLATFORMS.length;
 
 export default function DashboardCards({ stats }) {
   const [activeUsersPeriod, setActiveUsersPeriod] = useState('week');
@@ -25,7 +31,15 @@ export default function DashboardCards({ stats }) {
     totalAnalysesVal = stats.totalAnalyses;
   }
 
-  const platformsVal = String(stats?.supportedPlatformsCount ?? 0);
+  // Supported Platforms: use the API value when available; otherwise fall back
+  // to CANONICAL_PLATFORM_COUNT so the card never shows 0 due to a missing
+  // field, loading state, or database query failure.
+  const apiPlatformsCount = stats?.supportedPlatformsCount;
+  const platformsVal = String(
+    typeof apiPlatformsCount === 'number' && apiPlatformsCount > 0
+      ? apiPlatformsCount
+      : CANONICAL_PLATFORM_COUNT,
+  );
 
   const STAT_CONFIG = [
     {

@@ -1,4 +1,6 @@
+import './nodeLocalStorageTestSetup.js';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test, { afterEach, beforeEach } from 'node:test';
 import {
   ACTIVE_ANALYSIS_STORAGE_KEY,
@@ -11,6 +13,7 @@ import {
 } from './activeAnalysisState.js';
 import { getPageKey } from './pageAnalysisStorage.js';
 import { getTopicReviewSetSignature } from '../Users/utils/topicAnalysisRequest.js';
+import { detectRepeatedReviewText } from '../Users/utils/suspiciousReviewDetection.js';
 import {
   calculateReviewPriorities,
   filterReviewEntriesByEmotion,
@@ -22,7 +25,11 @@ globalThis.chrome = {
   storage: {
     local: {
       get(keys, callback) {
-        callback({ [keys[0]]: structuredClone(storage[keys[0]] || {}) });
+        const requestedKeys = Array.isArray(keys) ? keys : [keys];
+        callback(Object.fromEntries(requestedKeys.map((key) => [
+          key,
+          storage[key] === undefined ? undefined : structuredClone(storage[key]),
+        ])));
       },
       set(values, callback) {
         Object.assign(storage, structuredClone(values));
@@ -34,6 +41,11 @@ globalThis.chrome = {
 
 beforeEach(() => { storage = {}; });
 afterEach(() => { storage = {}; });
+
+const extensionBackgroundSource = await readFile(
+  new URL('../../extension/background.js', import.meta.url),
+  'utf8',
+);
 
 function input(url = 'https://shopee.ph/product/123/456') {
   return {
@@ -50,7 +62,47 @@ test('active state persists independently of saved history by canonical page key
 
   assert.equal(record.pageKey, 'shopee:i.123.456');
   assert.equal((await getActiveAnalysisForPage(getPageKey('shopee', 'https://shopee.ph/product/123/456?ref=popup'))).status, 'completed');
-  assert.deepEqual(Object.keys(storage), [ACTIVE_ANALYSIS_STORAGE_KEY]);
+  assert.deepEqual(
+    Object.keys(storage).sort(),
+    ['voxreview_privacy_migration_version', ACTIVE_ANALYSIS_STORAGE_KEY].sort(),
+  );
+});
+
+test('active cache stores allowlisted reviews and retains positional topic alignment', async () => {
+  const record = await setActiveAnalysisState({
+    ...input(),
+    productImage: 'https://cdn.example/product.png',
+    category: 'unneeded',
+    reviews: [
+      {
+        id: 'persistent-review-id',
+        reviewer: 'Private Person',
+        profileUrl: 'https://example.test/profile',
+        text: 'Works well.',
+        date: 'July 2026',
+        rating: 5,
+        helpfulCount: 12,
+        helpfulnessMetric: 'helpful_votes',
+        helpfulnessAvailable: true,
+      },
+    ],
+    topicResult: {
+      results: [{ reviewIndex: 0, topics: [{ label: 'Quality', score: 0.9 }] }],
+    },
+  });
+
+  assert.deepEqual(record.reviews, [{
+    text: 'Works well.',
+    date: 'July 2026',
+    rating: 5,
+    helpfulCount: 12,
+    helpfulnessMetric: 'helpful_votes',
+    helpfulnessAvailable: true,
+  }]);
+  assert.equal(record.productImage, 'https://cdn.example/product.png');
+  assert.equal(record.category, undefined);
+  assert.equal(record.topicResult.results[0].reviewIndex, 0);
+  assert.doesNotMatch(JSON.stringify(storage[ACTIVE_ANALYSIS_STORAGE_KEY]), /persistent-review-id|Private Person|profileUrl/);
 });
 
 test('returning to a prior page restores its results without showing another page state', async () => {
@@ -204,7 +256,12 @@ test('clearing active state removes only that page and leaves saved history unto
 });
 
 test('completed state restores without rerunning SVM or Topic Analysis', async () => {
-  await setActiveAnalysisState({ ...input(), status: 'completed', svmResult: { predictions: [1] }, topicResult: { results: [] } });
+  await setActiveAnalysisState({
+    ...input(),
+    status: 'completed',
+    svmResult: { predictions: [1] },
+    topicResult: { results: [{ reviewIndex: 0, topics: [] }] },
+  });
   let svmCalls = 0;
   let topicCalls = 0;
   const coordinator = createAnalysisJobCoordinator({
@@ -218,6 +275,65 @@ test('completed state restores without rerunning SVM or Topic Analysis', async (
   assert.equal(result.state.status, 'completed');
   assert.equal(svmCalls, 0);
   assert.equal(topicCalls, 0);
+});
+
+test('retries misaligned topic results for a completed 19-review emotion subset and preserves SVM predictions', async () => {
+  const url = 'https://store.steampowered.com/app/123/Example/';
+  const reviews = Array.from({ length: 19 }, (_, index) => ({
+    id: `sad-review-${index}`,
+    text: `This was a disappointing experience and made me feel sad, review ${index}.`,
+  }));
+  const page = {
+    ...input(url),
+    platform: 'steam',
+    pageKey: getPageKey('steam', url),
+    reviews,
+  };
+  const svmResult = { predictions: Array(19).fill(2) };
+  await setActiveAnalysisState({
+    ...page,
+    status: 'completed',
+    reviewSetSignature: getTopicReviewSetSignature(reviews.map(({ text }) => text)),
+    svmResult,
+    topicResult: {
+      results: reviews.map((_, index) => ({
+        reviewIndex: index + 1,
+        topics: [{ label: 'Quality', score: 0.8 }],
+      })),
+    },
+    topicError: 'Topic worker returned a misaligned response.',
+  });
+
+  let svmCalls = 0;
+  let topicCalls = 0;
+  const coordinator = createAnalysisJobCoordinator({
+    requestSvm: async () => {
+      svmCalls += 1;
+      return svmResult;
+    },
+    requestTopics: async (texts, platform) => {
+      topicCalls += 1;
+      assert.equal(platform, 'steam');
+      assert.equal(texts.length, 19);
+      return {
+        results: texts.map((_, reviewIndex) => ({
+          reviewIndex,
+          topics: [{ label: 'Quality', score: 0.8 }],
+        })),
+      };
+    },
+  });
+
+  const result = await coordinator.start(page);
+
+  assert.equal(result.state.status, 'completed');
+  assert.deepEqual(result.state.svmResult, svmResult);
+  assert.deepEqual(result.state.svmResult.predictions, Array(19).fill(2));
+  assert.equal(result.state.topicError, null);
+  assert.equal(result.state.topicResult.results.length, 19);
+  assert.ok(result.state.topicResult.results.every((item, index) => item.reviewIndex === index));
+  assert.equal(svmCalls, 0);
+  assert.equal(topicCalls, 1);
 });
 
 test('includes the source platform in the SVM request', async () => {
@@ -266,7 +382,7 @@ test('filters unsupported languages before both analysis requests and records sk
 
   assert.deepEqual(svmReviews, [acceptedReview.text]);
   assert.deepEqual(topicReviews, [acceptedReview.text]);
-  assert.deepEqual(result.state.reviews, [acceptedReview]);
+  assert.deepEqual(result.state.reviews, [{ text: acceptedReview.text }]);
   assert.equal(result.state.svmResult.predictions.length, 1);
   assert.equal(result.state.topicResult.results.length, 1);
   assert.deepEqual(
@@ -279,6 +395,174 @@ test('filters unsupported languages before both analysis requests and records sk
   assert.equal(calculateReviewPriorities([
     { text: acceptedReview.text, category: result.state.svmResult.predictions[0] },
   ]).length, 1);
+});
+
+test('excludes short Korean reviews from SVM, topics, emotion totals, and priority inputs', async () => {
+  const acceptedReview = {
+    id: 'en-1',
+    text: 'The product is excellent and easy to use. I am very happy with this purchase.',
+  };
+  const koreanReview = { id: 'ko-short', text: '정말 좋아요' };
+  let svmReviews;
+  let topicReviews;
+  const coordinator = createAnalysisJobCoordinator({
+    requestSvm: async (reviews) => {
+      svmReviews = reviews;
+      return { predictions: [1] };
+    },
+    requestTopics: async (reviews) => {
+      topicReviews = reviews;
+      return { results: [{ reviewIndex: 0, topics: [{ label: 'Quality', score: 0.9 }] }] };
+    },
+  });
+
+  const result = await coordinator.start({
+    ...input(),
+    reviews: [acceptedReview, koreanReview],
+  });
+
+  assert.deepEqual(svmReviews, [acceptedReview.text]);
+  assert.deepEqual(topicReviews, [acceptedReview.text]);
+  assert.deepEqual(result.state.reviews, [{ text: acceptedReview.text }]);
+  assert.deepEqual(result.state.skippedReviews.map(({ review, reason, detectedLanguage }) => ({
+    review,
+    reason,
+    detectedLanguage,
+  })), [{
+    review: { text: koreanReview.text },
+    reason: 'unsupported_language',
+    detectedLanguage: 'ko',
+  }]);
+  const priorityQuotes = result.state.reviews.map((review, index) => ({
+    ...review,
+    category: result.state.svmResult.predictions[index],
+  }));
+  assert.equal(priorityQuotes.length, 1);
+  assert.ok(!priorityQuotes.some(({ id }) => id === koreanReview.id));
+});
+
+test('keeps extracted, unique, supported, analyzed, and skipped counts distinct for a 100-review batch', async () => {
+  const supportedReviews = Array.from({ length: 58 }, (_, index) => ({
+    id: `en-${index}`,
+    text: `This game is very fun and enjoyable for player number ${index}. I love it.`,
+  }));
+  const unsupportedReviews = Array.from({ length: 42 }, (_, index) => ({
+    id: `ko-${index}`,
+    text: `정말 좋아요 ${String.fromCharCode(0xAC00 + index)}`,
+  }));
+  const requests = { svm: [], topics: [] };
+  const coordinator = createAnalysisJobCoordinator({
+    requestSvm: async (reviews) => {
+      requests.svm.push(reviews.length);
+      return { predictions: Array(reviews.length).fill(1) };
+    },
+    requestTopics: async (reviews) => {
+      requests.topics.push(reviews.length);
+      return {
+        results: reviews.map((_, reviewIndex) => ({
+          reviewIndex,
+          topics: [{ label: 'Features / Content', score: 0.9 }],
+        })),
+      };
+    },
+  });
+
+  const result = await coordinator.start({
+    ...input('https://store.steampowered.com/app/123/Example/'),
+    platform: 'steam',
+    reviews: [...supportedReviews, ...unsupportedReviews],
+    sourceReviewCount: 100,
+  });
+  const counts = result.state.analysisSampleInfo;
+
+  assert.deepEqual(requests.svm, [58]);
+  assert.deepEqual(requests.topics, [58]);
+  assert.equal(counts.extractedReviewCount, 100);
+  assert.equal(counts.uniqueReviewCount, 100);
+  assert.equal(counts.supportedReviewCount, 58);
+  assert.equal(counts.analyzedReviewCount, 58);
+  assert.equal(counts.unsupportedReviewCount, 42);
+  assert.equal(counts.failedReviewCount, 0);
+  assert.equal(result.state.reviews.length, 58);
+  assert.equal(result.state.topicResult.results.length, 58);
+  assert.ok(result.state.topicResult.results.every((entry, index) => entry.reviewIndex === index));
+});
+
+test('excludes empty records without counting them as unsupported-language skips', async () => {
+  const englishReview = { id: 'english', text: 'The game is excellent and enjoyable.' };
+  const emojiReview = { id: 'emoji', text: '👍❤️' };
+  const emptyReview = { id: 'empty', text: '  ' };
+  const unsupportedReview = { id: 'japanese', text: 'この商品はとても良いです。使いやすくて満足しています。品質も高く、また購入したいです。' };
+  let svmReviews;
+  let topicReviews;
+  const coordinator = createAnalysisJobCoordinator({
+    requestSvm: async (reviews) => {
+      svmReviews = reviews;
+      return { predictions: Array(reviews.length).fill(1) };
+    },
+    requestTopics: async (reviews) => {
+      topicReviews = reviews;
+      return {
+        results: reviews.map((_, reviewIndex) => ({ reviewIndex, topics: [] })),
+      };
+    },
+  });
+
+  const result = await coordinator.start({
+    ...input(),
+    reviews: [englishReview, emojiReview, emptyReview, unsupportedReview],
+    sourceReviewCount: 4,
+  });
+
+  assert.deepEqual(svmReviews, [englishReview.text, emojiReview.text]);
+  assert.deepEqual(topicReviews, [englishReview.text, emojiReview.text]);
+  assert.equal(result.state.analysisSampleInfo.extractedReviewCount, 4);
+  assert.equal(result.state.analysisSampleInfo.uniqueReviewCount, 4);
+  assert.equal(result.state.analysisSampleInfo.emptyReviewCount, 1);
+  assert.equal(result.state.analysisSampleInfo.supportedReviewCount, 1);
+  assert.equal(result.state.analysisSampleInfo.uncertainReviewCount, 1);
+  assert.equal(result.state.analysisSampleInfo.analyzedReviewCount, 2);
+  assert.equal(result.state.analysisSampleInfo.unsupportedReviewCount, 1);
+  assert.deepEqual(result.state.skippedReviews.map(({ review, reason }) => ({ review, reason })), [
+    { review: { text: '' }, reason: 'empty_review' },
+    { review: { text: unsupportedReview.text }, reason: 'unsupported_language' },
+  ]);
+});
+
+test('does not send Indonesian reviews to either analysis request', async () => {
+  const acceptedReview = {
+    id: 'taglish-1',
+    text: 'Ang ganda ng product na ito, easy to use at sulit talaga.',
+  };
+  const indonesianReview = {
+    id: 'id-mixed-1',
+    text: 'The quality is bagus, tapi pengiriman sangat lambat.',
+  };
+  let svmReviews;
+  let topicReviews;
+  const coordinator = createAnalysisJobCoordinator({
+    requestSvm: async (reviews) => {
+      svmReviews = reviews;
+      return { predictions: [1] };
+    },
+    requestTopics: async (reviews) => {
+      topicReviews = reviews;
+      return { results: [{ reviewIndex: 0, topics: [] }] };
+    },
+  });
+
+  const result = await coordinator.start({
+    ...input(),
+    reviews: [acceptedReview, indonesianReview],
+  });
+
+  assert.deepEqual(svmReviews, [acceptedReview.text]);
+  assert.deepEqual(topicReviews, [acceptedReview.text]);
+  assert.deepEqual(result.state.reviews, [{ text: acceptedReview.text }]);
+  assert.deepEqual(result.state.skippedReviews.map(({ review, detectedLanguage }) => ({
+    review,
+    detectedLanguage,
+  })), [{ review: { text: indonesianReview.text }, detectedLanguage: 'id' }]);
 });
 
 test('reuses completed results while refreshing skipped reviews for the current input', async () => {
@@ -320,7 +604,7 @@ test('reuses completed results while refreshing skipped reviews for the current 
   const persisted = await getActiveAnalysisForPage(page.pageKey);
 
   assert.equal(result.started, false);
-  assert.deepEqual(result.state.reviews, [supportedReview]);
+  assert.deepEqual(result.state.reviews, [{ text: supportedReview.text }]);
   assert.deepEqual(result.state.svmResult, { predictions: [1] });
   assert.deepEqual(result.state.topicResult.results[0].topics, [{ label: 'Quality', score: 0.9 }]);
   assert.deepEqual(result.state.skippedReviews.map(({ review, status, reason }) => ({
@@ -328,7 +612,7 @@ test('reuses completed results while refreshing skipped reviews for the current 
     status,
     reason,
   })), [{
-    review: currentUnsupportedReview,
+    review: { text: currentUnsupportedReview.text },
     status: 'skipped',
     reason: 'unsupported_language',
   }]);
@@ -451,6 +735,55 @@ test('different page keys keep independent simultaneous analysis jobs', async ()
   assert.equal(secondResult.state.status, 'completed');
 });
 
+test('large Steam analysis batches SVM and topics in order and persists actual progress', async () => {
+  const reviews = Array.from({ length: 120 }, (_, index) => ({
+    id: `steam-${index}`,
+    text: `A unique Steam review number ${index} describes the gameplay.`,
+  }));
+  const svmBatchSizes = [];
+  const topicBatchSizes = [];
+  const coordinator = createAnalysisJobCoordinator({
+    batchSize: 50,
+    maxSteamReviews: 200,
+    requestSvm: async (batch) => {
+      svmBatchSizes.push(batch.length);
+      return {
+        predictions: batch.map(() => 1),
+        results: batch.map(() => ({ category: 1, emotionDrivers: [] })),
+      };
+    },
+    requestTopics: async (batch) => {
+      topicBatchSizes.push(batch.length);
+      return {
+        results: batch.map((_, index) => ({
+          reviewIndex: index,
+          topics: [{ label: 'Features / Content', score: 0.8 }],
+        })),
+      };
+    },
+  });
+
+  const result = await coordinator.start({
+    ...input('https://store.steampowered.com/app/123/Game/'),
+    platform: 'steam',
+    reviews,
+    sourceReviewCount: 120,
+  });
+
+  assert.deepEqual(svmBatchSizes, [50, 50, 20]);
+  assert.deepEqual(topicBatchSizes, [50, 50, 20]);
+  assert.equal(result.state.svmResult.predictions.length, 120);
+  assert.deepEqual(
+    result.state.topicResult.results.map(({ reviewIndex }) => reviewIndex),
+    Array.from({ length: 120 }, (_, index) => index),
+  );
+  assert.equal(result.state.analysisSampleInfo.uniqueReviewCount, 120);
+  assert.equal(result.state.analysisSampleInfo.analyzedReviewCount, 120);
+  assert.equal(result.state.analysisSampleInfo.omittedReviewCount, 0);
+  assert.equal(result.state.analysisProgress.completedReviews, 120);
+  assert.equal((await getActiveAnalysisForPage(result.state.pageKey)).analysisProgress.stage, 'complete');
+});
+
 test('an explicit Rescan cancels and replaces the in-progress job for that page', async () => {
   const pendingSvm = [];
   const coordinator = createAnalysisJobCoordinator({
@@ -530,7 +863,10 @@ test('Topic failures remain completed and SVM failures are persisted', async () 
   });
   const completed = await topicsUnavailable.start(input());
   assert.equal(completed.state.status, 'completed');
-  assert.equal(completed.state.topicError, 'topic inference failed');
+  assert.equal(
+    completed.state.topicError,
+    'Batch 1 of 1 failed: topic inference failed — code TOPIC_INFERENCE_FAILED',
+  );
   assert.equal(completed.state.topicResult, null);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(activityEvents, []);
@@ -544,7 +880,7 @@ test('Topic failures remain completed and SVM failures are persisted', async () 
   const failed = await svmUnavailable.start(input('https://shopee.ph/product/123/789'));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(failed.state.status, 'error');
-  assert.equal(failed.state.error, 'svm offline');
+  assert.equal(failed.state.error, 'Batch 1 of 1 failed: svm offline');
   assert.deepEqual(failedEvents, []);
 });
 
@@ -600,6 +936,7 @@ test('Topic Analysis failure preserves the Anger review and its calculated prior
   const [category] = state.svmResult.predictions;
   const quote = {
     ...state.reviews[0],
+    reviewIndex: 0,
     category,
     emotion: 'Anger',
   };
@@ -611,8 +948,10 @@ test('Topic Analysis failure preserves the Anger review and its calculated prior
 
   assert.equal(state.status, 'completed');
   assert.match(state.topicError, /topic request timed out/i);
+  assert.match(state.topicError, /HTTP 504/);
   assert.equal(visibleEntries.length, 1);
-  assert.equal(visibleEntries[0].quote.id, 'steam-review-42');
+  assert.equal(visibleEntries[0].quote.id, undefined);
+  assert.equal(visibleEntries[0].quote.reviewIndex, 0);
   assert.equal(visibleEntries[0].quote.text, review.text);
   assert.equal(visibleEntries[0].priority.severity, 'MAJOR');
   assert.equal(visibleEntries[0].priority.level, 'HIGH');
@@ -784,4 +1123,60 @@ test('a disconnected popup does not interrupt a persisted background topic retry
   assert.deepEqual(persisted.topicResult, successfulTopics);
   assert.equal(persisted.status, 'completed');
   assert.equal(persisted.topicError, null);
+});
+
+test('extension analysis coordinator is wired to the existing repeated-review detector', () => {
+  assert.match(
+    extensionBackgroundSource,
+    /import \{ detectRepeatedReviewText \} from "\.\.\/src\/Users\/utils\/suspiciousReviewDetection\.js";/,
+  );
+  assert.match(extensionBackgroundSource, /suspiciousReviewDetector: detectRepeatedReviewText/);
+});
+
+test('configured repeated-review detector completes repeated and unique review batches', async () => {
+  const coordinator = createAnalysisJobCoordinator({
+    suspiciousReviewDetector: detectRepeatedReviewText,
+    requestSvm: async (reviews) => ({ predictions: reviews.map(() => 1) }),
+    requestTopics: async (reviews) => ({ results: reviews.map(() => ({ topics: [] })) }),
+  });
+
+  const repeated = await coordinator.start({
+    ...input('https://shopee.ph/product/123/456'),
+    suspiciousReviewDetectionEnabled: true,
+    reviews: [
+      { text: 'Repeated review wording.' },
+      { text: 'Repeated review wording.' },
+    ],
+  });
+  const unique = await coordinator.start({
+    ...input('https://shopee.ph/product/123/789'),
+    suspiciousReviewDetectionEnabled: true,
+    reviews: [
+      { text: 'Nice item, thanks.' },
+      { text: 'Works well, useful.' },
+    ],
+  });
+
+  assert.equal(repeated.state.suspiciousReviewDetection.status, 'complete');
+  assert.equal(repeated.state.suspiciousReviewDetection.evaluatedCount, 2);
+  assert.deepEqual(
+    repeated.state.suspiciousReviewDetection.results.map(({ reviewIndex, label, score }) => ({
+      reviewIndex, label, score,
+    })),
+    [
+      { reviewIndex: 0, label: 'Repeated Review', score: 0.95 },
+      { reviewIndex: 1, label: 'Repeated Review', score: 0.95 },
+    ],
+  );
+
+  assert.equal(unique.state.suspiciousReviewDetection.status, 'complete');
+  assert.equal(unique.state.suspiciousReviewDetection.evaluatedCount, 2);
+  assert.equal(unique.state.suspiciousReviewDetection.results.length, 2);
+  assert.deepEqual(
+    unique.state.suspiciousReviewDetection.results.map(({ label, score }) => ({ label, score })),
+    [
+      { label: 'Likely Authentic', score: 0.5 },
+      { label: 'Likely Authentic', score: 0.5 },
+    ],
+  );
 });

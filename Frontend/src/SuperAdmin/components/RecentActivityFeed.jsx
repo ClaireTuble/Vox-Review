@@ -7,7 +7,6 @@ import '../css/tables.css';
 const PLATFORM_COLORS = {
   'Shopee':            { bg: 'rgba(251,146,60,0.14)',   color: '#fb923c' },
   'Lazada':            { bg: 'rgba(192,132,252,0.14)',   color: '#c084fc' },
-  'Google Maps':       { bg: 'rgba(96,165,250,0.14)',    color: '#60a5fa' },
   'Google Play Store': { bg: 'rgba(110,231,183,0.14)',   color: '#6ee7b7' },
   'Steam':             { bg: 'rgba(129,140,248,0.14)',   color: '#818cf8' },
 };

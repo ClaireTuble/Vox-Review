@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../../services/apiConfig.js';
+import { sanitizeReviewTextList } from '../../services/privacyRedaction.js';
 
 export const SVM_REQUEST_TIMEOUT_MS = 65_000;
 
@@ -6,6 +7,7 @@ const SVM_API_URL = `${API_BASE_URL}/api/nlp/svm/predict`;
 
 export async function requestSvmBatch(reviews, {
   platform,
+  reviewOffset = 0,
   fetchImpl = globalThis.fetch,
   timeoutMs = SVM_REQUEST_TIMEOUT_MS,
   onFailure = () => {},
@@ -22,10 +24,11 @@ export async function requestSvmBatch(reviews, {
   }, timeoutMs);
 
   try {
+    const sanitizedReviews = sanitizeReviewTextList(reviews);
     const response = await fetchImpl(SVM_API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reviews, platform }),
+      body: JSON.stringify({ reviews: sanitizedReviews, platform, reviewOffset }),
       signal: controller.signal,
     });
     const payload = await response.json();

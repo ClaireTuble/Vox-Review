@@ -8,7 +8,8 @@
     "build": "vite build",
     "build:extension": "vite build --mode extension",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
@@ -27,6 +28,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "globals": "^17.7.0",
+    "patch-package": "8.0.1",
     "vite": "^8.1.1"
   }
 }

@@ -9,6 +9,7 @@ import {
 
 const savedProfile = {
   username: 'testuser',
+  email: 'testuser@example.com',
   firstName: 'Test',
   lastName: 'User',
   avatarUrl: 'https://example.com/custom-avatar.jpg',
@@ -122,6 +123,7 @@ test('profile Settings allows avatar upload with blank Last Name and preserves p
     }],
   ]);
   assert.equal(updatedUser.username, savedProfile.username);
+  assert.equal(updatedUser.email, savedProfile.email);
   assert.equal(updatedUser.avatarUrl, 'https://example.com/new-avatar.jpg');
   assert.equal(updatedUser.googleAvatarUrl, savedProfile.googleAvatarUrl);
   assert.equal(updatedUser.isCustomAvatar, true);

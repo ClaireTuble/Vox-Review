@@ -10,9 +10,10 @@ const EVENT_NAME = 'superadmin_notifications_updated';
 
 async function getSuperAdminHeaders() {
   const token = await authService.getSuperAdminAccessToken();
-  return token
-    ? { Authorization: `Bearer ${token}` }
-    : {};
+  if (!token) {
+    throw new Error('A verified Super Admin access token is required.');
+  }
+  return { Authorization: `Bearer ${token}` };
 }
 
 export async function fetchSuperAdminNotifications() {
@@ -23,7 +24,7 @@ export async function fetchSuperAdminNotifications() {
     });
 
     if (!response.ok) {
-      throw new Error('Unable to load notifications.');
+      throw new Error(`Unable to load notifications (HTTP ${response.status}).`);
     }
 
     const payload = await response.json();

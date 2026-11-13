@@ -32,7 +32,7 @@ export default function NoReviewsView({ platform = '', onRescan, isRescanning = 
         </div>
         <ol className="guidance-steps-list">
           <li>Open a supported website.</li>
-          <li>Navigate to the page containing the product, app, place, or reviews you want to analyze.</li>
+          <li>Navigate to the page containing the product, app, or reviews you want to analyze.</li>
           <li>Open the extension.</li>
           <li>Click the appropriate analysis/action button.</li>
           <li>Wait for the extension to analyze the available reviews/comments.</li>

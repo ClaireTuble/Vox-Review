@@ -18,7 +18,7 @@ const EMOTION_DRIVER_STOP_WORDS = new Set([
   'thing', 'things', 'time', 'times',
 ]);
 const POSITIVE_EMOTION_CUE = /\b(?:amazing|beautiful|excellent|fantastic|good|great|happy|love(?:d|s)?|nice|perfect|pleased|recommend|satisfied|wonderful)\b/i;
-const NEGATIVE_EMOTION_CUE = /\b(?:awful|bad|broken|bug(?:gy)?|can't|cannot|crash(?:es|ed|ing)?|disappoint(?:ed|ing)?|doesn't|does\s+not|fail(?:s|ed|ure)?|freeze(?:s|d|ing)?|glitch(?:y)?|hate(?:s|d)?|issue|issues|lack(?:s|ed|ing)?|lag(?:gy)?|mad|missing|never|no|not|poor|problem|sad|scared|slow|stutter(?:s|ed|ing)?|terrible|unavailable|unsafe|upset|wasn't|won't|worried)\b/i;
+const NEGATIVE_EMOTION_CUE = /\b(?:awful|bad|broken|bug(?:gy)?|can't|cannot|crash(?:es|ed|ing)?|disappoint(?:ed|ing)?|doesn't|does\s+not|downside|fail(?:s|ed|ure)?|freeze(?:s|d|ing)?|glitch(?:y)?|hate(?:s|d)?|issue|issues|lack(?:s|ed|ing)?|lag(?:gy)?|mad|missing|never|no|not|poor|problem|sad|scared|slow|stutter(?:s|ed|ing)?|terrible|unavailable|unsafe|upset|wasn't|won't|worried)\b/i;
 const NEGATED_POSITIVE_EMOTION_CUE = /\b(?:doesn't|does\s+not|didn't|did\s+not|isn't|is\s+not|never|no|not|wasn't|was\s+not|without|won't)\b(?:\s+[\p{L}\p{N}'’,-]+){0,3}\s+\b(?:amazing|beautiful|excellent|fantastic|good|great|happy|love(?:d|s)?|nice|perfect|pleased|recommend|satisfied|wonderful)\b/i;
 const REVIEW_CLAUSE_BOUNDARY = /\b(?:although|apart\s+from|but|however|though|whereas|yet)\b|[.!?;]+/giu;
 
@@ -43,45 +43,49 @@ function getReviewClauses(reviewText) {
   return clauses;
 }
 
-function phraseAppearsInClause(phrase, clauses) {
-  const normalizedPhrase = phrase.toLocaleLowerCase();
-  return clauses.some((clause) => {
-    const normalizedClause = clause.toLocaleLowerCase();
-    let index = normalizedClause.indexOf(normalizedPhrase);
-    while (index >= 0) {
-      const before = clause[index - 1];
-      const after = clause[index + phrase.length];
-      const beginsAtWordBoundary = !before || !/[\p{L}\p{N}]/u.test(before);
-      const endsAtWordBoundary = !after || !/[\p{L}\p{N}]/u.test(after);
-      if (beginsAtWordBoundary && endsAtWordBoundary) return true;
-      index = normalizedClause.indexOf(normalizedPhrase, index + 1);
+function findSourcePhraseSpans(sourceText, phrase) {
+  const sourceTokens = [...sourceText.matchAll(/[\p{L}\p{N}]+(?:[-'’][\p{L}\p{N}]+)*/gu)];
+  const phraseTokens = phrase.match(/[\p{L}\p{N}]+(?:[-'’][\p{L}\p{N}]+)*/gu)
+    ?.map((token) => token.toLocaleLowerCase()) || [];
+  if (!phraseTokens.length) return [];
+
+  const spans = [];
+  for (let start = 0; start <= sourceTokens.length - phraseTokens.length; start += 1) {
+    if (phraseTokens.every((token, offset) => (
+      sourceTokens[start + offset][0].toLocaleLowerCase() === token
+    ))) {
+      const first = sourceTokens[start];
+      const last = sourceTokens[start + phraseTokens.length - 1];
+      let spanStart = first.index;
+      let spanEnd = last.index + last[0].length;
+      if (spanStart > 0 && /['"“”‘’]/u.test(sourceText[spanStart - 1])) spanStart -= 1;
+      if (/['"“”‘’]/u.test(sourceText[spanEnd] || '')) spanEnd += 1;
+      spans.push({ start: spanStart, end: spanEnd });
     }
-    return false;
-  });
+  }
+  return spans;
+}
+
+function getContainingClause(phrase, clauses) {
+  return clauses.find((clause) => findSourcePhraseSpans(clause, phrase).length > 0) || null;
+}
+
+function hasContextualEmotionEvidence(phrase, category, clause, driverWords) {
+  if (hasEmotionPolarityEvidence(phrase, category)) return true;
+  if (category < 2 || category > 6 || !clause ||
+      !NEGATIVE_EMOTION_CUE.test(clause)) return false;
+  const phraseWords = phrase.match(/[\p{L}\p{N}]+(?:[-'’][\p{L}\p{N}]+)*/gu) || [];
+  return phraseWords.some((word) => driverWords.has(word.toLocaleLowerCase()));
 }
 
 function mergeOverlappingSourcePhrases(reviewText, phrases) {
-  const normalizedText = reviewText.toLocaleLowerCase();
   const spans = [];
   const unmatchedPhrases = [];
 
   phrases.forEach((phrase) => {
-    const normalizedPhrase = phrase.toLocaleLowerCase();
-    let index = normalizedText.indexOf(normalizedPhrase);
-    let found = false;
-    while (index >= 0) {
-      const before = reviewText[index - 1];
-      const after = reviewText[index + phrase.length];
-      const beginsAtWordBoundary = !before || !/[\p{L}\p{N}]/u.test(before);
-      const endsAtWordBoundary = !after || !/[\p{L}\p{N}]/u.test(after);
-      if (beginsAtWordBoundary && endsAtWordBoundary) {
-        spans.push({ start: index, end: index + phrase.length });
-        found = true;
-        break;
-      }
-      index = normalizedText.indexOf(normalizedPhrase, index + 1);
-    }
-    if (!found) unmatchedPhrases.push(phrase);
+    const [span] = findSourcePhraseSpans(reviewText, phrase);
+    if (span) spans.push(span);
+    else unmatchedPhrases.push(phrase);
   });
 
   spans.sort((first, second) => first.start - second.start || second.end - first.end);
@@ -136,11 +140,14 @@ export function getSvmEmotionKeywords(explanationResults, category, reviews = []
     );
     const hasSourceDriver = [...driverWords].some((word) => sourceWords.has(word));
     const candidatePhrases = getReviewKeywordPhrases(reviewText)
-      .filter((phrase) => (
-          hasSourceDriver &&
-          hasEmotionPolarityEvidence(phrase, category) &&
-          phraseAppearsInClause(phrase, reviewClauses)
-      ));
+      .filter((phrase) => {
+        if (!hasSourceDriver) return false;
+        const clause = getContainingClause(phrase, reviewClauses);
+        return Boolean(
+          clause &&
+          hasContextualEmotionEvidence(phrase, category, clause, driverWords),
+        );
+      });
     const reviewPhrases = new Set(
       mergeOverlappingSourcePhrases(reviewText, candidatePhrases),
     );

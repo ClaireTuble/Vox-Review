@@ -1,8 +1,13 @@
 import { HEALTH_TEST_URLS } from "./healthTestConfig.js";
 import { createAnalysisJobCoordinator } from "../src/services/activeAnalysisState.js";
 import { createActivityReporter } from "../src/services/activityReporter.js";
+import { sanitizeReviewsForAnalysis } from "../src/services/privacyRedaction.js";
+import { ensureLegacyReviewPrivacyMigration } from "../src/services/legacyReviewPrivacyMigration.js";
 import { requestSvmBatch } from "../src/Users/utils/svmRequest.js";
+import { detectRepeatedReviewText } from "../src/Users/utils/suspiciousReviewDetection.js";
 import { supabaseAnonKey, supabaseUrl } from "../src/lib/supabase.js";
+import { isNewerAuthSession } from "../src/lib/extensionAuthStorage.js";
+import { createAuthRefreshCoordinator } from "./authRefreshCoordinator.js";
 import { revokePendingAuthSessions } from "./authSessionRevocation.js";
 import { removeMatchingWebsiteLogoutSession } from "./websiteLogoutSync.js";
 import {
@@ -10,6 +15,8 @@ import {
   createTopicRequestTimeout,
   requestTopicAnalysis,
 } from "../src/Users/utils/topicAnalysisRequest.js";
+import { filterSubstantiveReviews } from "../src/Users/utils/reviewTopics.js";
+import { resolveScrapeReviews } from "./scrapeStorage.js";
 import { API_BASE_URL } from "../src/services/apiConfig.js";
 
 const topicRequests = createTopicAnalysisRequestCoordinator({
@@ -43,6 +50,7 @@ const topicRequests = createTopicAnalysisRequestCoordinator({
 });
 const analysisJobs = createAnalysisJobCoordinator({
   requestSvm: (reviews, platform, signal) => requestSvmBatch(reviews, { platform, signal }),
+  suspiciousReviewDetector: detectRepeatedReviewText,
   requestTopics: (reviews, platform, signal, context = {}) => topicRequests.request(
     reviews,
     platform,
@@ -63,6 +71,25 @@ const PENDING_AUTH_LOGOUTS_STORAGE_KEY = "voxreview_pending_auth_logouts";
 const LOGGED_OUT_AUTH_USERS_STORAGE_KEY = "voxreview_logged_out_auth_users";
 const AUTH_LOGOUT_RETRY_ALARM = "voxreview-auth-logout-retry";
 let pendingAuthLogoutTask = null;
+const authRefreshCoordinator = createAuthRefreshCoordinator({
+  getSession: async () => {
+    const stored = await chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY]);
+    return stored?.[EXTENSION_USER_AUTH_STORAGE_KEY] || null;
+  },
+  setSession: async (candidate) => {
+    const stored = await chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY]);
+    const current = stored?.[EXTENSION_USER_AUTH_STORAGE_KEY] || null;
+    if (!isNewerAuthSession(candidate, current)) return;
+    await chrome.storage.local.set({
+      [EXTENSION_USER_AUTH_STORAGE_KEY]: candidate,
+    });
+  },
+  removeSession: async () => {
+    await chrome.storage.local.remove([EXTENSION_USER_AUTH_STORAGE_KEY]);
+  },
+  supabaseUrl,
+  anonKey: supabaseAnonKey,
+});
 
 function isSupportedAppOrigin(origin) {
   return origin === __VOXREVIEW_APP_ORIGIN__
@@ -73,6 +100,29 @@ function isSupportedAppOrigin(origin) {
 function getSenderOrigin(sender) {
   try {
     return sender.tab?.url ? new URL(sender.tab.url).origin : null;
+  } catch {
+    return null;
+  }
+}
+
+function isExtensionPageSender(sender) {
+  return sender.id === chrome.runtime.id &&
+    !sender.tab &&
+    typeof sender.url === "string" &&
+    sender.url.startsWith(`chrome-extension://${chrome.runtime.id}/`);
+}
+
+function isTrustedAuthSessionSender(sender) {
+  return sender.id === chrome.runtime.id &&
+    (isExtensionPageSender(sender) || isSupportedAppOrigin(getSenderOrigin(sender)));
+}
+
+function sanitizeProductImageUrl(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return null;
+    return url.href;
   } catch {
     return null;
   }
@@ -264,7 +314,7 @@ async function runHealthCheck(platform, requestId) {
   });
 }
 
-const VALID_PLATFORMS = new Set(["shopee", "lazada", "google", "googleplay", "steam"]);
+const VALID_PLATFORMS = new Set(["shopee", "lazada", "googleplay", "steam"]);
 
 // ── Platform Active Check ─────────────────────────────────────────────────────
 // Queries the backend health status API to determine whether a platform is
@@ -361,6 +411,93 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "persistAuthSession") {
+    if (
+      !isTrustedAuthSessionSender(sender) ||
+      !message.session?.user?.id ||
+      !(message.session.access_token || message.session.token) ||
+      !message.session.refresh_token
+    ) {
+      sendResponse({ ok: false });
+      return;
+    }
+
+    authRefreshCoordinator.persistSession(message.session, {
+      allowUserReplacement: message.allowUserReplacement === true,
+    }).then((persisted) => {
+      sendResponse({ ok: true, persisted });
+    }).catch((error) => {
+      console.warn("VoxReview: Could not persist the latest authentication session.", {
+        code: error?.code || null,
+      });
+      sendResponse({ ok: false });
+    });
+    return true;
+  }
+
+  if (message?.type === "clearAuthSession") {
+    if (
+      !isExtensionPageSender(sender) ||
+      typeof message.userId !== "string" ||
+      !message.userId
+    ) {
+      sendResponse({ ok: false });
+      return;
+    }
+
+    authRefreshCoordinator.clearSession({
+      userId: message.userId,
+    }).then((cleared) => {
+      sendResponse({ ok: cleared });
+    }).catch((error) => {
+      console.warn("VoxReview: Could not clear the matching authentication session.", {
+        code: error?.code || null,
+      });
+      sendResponse({ ok: false });
+    });
+    return true;
+  }
+
+  if (message?.type === "refreshAuthSession") {
+    const senderOrigin = getSenderOrigin(sender);
+    const extensionPage = isExtensionPageSender(sender);
+    if (
+      sender.id !== chrome.runtime.id ||
+      (!extensionPage && !isSupportedAppOrigin(senderOrigin)) ||
+      typeof message.userId !== "string" ||
+      !message.userId ||
+      typeof message.refreshToken !== "string" ||
+      !message.refreshToken
+    ) {
+      sendResponse({
+        status: 403,
+        body: { error: "refresh_request_rejected", message: "Session refresh request was rejected." },
+      });
+      return;
+    }
+
+    authRefreshCoordinator.refresh({
+      userId: message.userId,
+      refreshToken: message.refreshToken,
+    }).then(sendResponse).catch((error) => {
+      console.warn("VoxReview: Coordinated session refresh failed.", {
+        code: error?.code || null,
+      });
+      sendResponse({
+        status: 503,
+        body: { error: "temporarily_unavailable", message: "Session refresh is temporarily unavailable." },
+      });
+    });
+    return true;
+  }
+
+  if (message?.type === "ensureLegacyReviewPrivacyMigration") {
+    ensureLegacyReviewPrivacyMigration().then(
+      () => sendResponse({ ok: true }),
+      () => sendResponse({ ok: false, error: "Stored review data could not be safely privacy-migrated." }),
+    );
+    return true;
+  }
 
   // ── Explicit browser health test ──────────────────────────────────────────
   if (message?.type === "healthCheck") {
@@ -383,6 +520,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "startAnalysis") {
     const analysisPlatform = String(message.analysis?.platform || "").trim().toLowerCase();
+    const reviews = filterSubstantiveReviews(message.analysis?.reviews);
+    if (reviews.length === 0) {
+      sendResponse({ ok: false, error: "No usable review text was available for analysis." });
+      return;
+    }
     checkPlatformActive(analysisPlatform).then((active) => {
       if (!active) {
         sendResponse({
@@ -391,7 +533,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         return;
       }
-      analysisJobs.start(message.analysis).then(sendResponse).catch((error) => sendResponse({
+      analysisJobs.start({ ...message.analysis, reviews }).then(sendResponse).catch((error) => sendResponse({
         ok: false,
         error: error?.message || "Analysis could not be started.",
       }));
@@ -402,8 +544,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "cancelAnalysis") {
+    const pageKey = typeof message.pageKey === "string" ? message.pageKey : "";
+    if (!pageKey) {
+      sendResponse({ ok: false, error: "A page key is required to cancel analysis." });
+      return;
+    }
+    analysisJobs.cancel(pageKey).then(
+      (cancelled) => sendResponse({ ok: true, cancelled }),
+      (error) => sendResponse({ ok: false, error: error?.message || "Analysis could not be cancelled." }),
+    );
+    return true;
+  }
+
   if (message?.type === "requestTopicAnalysis") {
-    const { reviews, platform, pageKey, requestContext, force, operation } = message.request || {};
+    const { platform, pageKey, requestContext, force, operation } = message.request || {};
+    const reviews = filterSubstantiveReviews(message.request?.reviews);
+    if (reviews.length === 0) {
+      sendResponse({ ok: false, error: "No usable review text was available for topic analysis." });
+      return;
+    }
     topicRequests.request(reviews, platform, {
       pageKey,
       requestContext: requestContext || "popup-request",
@@ -438,123 +598,137 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log("[BACKGROUND] reviewsScraped received:", {
       platform: message.platform,
       reviewCount: Array.isArray(message.reviews) ? message.reviews.length : 0,
+      reviewDiagnostics: message.reviewDiagnostics || null,
       tabId: sender.tab?.id ?? null,
     });
     const {
       platform,
       productTitle = "",
-      productImage = null,
-      rating = null,
-      category = null,
-      reviews = [],
+      reviews: scrapedReviews = [],
       url = "",
-      ratingFilter = "all",
       forceRefresh = false,
+      hasError = false,
+      errorMessage = null,
+      reviewDiagnostics = null,
     } = message;
+    const productImage = sanitizeProductImageUrl(message.productImage);
+    const productMediaType = ["image", "video"].includes(message.productMediaType)
+      ? message.productMediaType
+      : null;
+    const reviews = sanitizeReviewsForAnalysis(
+      filterSubstantiveReviews(scrapedReviews),
+      platform,
+    );
 
     if (!platform || !VALID_PLATFORMS.has(String(platform).toLowerCase())) {
       sendResponse({ ok: false, error: "Invalid platform" });
       return;
     }
 
-    // Enforce disabled-platform check before processing scraped reviews
-    checkPlatformActive(String(platform).toLowerCase()).then((platformActive) => {
-      if (!platformActive) {
-        sendResponse({ ok: false, error: "This platform is currently unavailable." });
-        return;
+    const scrapePageUrl = url || sender.tab?.url || "";
+    const isProductPage = message.isProductPage ?? true;
+
+    console.log("Received scrape:", {
+      platform,
+      productTitle,
+      reviewsCount: reviews.length,
+      url: scrapePageUrl,
+    });
+
+    // Clear any unsupported-site flag for this tab since we now have valid data.
+    chrome.storage.local.set({ voxreviewSiteStatus: { unsupported: false } });
+
+    // ── Immediate Health Report Dispatch ───────────────────────────────────────
+    if (isProductPage) {
+      if (hasError) {
+        reportHealthToBackend({
+          platform,
+          status: "Error",
+          lastSuccessfulStage: "Page Detection",
+          errorStage: "Review Extraction",
+          errorMessage: errorMessage || "Steam review extraction failed.",
+        });
+      } else if (reviews.length > 0) {
+        // SUCCESS: reviews were actually extracted
+        reportHealthToBackend({
+          platform,
+          status: "Working",
+          lastSuccessfulStage: "Data Transfer",
+          errorStage: null,
+          errorMessage: null,
+        });
+      } else {
+        // WARNING: product page confirmed but no reviews found in DOM
+        reportHealthToBackend({
+          platform,
+          status: "Warning",
+          lastSuccessfulStage: "Review Section Detection",
+          errorStage: "Review Extraction",
+          errorMessage: "Product page detected but no reviews found in DOM.",
+        });
       }
+    }
 
-      const pageUrl = url || sender.tab?.url || "";
-      const isProductPage = message.isProductPage ?? true;
-
-      console.log("Received scrape:", {
-        platform,
-        productTitle,
-        reviewsCount: reviews.length,
-        url: pageUrl,
-      });
-
-      // Clear any unsupported-site flag for this tab since we now have valid data.
-      chrome.storage.local.set({ voxreviewSiteStatus: { unsupported: false } });
-
-      // ── Immediate Health Report Dispatch ───────────────────────────────────────
-      if (isProductPage) {
-        if (reviews.length > 0) {
-          // SUCCESS: reviews were actually extracted
-          reportHealthToBackend({
-            platform,
-            status: "Working",
-            lastSuccessfulStage: "Data Transfer",
-            errorStage: null,
-            errorMessage: null,
-          });
-        } else {
-          // WARNING: product page confirmed but no reviews found in DOM
-          reportHealthToBackend({
-            platform,
-            status: "Warning",
-            lastSuccessfulStage: "Review Section Detection",
-            errorStage: "Review Extraction",
-            errorMessage: "Product page detected but no reviews found in DOM.",
-          });
-        }
-      }
-
+    void ensureLegacyReviewPrivacyMigration().then(() => new Promise((resolve, reject) => {
       chrome.storage.local.get(["voxreviewLastScrape"], (result) => {
-        const currentScrape = result.voxreviewLastScrape || {};
+        if (chrome.runtime.lastError) reject(new Error("Stored review data could not be safely privacy-migrated."));
+        else resolve(result || {});
+      });
+    })).then((result) => {
+      const currentScrape = result.voxreviewLastScrape || {};
+      const finalReviews = sanitizeReviewsForAnalysis(resolveScrapeReviews({
+        currentScrape,
+        incomingReviews: reviews,
+        productTitle,
+        pageUrl: scrapePageUrl,
+        ratingFilter: "all",
+        forceRefresh,
+      }), platform);
+      const scrapeData = {
+        sessionId: Date.now(),
+        platform,
+        isProductPage: message.isProductPage ?? true,
+        productTitle,
+        productImage,
+        productMediaType,
+        reviews: finalReviews,
+        reviewCount: finalReviews.length,
+        uniqueReviewCount: finalReviews.length,
+        extractedReviewCount: scrapedReviews.length,
+        reviewDiagnostics,
+        hasError,
+        errorMessage,
+        url: scrapePageUrl,
+        rescanRequestId: message.rescanRequestId || null,
+        timestamp: Date.now(),
+        tabId: sender.tab?.id ?? null,
+      };
 
-        // Session change: different product, URL, rating filter, or first run
-        const isDifferentProduct = currentScrape.productTitle && currentScrape.productTitle !== productTitle;
-        const isDifferentUrl = currentScrape.url && pageUrl && currentScrape.url !== pageUrl;
-        const isDifferentFilter = currentScrape.ratingFilter !== undefined && currentScrape.ratingFilter !== ratingFilter;
-        const productChanged = forceRefresh || isDifferentProduct || isDifferentUrl || isDifferentFilter || !currentScrape.sessionId;
-
-        let finalReviews = reviews; // always replace on filter/product change
-        const sessionId = Date.now();
-
-        if (productChanged) {
-          finalReviews = reviews; // clear old session reviews completely
-        } else {
-          // Same product & same filter: deduplicate & merge
-          const existingReviews = currentScrape.reviews || [];
-          const reviewMap = new Map();
-          existingReviews.forEach((r) => reviewMap.set(r.id || r.text, r));
-          reviews.forEach((r) => reviewMap.set(r.id || r.text, r));
-          finalReviews = Array.from(reviewMap.values());
-        }
-
-        const scrapeData = {
-          sessionId: sessionId,
-          platform: platform,
-          isProductPage: message.isProductPage ?? true,
-          productTitle: productTitle,
-          productImage: productImage,
-          rating: rating,
-          category: category,
-          ratingFilter: ratingFilter,
-          reviews: finalReviews,
-          reviewCount: finalReviews.length,
-          url: pageUrl,
-          rescanRequestId: message.rescanRequestId || null,
-          timestamp: Date.now(),
-          tabId: sender.tab?.id ?? null,
-        };
-
+      return new Promise((resolve, reject) => {
         chrome.storage.local.set({ voxreviewLastScrape: scrapeData }, () => {
-          console.log("[BACKGROUND] scrape data stored:", {
-            platform,
-            reviewCount: finalReviews.length,
-            tabId: scrapeData.tabId,
-          });
+          if (chrome.runtime.lastError) {
+            reject(new Error("Scrape data could not be safely stored."));
+            return;
+          }
+          resolve();
         });
       });
-
-      sendResponse({ ok: true });
-    }).catch((error) => {
-      sendResponse({
-        ok: false,
-        error: error?.message || "Platform availability could not be verified.",
+    }).then(() => {
+      console.log("[BACKGROUND] scrape data stored:", {
+        platform,
+        reviewCount: reviews.length,
+        extractionSucceeded: !hasError && reviews.length > 0,
+        reason: hasError ? errorMessage : reviews.length === 0 ? "No reviews were extracted." : null,
+        tabId: sender.tab?.id ?? null,
       });
+      sendResponse({
+        ok: true,
+        extractionSucceeded: !hasError && reviews.length > 0,
+        reviewCount: reviews.length,
+        reason: hasError ? errorMessage : reviews.length === 0 ? "No reviews were extracted." : null,
+      });
+    }).catch(() => {
+      sendResponse({ ok: false, error: "Stored review data could not be safely privacy-migrated." });
     });
 
     return true;
@@ -564,32 +738,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Content script sends this when scrapeAndSend() catches a runtime exception.
   if (message?.type === "scrapeError") {
     const { platform, errorStage, errorMessage } = message;
-    console.error("VoxReview: Scrape error reported:", { platform, errorStage, errorMessage });
+    const safePlatform = typeof platform === "string" && /^[a-z0-9_-]{1,32}$/i.test(platform)
+      ? platform
+      : "unknown";
+    const safeErrorStage = typeof errorStage === "string" && /^[A-Za-z ]{1,48}$/.test(errorStage)
+      ? errorStage
+      : "Review Extraction";
+    const safeErrorMessage = typeof errorMessage === "string" &&
+      /^Scrape failed during [A-Za-z ]{1,48} \([A-Za-z][A-Za-z0-9]*\)\.$/.test(errorMessage)
+      ? errorMessage
+      : "An error occurred during scraping.";
+    console.error(
+      "VoxReview: Scrape error reported",
+      "platform:", safePlatform,
+      "errorStage:", safeErrorStage,
+      "errorMessage:", safeErrorMessage,
+    );
 
-    if (platform && platform !== "unknown") {
+    if (safePlatform !== "unknown") {
       reportHealthToBackend({
-        platform,
+        platform: safePlatform,
         status: "Error",
         lastSuccessfulStage: null,
-        errorStage: errorStage || "Review Extraction",
-        errorMessage: errorMessage || "An unknown error occurred during scraping.",
+        errorStage: safeErrorStage,
+        errorMessage: safeErrorMessage,
       });
 
-      chrome.storage.local.set({
-        voxreviewLastScrape: {
-          platform,
+      void ensureLegacyReviewPrivacyMigration().then(() => new Promise((resolve, reject) => {
+        chrome.storage.local.set({
+          voxreviewLastScrape: {
+          platform: safePlatform,
           isProductPage: true,
           hasError: true,
-          errorStage: errorStage || "Review Extraction",
-          errorMessage: errorMessage || "An unknown error occurred during scraping.",
+          errorStage: safeErrorStage,
+          errorMessage: safeErrorMessage,
           reviews: [],
           reviewCount: 0,
           url: sender.tab?.url || "",
           tabId: sender.tab?.id ?? null,
           rescanRequestId: message.rescanRequestId || null,
           timestamp: Date.now(),
-        },
+          },
+        }, () => {
+          if (chrome.runtime.lastError) reject(new Error("Scrape error state could not be safely stored."));
+          else resolve();
+        });
+      })).then(() => sendResponse({ ok: true })).catch(() => {
+        sendResponse({ ok: false, error: "Stored review data could not be safely privacy-migrated." });
       });
+      return true;
     }
 
     sendResponse({ ok: true });
@@ -630,11 +827,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     removeMatchingWebsiteLogoutSession({
       storage: chrome.storage.local,
       userId,
-      queueAuthLogout,
       markAuthUserLoggedOut,
+      clearSession: authRefreshCoordinator.clearSession,
     })
       .then((matchedSession) => {
-        if (matchedSession) void processPendingAuthLogouts();
         sendResponse({ ok: matchedSession });
       })
       .catch((error) => {
@@ -689,7 +885,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     markAuthUserLoggedOut(userId)
       .then(() => {
-        void processPendingAuthLogouts();
         return Promise.all([
           chrome.tabs.query({ url: `${__VOXREVIEW_APP_ORIGIN__}/*` }),
           chrome.tabs.query({ url: "http://localhost:5173/*" }),
@@ -735,64 +930,120 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const scraperFile = scraperFileByPlatform[platform];
       if (!scraperFile) throw new Error("No scraper is configured for the current platform.");
 
-      let hasScraper = false;
-      try {
-        const result = await chrome.scripting.executeScript({
+      const inspectContentScript = async () => {
+        const results = await chrome.scripting.executeScript({
           target: { tabId },
-          func: () => typeof scrapeReviews === "function",
+          args: [platform],
+          func: (requestedPlatform) => {
+            const platformScrapers = {
+              shopee: typeof scrapeShopeeReviews === "function",
+              lazada: typeof scrapeLazadaReviews === "function",
+              googleplay: typeof scrapeGooglePlayReviews === "function",
+              steam: typeof scrapeSteamReviews === "function",
+            };
+            return {
+              initialized: globalThis.__voxreviewContentScriptInitialized === true,
+              detectorReady: typeof detectPlatform === "function",
+              helpfulnessReady: typeof globalThis.__voxreviewHelpfulness === "object",
+              platformScraperReady: platformScrapers[requestedPlatform] === true,
+              scraperManagerReady: typeof scrapeReviews === "function",
+              privacyRedactionReady: typeof globalThis.__voxreviewPrivacyRedaction === "object",
+            };
+          },
         });
-        hasScraper = result?.[0]?.result === true;
-      } catch (error) {
-        console.warn("VoxReview: Could not inspect content-script state:", error.message);
+        const state = results?.[0]?.result;
+        if (!state || typeof state !== "object") {
+          throw new Error("The content-script state could not be inspected.");
+        }
+        return state;
+      };
+
+      const state = await inspectContentScript();
+      const files = [];
+      if (!state.detectorReady) files.push("scraper/detector.js");
+      if (!state.helpfulnessReady) files.push("scraper/helpfulness.js");
+      if (!state.platformScraperReady) files.push(scraperFile);
+      if (!state.scraperManagerReady) files.push("scraper/scraperManager.js");
+      if (!state.privacyRedactionReady) files.push("privacyRedaction.js");
+      if (!state.initialized) files.push("content.js");
+
+      if (files.length === 0) {
+        throw new Error(
+          "The content script is initialized but did not acknowledge RESCAN. Reload the page and retry.",
+        );
       }
 
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        files: hasScraper
-          ? ["content.js"]
-          : ["scraper/detector.js", scraperFile, "scraper/scraperManager.js", "content.js"],
-      });
+      await chrome.scripting.executeScript({ target: { tabId }, files });
+
+      const recoveredState = await inspectContentScript();
+      if (
+        recoveredState.initialized !== true ||
+        recoveredState.platformScraperReady !== true ||
+        recoveredState.scraperManagerReady !== true
+      ) {
+        throw new Error("The platform content script could not be initialized in the active tab.");
+      }
     };
 
-    const forwardToTab = (tabId) => {
+    const sendRescan = (tabId) => new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(
+        tabId,
+        {
+          type: "rescanPage",
+          url: message.url,
+          platform: message.platform,
+          requestId: message.requestId,
+        },
+        (response) => {
+          const deliveryError = chrome.runtime?.lastError?.message;
+          if (deliveryError) {
+            reject(new Error(deliveryError));
+          } else if (response?.ok !== true) {
+            reject(new Error(response?.reason || "The content script did not acknowledge RESCAN."));
+          } else {
+            resolve(response);
+          }
+        },
+      );
+    });
+
+    const forwardToTab = async (tabId) => {
       console.log("[RESCAN] forwarding to tab:", { tabId, url: message.url, platform: message.platform });
-      chrome.tabs.sendMessage(tabId, { type: "rescanPage", url: message.url, platform: message.platform, requestId: message.requestId }, (response) => {
-        if (chrome.runtime?.lastError) {
-          const initialError = chrome.runtime.lastError.message;
-          console.warn("VoxReview rescan delivery failed:", initialError);
-          recoverContentScript(tabId)
-            .then(() => new Promise((resolve, reject) => {
-              chrome.tabs.sendMessage(tabId, { type: "rescanPage", url: message.url, platform: message.platform, requestId: message.requestId }, (retryResponse) => {
-                if (chrome.runtime?.lastError) reject(new Error(chrome.runtime.lastError.message));
-                else resolve(retryResponse || { ok: true, recovered: true });
-              });
-            }))
-            .then(sendResponse)
-            .catch((error) => sendResponse({ ok: false, reason: error.message || initialError }));
-        } else {
-          console.log("[RESCAN] content script reached:", { tabId });
-          sendResponse(response || { ok: true });
+      try {
+        let response;
+        try {
+          response = await sendRescan(tabId);
+        } catch (initialError) {
+          console.warn("VoxReview RESCAN delivery failed:", initialError.message);
+          await recoverContentScript(tabId);
+          response = await sendRescan(tabId);
         }
-      });
+        console.log("[RESCAN] content script acknowledged:", { tabId });
+        sendResponse(response);
+      } catch (error) {
+        const reason = error?.message || "The content script could not receive RESCAN.";
+        console.warn("VoxReview RESCAN could not be delivered:", { tabId, reason });
+        sendResponse({ ok: false, reason });
+      }
     };
 
-    if (message.tabId) {
-      forwardToTab(message.tabId);
+    if (Number.isInteger(message.tabId)) {
+      void forwardToTab(message.tabId);
     } else {
       chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
         const tab = tabs?.[0];
-        if (!tab?.id) {
+        if (!Number.isInteger(tab?.id)) {
           chrome.tabs.query({ active: true, currentWindow: true }, (fallbackTabs) => {
             const fallbackTab = fallbackTabs?.[0];
-            if (!fallbackTab?.id) {
-              sendResponse({ ok: false, reason: "no active tab" });
+            if (!Number.isInteger(fallbackTab?.id)) {
+              sendResponse({ ok: false, reason: "No active browser tab was found for RESCAN." });
               return;
             }
-            forwardToTab(fallbackTab.id);
+            void forwardToTab(fallbackTab.id);
           });
           return;
         }
-        forwardToTab(tab.id);
+        void forwardToTab(tab.id);
       });
     }
     return true; // keep channel open for async sendResponse

@@ -1,31 +1,22 @@
 console.log("Google Play scraper loaded");
 
-let lastAppUrl = "";
+let lastAppId = "";
 const seenReviewKeys = new Set();
 let allScrapedReviews = [];
 
-function extractGooglePlayHelpfulCount(card) {
-  const countEl = card.querySelector("[data-original-thumbs-up-count]");
-  const rawCount = countEl?.getAttribute("data-original-thumbs-up-count");
-  if (rawCount == null || !/^\d+$/.test(rawCount.trim())) return null;
-  const count = Number(rawCount);
-  return Number.isSafeInteger(count) ? count : null;
+function getGooglePlayAppId() {
+  const url = new URL(window.location.href);
+  if (
+    url.hostname !== "play.google.com" ||
+    !/^\/store\/apps\/details\/?$/.test(url.pathname)
+  ) {
+    return "";
+  }
+  return url.searchParams.get("id")?.trim() || "";
 }
 
 function isGooglePlayProductPage() {
-  const href = window.location.href;
-  const path = window.location.pathname;
-
-  const hasAppUrl = path.includes("/store/apps/details") || path.includes("/store/books/details") || href.includes("id=");
-  const hasAppDom = !!document.querySelector(
-    ".hnnXjf, [itemprop='name'], header.c1bOId, [data-review-id], .RHo1pe, .EGFGHd"
-  );
-
-  if (path === "/store" || path === "/store/apps" || path.includes("/store/apps/category") || path.includes("/store/search")) {
-    if (!hasAppDom) return false;
-  }
-
-  return hasAppUrl || hasAppDom;
+  return Boolean(getGooglePlayAppId());
 }
 
 function getGooglePlayProductMetadata() {
@@ -56,37 +47,46 @@ function getGooglePlayProductMetadata() {
     productTitle = document.title.replace(/[-–|].*$/g, "").trim();
   }
 
-  const imgEl = document.querySelector(
-    ".hnnXjf img[src*='play-lh.googleusercontent.com'], " +
-    ".hnnXjf img[src*='googleusercontent'], " +
-    "img[src*='play-lh.googleusercontent.com']"
-  );
-  const productImage = imgEl ? (imgEl.src || imgEl.getAttribute("src")) : null;
-
-  let rating = null;
-  const summaryRatingEl = document.querySelector(".jILTFe, .hnnXjf .TT9eCd");
-  if (summaryRatingEl) {
-    const text = (summaryRatingEl.innerText || summaryRatingEl.textContent || "").trim();
-    const match = text.match(/(\d+(?:\.\d+)?)/);
-    if (match) rating = match[1];
-  }
-
-  const categoryEl = document.querySelector("a[href*='/store/apps/category/']");
-  const category = categoryEl ? (categoryEl.innerText?.trim() || "") : "";
-
   return {
     platform: "googleplay",
     productTitle: productTitle || "Google Play App",
-    productImage: productImage,
-    rating: rating || null,
-    category: category || "Google Play Apps",
-    ratingFilter: "all",
     productUrl: window.location.href,
   };
 }
 
+function extractGooglePlayHelpfulness(card) {
+  if (!globalThis.__voxreviewHelpfulness?.isCollectionEnabled("googleplay")) {
+    return { helpfulCount: null, helpfulnessMetric: null, helpfulnessAvailable: false };
+  }
+  const attributeElement = card.querySelector("[data-original-thumbs-up-count]");
+  const attributeValue = attributeElement?.getAttribute("data-original-thumbs-up-count");
+  const textElement = card.querySelector(".AJTPZc[jsname='J0d7Yd'], .AJTPZc");
+  const text = (textElement?.innerText || textElement?.textContent || "").trim();
+  const textMatch = text.match(/^([\d,]+)\s+people\s+found\s+this\s+review\s+helpful$/i);
+  const parser = globalThis.__voxreviewHelpfulness?.parseNonNegativeSafeInteger;
+  const count = typeof parser === "function"
+    ? (parser(attributeValue) ?? (textMatch ? parser(textMatch[1]) : null))
+    : null;
+  return globalThis.__voxreviewHelpfulness?.buildHelpfulnessFields(
+    "googleplay",
+    "helpful_votes",
+    count,
+  ) || { helpfulCount: null, helpfulnessMetric: null, helpfulnessAvailable: false };
+}
+
+function runAtScrapeStage(stage, operation) {
+  try {
+    return operation();
+  } catch (error) {
+    const stagedError = new Error(`Google Play ${stage.toLowerCase()} failed.`);
+    stagedError.name = error?.name || "Error";
+    stagedError.scrapeStage = stage;
+    throw stagedError;
+  }
+}
+
 function scrapeGooglePlayReviews() {
-  const isProduct = isGooglePlayProductPage();
+  const isProduct = runAtScrapeStage("Card Detection", isGooglePlayProductPage);
   if (!isProduct) {
     console.log("[Google Play] Not an app detail page.");
     return {
@@ -96,31 +96,26 @@ function scrapeGooglePlayReviews() {
     };
   }
 
-  const currentUrl = window.location.href;
-  if (currentUrl !== lastAppUrl) {
-    lastAppUrl = currentUrl;
+  const appId = runAtScrapeStage("Card Detection", getGooglePlayAppId);
+  if (appId !== lastAppId) {
+    lastAppId = appId;
     seenReviewKeys.clear();
     allScrapedReviews = [];
   }
 
-  const rawCards = Array.from(
+  const rawCards = runAtScrapeStage("Card Detection", () => Array.from(
     document.querySelectorAll(
       "header.c1bOId[data-review-id], [data-review-id], .c1bOId, .RHo1pe, .EGFGHd, div[role='dialog'] [data-review-id], div[role='dialog'] .c1bOId, div[role='dialog'] .RHo1pe, div[role='dialog'] .EGFGHd"
     )
-  );
+  ));
 
-  const cards = rawCards.filter((card, idx, arr) => {
+  const cards = runAtScrapeStage("Card Detection", () => rawCards.filter((card, idx, arr) => {
     return !arr.some((other, otherIdx) => otherIdx !== idx && other.contains(card));
-  });
+  }));
 
   console.log("[Google Play] Review cards detected:", cards.length);
 
-  cards.forEach((card, index) => {
-    const reviewerEl = card.querySelector(".X5PpBb, .gSGphe .X5PpBb, [class*='reviewer']");
-    let reviewer = reviewerEl
-      ? (reviewerEl.innerText || reviewerEl.textContent || "").replace(/\s+/g, " ").trim()
-      : "Google Play Store Reviewer";
-
+  runAtScrapeStage("Review Extraction", () => cards.forEach((card) => {
     const dateEl = card.querySelector(".bp9Aid, [class*='date']");
     const date = dateEl
       ? (dateEl.innerText || dateEl.textContent || "").replace(/\s+/g, " ").trim()
@@ -145,27 +140,28 @@ function scrapeGooglePlayReviews() {
 
     if (!cleanText || cleanText.length < 2) return;
 
-    const dataReviewId = card.getAttribute("data-review-id") || card.dataset?.reviewId || card.querySelector("[data-review-id]")?.getAttribute("data-review-id");
-    const uniqueKey = dataReviewId
-      ? `id:${dataReviewId}`
-      : `${reviewer.toLowerCase()}|${date.toLowerCase()}|${cleanText.toLowerCase()}`;
+    const uniqueKey = `${date.toLowerCase()}|${cleanText.toLowerCase()}`;
 
     if (!seenReviewKeys.has(uniqueKey)) {
       seenReviewKeys.add(uniqueKey);
       allScrapedReviews.push({
-        id: dataReviewId || (reviewer && date ? `${reviewer}-${date}-${index}` : `googleplay-review-${allScrapedReviews.length}`),
-        reviewer,
-        date,
-        rating: null,
-        helpfulCount: extractGooglePlayHelpfulCount(card),
+        ...(date ? { date } : {}),
+        ...extractGooglePlayHelpfulness(card),
         text: cleanText,
-        review: cleanText,
         platform: "googleplay",
       });
+    } else {
+      const existing = allScrapedReviews.find((review) => (
+        `${(review.date || "").toLowerCase()}|${review.text.toLowerCase()}` === uniqueKey
+      ));
+      const refreshedHelpfulness = extractGooglePlayHelpfulness(card);
+      if (existing && refreshedHelpfulness.helpfulnessAvailable) {
+        Object.assign(existing, refreshedHelpfulness);
+      }
     }
-  });
+  }));
 
-  const metadata = getGooglePlayProductMetadata();
+  const metadata = runAtScrapeStage("Product Metadata", getGooglePlayProductMetadata);
 
   return {
     ...metadata,

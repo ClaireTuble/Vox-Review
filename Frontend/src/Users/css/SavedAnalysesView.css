@@ -5,6 +5,8 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex: 1 1 0%;
+  min-height: 0;
 }
 
 .saved-view-header {
@@ -25,6 +27,38 @@
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.saved-cloud-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: 9px;
+  background: var(--accent-light);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.saved-cloud-status button {
+  flex: 0 0 auto;
+  border: 1px solid var(--accent-border);
+  border-radius: 7px;
+  padding: 5px 8px;
+  color: var(--accent-color);
+  background: var(--bg-popup);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.saved-cloud-status-error {
+  border-color: rgba(220, 38, 38, 0.24);
+  background: rgba(239, 68, 68, 0.07);
+  color: #b91c1c;
 }
 
 /* Subtle, modern count badge/chip matching blue/white aesthetic */
@@ -311,6 +345,11 @@ html.dark .saved-clear-all-btn:hover:not(:disabled) .saved-clear-icon {
   transform: translateY(-1px);
 }
 
+.saved-card--menu-open {
+  position: relative;
+  z-index: 141;
+}
+
 .saved-card-info {
   display: flex;
   flex-direction: column;
@@ -332,9 +371,79 @@ html.dark .saved-clear-all-btn:hover:not(:disabled) .saved-clear-icon {
 .saved-card-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
   font-size: 10px;
   color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.saved-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.saved-card-notes-preview {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9.5px;
+  color: var(--text-secondary);
+  background: var(--bg-stage);
+  border: 1px dashed var(--border-card);
+  border-radius: 5px;
+  padding: 2.5px 6px;
+  margin-top: 1px;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
+}
+
+.saved-notes-icon {
+  flex-shrink: 0;
+  color: var(--accent-color);
+  opacity: 0.85;
+}
+
+.saved-notes-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.dark .saved-card-notes-preview {
+  background: rgba(30, 41, 59, 0.45);
+  border-color: rgba(148, 163, 184, 0.2);
+  color: #94a3b8;
+}
+
+.saved-snapshot-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1.5px 6px;
+  font-size: 9.5px;
+  font-weight: 700;
+  border-radius: 4px;
+  background: var(--accent-light);
+  color: var(--accent-color);
+  border: 1px solid var(--accent-border);
+  line-height: 1.25;
+  white-space: nowrap;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+  letter-spacing: 0.01em;
+}
+
+html.dark .saved-snapshot-badge {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--accent-color);
+  border-color: rgba(96, 165, 250, 0.3);
 }
 
 .saved-card-right {
@@ -346,7 +455,17 @@ html.dark .saved-clear-all-btn:hover:not(:disabled) .saved-clear-icon {
   flex-shrink: 0;
 }
 
-.saved-trash-btn {
+.saved-card-actions-top {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.saved-menu-anchor {
+  position: relative;
+}
+
+.saved-action-btn {
   background: transparent;
   border: none;
   color: var(--text-muted, #94a3b8);
@@ -360,9 +479,84 @@ html.dark .saved-clear-all-btn:hover:not(:disabled) .saved-clear-icon {
   line-height: 1;
 }
 
+.saved-action-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-stage);
+}
+
 .saved-trash-btn:hover {
   color: #ef4444;
   background: rgba(239, 68, 68, 0.12);
+}
+
+.saved-card-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 150;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: 4px;
+  min-width: 105px;
+  animation: popupFadeIn 140ms ease-out;
+}
+
+.saved-card-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.saved-card-menu-item:hover {
+  background: var(--accent-light);
+  color: var(--accent-color);
+}
+
+.saved-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  background: transparent;
+}
+
+.extension-label-input,
+.extension-notes-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  border: 1px solid var(--border-card);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.extension-label-input:focus,
+.extension-notes-textarea:focus {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.extension-notes-textarea {
+  resize: vertical;
+  min-height: 56px;
 }
 
 .saved-emotion-summary {

@@ -28,7 +28,10 @@
     "http://127.0.0.1:5000/*",
     "http://localhost:5173/*",
     "https://vox-review-production.up.railway.app/*",
-    "https://vox-review.vercel.app/*"
+    "https://vox-review.vercel.app/*",
+    "https://slusdwuwqqbcfeyfiear.supabase.co/*",
+    "https://play.google.com/*",
+    "https://store.steampowered.com/*"
   ],
   "background": {
     "service_worker": "assets/background.js",
@@ -47,8 +50,10 @@
       ],
       "js": [
         "scraper/detector.js",
+        "scraper/helpfulness.js",
         "scraper/platforms/shopee.js",
         "scraper/scraperManager.js",
+        "privacyRedaction.js",
         "content.js"
       ],
       "run_at": "document_idle"
@@ -64,8 +69,10 @@
       ],
       "js": [
         "scraper/detector.js",
+        "scraper/helpfulness.js",
         "scraper/platforms/lazada.js",
         "scraper/scraperManager.js",
+        "privacyRedaction.js",
         "content.js"
       ],
       "run_at": "document_idle"
@@ -76,8 +83,10 @@
       ],
       "js": [
         "scraper/detector.js",
-        "scraper/platforms/googleplay.js",
+        "scraper/helpfulness.js",
+        "scraper/platforms/googlePlay.js",
         "scraper/scraperManager.js",
+        "privacyRedaction.js",
         "content.js"
       ],
       "run_at": "document_idle"
@@ -89,8 +98,24 @@
       ],
       "js": [
         "scraper/detector.js",
+        "scraper/helpfulness.js",
         "scraper/platforms/steam.js",
         "scraper/scraperManager.js",
+        "privacyRedaction.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://steamcommunity.com/app/*/reviews*"
+      ],
+      "js": [
+        "scraper/detector.js",
+        "scraper/helpfulness.js",
+        "scraper/platforms/steam.js",
+        "scraper/scraperManager.js",
+        "privacyRedaction.js",
         "content.js"
       ],
       "run_at": "document_idle"
@@ -104,6 +129,7 @@
       ],
       "js": [
         "scraper/detector.js",
+        "privacyRedaction.js",
         "content.js"
       ],
       "run_at": "document_idle"
@@ -115,7 +141,7 @@
       "js": [
         "assets/authSync.js"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ]
 }

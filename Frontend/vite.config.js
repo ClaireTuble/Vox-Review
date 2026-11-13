@@ -3,8 +3,12 @@ import process from "node:process";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { DEFAULT_API_URL, DEFAULT_APP_URL } from "./extension/config.js";
+import {
+  getSupabaseConfigurationError,
+  getSupabaseProjectOrigin,
+} from "./src/lib/supabaseConfiguration.js";
 
-function extensionManifestPlugin(apiUrl, appUrl) {
+function extensionManifestPlugin(apiUrl, appUrl, supabaseOrigin) {
   return {
     name: "extension-manifest",
     generateBundle() {
@@ -20,11 +24,17 @@ function extensionManifestPlugin(apiUrl, appUrl) {
       const apiHostPermission = apiUrl ? `${new URL(apiUrl).origin}/*` : null;
       const appOrigin = new URL(appUrl || DEFAULT_APP_URL).origin;
       const appHostPermission = `${appOrigin}/*`;
+      const supabaseHostPermission = `${supabaseOrigin}/*`;
+      const googlePlayHostPermission = "https://play.google.com/*";
+      const steamReviewApiHostPermission = "https://store.steampowered.com/*";
       const hostPermissions = [
         ...new Set([
           ...localHostPermissions,
           ...(apiHostPermission ? [apiHostPermission] : []),
           appHostPermission,
+          supabaseHostPermission,
+          googlePlayHostPermission,
+          steamReviewApiHostPermission,
         ]),
       ];
       manifest.host_permissions = hostPermissions;
@@ -34,7 +44,7 @@ function extensionManifestPlugin(apiUrl, appUrl) {
       manifest.content_scripts.push({
         matches: [`${appOrigin}/*`],
         js: ["assets/authSync.js"],
-        run_at: "document_idle",
+        run_at: "document_start",
       });
 
       this.emitFile({
@@ -48,19 +58,37 @@ function extensionManifestPlugin(apiUrl, appUrl) {
 
 export default defineConfig(({ mode }) => {
   const isExtensionBuild = mode === "extension";
-  const env = loadEnv(mode, process.cwd(), "VITE_");
+  const env = loadEnv(mode, process.cwd(), ["VITE_", "SUPABASE_"]);
+  const supabaseEnv = isExtensionBuild
+    ? loadEnv("production", process.cwd(), ["VITE_", "SUPABASE_"])
+    : env;
   const apiUrl = env.VITE_API_URL || DEFAULT_API_URL;
   const appUrl = env.VITE_APP_URL || DEFAULT_APP_URL;
   const appOrigin = new URL(appUrl).origin;
+  const supabaseUrl = supabaseEnv.VITE_SUPABASE_URL || supabaseEnv.SUPABASE_URL;
+  const supabaseAnonKey = supabaseEnv.VITE_SUPABASE_ANON_KEY || supabaseEnv.SUPABASE_ANON_KEY;
+  const supabaseConfigurationError = getSupabaseConfigurationError(supabaseUrl, supabaseAnonKey);
+
+  if (supabaseConfigurationError) {
+    throw new Error(`VoxReview build configuration error: ${supabaseConfigurationError}`);
+  }
+  const supabaseOrigin = getSupabaseProjectOrigin(supabaseUrl);
 
   return {
     define: isExtensionBuild
-      ? { __VOXREVIEW_APP_ORIGIN__: JSON.stringify(appOrigin) }
-      : {},
+      ? {
+          __VOXREVIEW_APP_ORIGIN__: JSON.stringify(appOrigin),
+          "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(supabaseUrl),
+          "import.meta.env.VITE_SUPABASE_ANON_KEY": JSON.stringify(supabaseAnonKey),
+        }
+      : {
+          "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(supabaseUrl),
+          "import.meta.env.VITE_SUPABASE_ANON_KEY": JSON.stringify(supabaseAnonKey),
+        },
     plugins: [
       react(),
       ...(isExtensionBuild
-        ? [extensionManifestPlugin(apiUrl, appUrl)]
+        ? [extensionManifestPlugin(apiUrl, appUrl, supabaseOrigin)]
         : []),
     ],
     base: isExtensionBuild ? "./" : "/",

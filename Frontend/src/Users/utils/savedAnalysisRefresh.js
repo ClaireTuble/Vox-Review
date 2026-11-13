@@ -56,6 +56,43 @@ export function getNewReviews(existingReviews, fetchedReviews) {
   });
 }
 
+export function getSavedRefreshScrapeFailure(scrapeData) {
+  if (scrapeData?.hasError) {
+    return scrapeData.errorMessage || 'Unable to retrieve reviews from the saved source page.';
+  }
+  if (scrapeData?.isProductPage === false) {
+    return 'The saved source page is not a supported product page.';
+  }
+  if (!Array.isArray(scrapeData?.reviews) || scrapeData.reviews.length === 0) {
+    return 'The saved source page has not loaded any reviews yet. Load reviews on the page, then try Rescan.';
+  }
+  return null;
+}
+
+export async function refreshSavedAnalysisFromScrape(savedItem, scrapeData, saveAnalysisForPage) {
+  const failure = getSavedRefreshScrapeFailure(scrapeData);
+  if (failure) throw new Error(failure);
+
+  const savedReviews = Array.isArray(savedItem.reviews) ? savedItem.reviews : [];
+  const fetchedReviews = scrapeData.reviews;
+  const newReviews = getNewReviews(savedReviews, fetchedReviews);
+  const refreshedAt = Date.now();
+  const updatedRecord = await saveAnalysisForPage({
+    ...savedItem,
+    last_refreshed_at: refreshedAt,
+  });
+  if (!updatedRecord) throw new Error('Unable to update the saved refresh timestamp.');
+
+  return {
+    success: true,
+    newReviewCount: newReviews.length,
+    newReviews,
+    message: newReviews.length ? `${newReviews.length} new reviews detected` : 'No new reviews found',
+    record: updatedRecord,
+    lastRefreshedAt: refreshedAt,
+  };
+}
+
 export function alignSavedAnalysisRefreshBatch(reviews, predictions) {
   if (!Array.isArray(reviews) || !Array.isArray(predictions) || reviews.length !== predictions.length) {
     throw new Error('Saved-analysis review and emotion results are not aligned.');

@@ -133,3 +133,52 @@ test('clearing search and restoring all filters returns every record', () => {
     emotions: SAVED_EMOTION_OPTIONS,
   })), ids(records));
 });
+
+test('search matches snapshot label case-insensitively', () => {
+  const labeledRecords = [
+    ...records,
+    {
+      id: 'hades-initial',
+      targetTitle: 'Hades II',
+      label: 'Initial Analysis',
+      platform: 'steam',
+      dominantEmotion: 'Happy',
+    },
+    {
+      id: 'hades-october',
+      targetTitle: 'Hades II',
+      label: 'October Update',
+      platform: 'steam',
+      dominantEmotion: 'Happy',
+    },
+  ];
+
+  assert.deepEqual(ids(filterSavedAnalyses(labeledRecords, { searchQuery: 'October' })), ['hades-october']);
+  assert.deepEqual(ids(filterSavedAnalyses(labeledRecords, { searchQuery: 'Initial Analysis' })), ['hades-initial']);
+  assert.deepEqual(ids(filterSavedAnalyses(labeledRecords, { searchQuery: 'Hades' })), ['hades-initial', 'hades-october']);
+});
+
+test('search matches personal notes case-insensitively and partially', () => {
+  const notedRecords = [
+    {
+      id: 'note-1',
+      targetTitle: 'Mechanical Keyboard',
+      label: 'Analysis 1',
+      notes: 'Contains important feedback about blue switches and keycaps',
+      platform: 'shopee',
+      dominantEmotion: 'Happy',
+    },
+    {
+      id: 'note-2',
+      targetTitle: 'Gaming Mouse',
+      label: 'Analysis 1',
+      notes: 'Customer mentioned latency issues on wireless mode',
+      platform: 'lazada',
+      dominantEmotion: 'Anger',
+    },
+  ];
+
+  assert.deepEqual(ids(filterSavedAnalyses(notedRecords, { searchQuery: 'blue switches' })), ['note-1']);
+  assert.deepEqual(ids(filterSavedAnalyses(notedRecords, { searchQuery: 'latency' })), ['note-2']);
+  assert.deepEqual(ids(filterSavedAnalyses(notedRecords, { searchQuery: 'unrelated note query' })), []);
+});

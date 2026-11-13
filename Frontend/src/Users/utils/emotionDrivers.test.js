@@ -90,6 +90,22 @@ test('emotion evidence is empty when the source has no phrase-level polarity evi
   );
 });
 
+test('the supplied positive Taglish review keeps an honest empty Sad-evidence fallback', () => {
+  const review = (
+    'item is so nice. mahaba yung strap and yung tela neto malambot. '
+    + 'and its cheap so i like it. tysm'
+  );
+
+  assert.deepEqual(
+    getSvmEmotionKeywords(
+      [{ category: 2, emotionDrivers: ['mahaba', 'strap', 'like', 'malambot'] }],
+      2,
+      [review],
+    ),
+    [],
+  );
+});
+
 test('emotion keywords filter generic stop words and do not invent fallback terms', () => {
   assert.deepEqual(
     getSvmEmotionKeywords(
@@ -133,4 +149,26 @@ test('overlapping anger evidence phrases merge into one source-grounded phrase',
 
   assert.deepEqual(evidence, ['bugs and completely broken moments']);
   assert.ok(evidence.every((phrase) => review.includes(phrase)));
+});
+
+test('mixed Steam review keeps negative update and server evidence separate from positive context', () => {
+  const review = `Been playing this game for almost a year now, and I could say it's 'almost' perfect. The gameplay is as expected from a hack and slash, lots of mini games and events to grind on so you never run out of things to do in-game, and the gacha can be forgiving (sometimes). The downside is the update, everytime. Though it's not as frequent as other games (2 months or so between each update), the update is so huge it feels as if you're re-installing the game. The network and server issues don't help`;
+  const negativeEvidence = getSvmEmotionKeywords(
+    [{ category: 2, emotionDrivers: ['update', 'issues'] }],
+    2,
+    [review],
+  );
+  const positiveEvidence = getSvmEmotionKeywords(
+    [{ category: 1, emotionDrivers: ['perfect', 'gacha'] }],
+    1,
+    [review],
+  );
+
+  assert.ok(negativeEvidence.includes('downside is the update'));
+  assert.ok(negativeEvidence.includes('update is so huge'));
+  assert.ok(negativeEvidence.includes('network and server issues'));
+  assert.ok(positiveEvidence.includes("'almost' perfect"));
+  assert.ok(negativeEvidence.every((phrase) => review.includes(phrase)));
+  assert.ok(positiveEvidence.every((phrase) => review.includes(phrase)));
+  assert.ok(!negativeEvidence.includes('almost perfect'));
 });

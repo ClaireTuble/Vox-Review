@@ -47,7 +47,13 @@ export default function Dashboard({ activeTab, setActiveTab, onSignOut }) {
               setRecentUsers(data.recentUsers || []);
               setRecentActivities(data.recentActivities || []);
             }
+          } else {
+            console.warn('VoxReview: Dashboard overview request was rejected.', {
+              status: res.status,
+            });
           }
+        } else {
+          console.warn('VoxReview: Dashboard overview was not requested because no Super Admin token is available.');
         }
       } catch (err) {
         console.warn('VoxReview: Dashboard overview fetch notice:', err.message);

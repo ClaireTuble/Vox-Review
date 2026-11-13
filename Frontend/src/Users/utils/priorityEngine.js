@@ -1,4 +1,5 @@
 import { getReviewText } from './reviewTopics.js';
+import { isReviewEligibleForAggregates } from './reviewAggregateEligibility.js';
 
 export const PRIORITY_CONFIG = {
   severityOrder: ['NONE', 'MINOR', 'MAJOR', 'CRITICAL'],
@@ -231,8 +232,20 @@ export function calculateReviewPriorities(reviews, topicAnalysis = null) {
 }
 
 export function attachReviewPriorities(reviews, topicAnalysis = null) {
-  const priorities = calculateReviewPriorities(reviews, topicAnalysis);
-  return reviews.map((review, index) => ({ ...review, priority: priorities[index] }));
+  const eligibleIndexes = [];
+  const eligibleReviews = reviews.filter((review, index) => {
+    if (!isReviewEligibleForAggregates(review)) return false;
+    eligibleIndexes.push(index);
+    return true;
+  });
+  const priorities = calculateReviewPriorities(eligibleReviews, topicAnalysis);
+  const priorityByIndex = new Map(eligibleIndexes.map((index, priorityIndex) => (
+    [index, { ...priorities[priorityIndex], reviewIndex: index }]
+  )));
+  return reviews.map((review, index) => ({
+    ...review,
+    priority: priorityByIndex.get(index) || null,
+  }));
 }
 
 export function filterPriorityReviews(entries, priorityLevel = 'all') {
@@ -254,9 +267,10 @@ export function filterReviewEntriesByEmotion(entries, emotion = 'all') {
   if (normalizedEmotion === 'all') return [...entries];
 
   return entries.filter(({ quote }) => {
-    const quoteEmotion = typeof quote?.emotion === 'string'
-      ? quote.emotion.toLowerCase()
-      : EMOTION_LABEL_BY_CATEGORY[quote?.category];
+    const emotionLabel = typeof quote?.emotion === 'string'
+      ? quote.emotion.trim().toLowerCase()
+      : '';
+    const quoteEmotion = emotionLabel || EMOTION_LABEL_BY_CATEGORY[quote?.category];
     return quoteEmotion === normalizedEmotion;
   });
 }

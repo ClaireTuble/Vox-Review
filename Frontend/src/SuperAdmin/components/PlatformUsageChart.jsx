@@ -4,7 +4,6 @@ import '../css/dashboard.css';
 const PLATFORM_COLORS = {
   'Shopee':            { bar: '#fb923c', bg: 'rgba(251,146,60,0.12)'  },
   'Lazada':            { bar: '#c084fc', bg: 'rgba(192,132,252,0.12)' },
-  'Google Maps':       { bar: '#60a5fa', bg: 'rgba(96,165,250,0.12)'  },
   'Google Play Store': { bar: '#6ee7b7', bg: 'rgba(110,231,183,0.12)' },
 };
 

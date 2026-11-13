@@ -5,11 +5,18 @@ import { requestSvmBatch } from './svmRequest.js';
 test('returns a successful batch response and passes all reviews in one request', async () => {
   let requestCount = 0;
   let requestBody;
-  const payload = { success: true, predictions: [1, 2] };
+  const payload = {
+    success: true,
+    predictions: [1, 2],
+    modelProvenance: { modelIdentifier: 'hybrid_oof_stacking' },
+  };
+  let requestUrl;
   const result = await requestSvmBatch(['great', 'disappointed'], {
     platform: 'shopee',
-    fetchImpl: async (_url, options) => {
+    reviewOffset: 100,
+    fetchImpl: async (url, options) => {
       requestCount += 1;
+      requestUrl = url;
       requestBody = JSON.parse(options.body);
       return { ok: true, json: async () => payload };
     },
@@ -18,6 +25,9 @@ test('returns a successful batch response and passes all reviews in one request'
   assert.equal(requestCount, 1);
   assert.deepEqual(requestBody.reviews, ['great', 'disappointed']);
   assert.equal(requestBody.platform, 'shopee');
+  assert.equal(requestBody.reviewOffset, 100);
+  assert.match(requestUrl, /\/api\/nlp\/svm\/predict$/);
+  assert.equal(result.modelProvenance.modelIdentifier, 'hybrid_oof_stacking');
   assert.equal(result, payload);
 });
 
@@ -59,6 +69,21 @@ test('surfaces the backend platform-disabled message', async () => {
     (error) => error.code === 'PLATFORM_DISABLED' &&
       /Analysis for this platform is currently disabled/.test(error.message),
   );
+});
+
+test('sends redacted review text without reviewer metadata', async () => {
+  let requestBody;
+  await requestSvmBatch([
+    { reviewer: 'Jane', reviewText: 'Great quality. Email jane@example.com and call +63 917 123 4567.' },
+  ], {
+    platform: 'shopee',
+    fetchImpl: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ success: true, predictions: [1] }) };
+    },
+  });
+
+  assert.deepEqual(requestBody.reviews, ['Great quality. Email [EMAIL] and call [PHONE].']);
 });
 
 test('aborts a pending request at the deadline and clears loading with a timeout message', async () => {

@@ -15,6 +15,7 @@
   position: sticky;
   bottom: 0;
   z-index: 100;
+  flex-shrink: 0;
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 

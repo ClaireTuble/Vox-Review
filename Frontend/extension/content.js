@@ -1,7 +1,6 @@
 if (globalThis.__voxreviewContentScriptInitialized) {
   console.log("VoxReview content already initialized.");
 } else {
-  globalThis.__voxreviewContentScriptInitialized = true;
   console.log("VoxReview content loaded");
 
 function hasUnpairedSurrogate(text) {
@@ -16,6 +15,82 @@ function hasUnpairedSurrogate(text) {
     }
   }
   return false;
+}
+
+function getProductImageMetadata(raw) {
+  const safeImageUrl = (value) => {
+    if (typeof value !== "string" || !value.trim()) return null;
+    try {
+      const url = new URL(value.trim(), document.baseURI);
+      return ["http:", "https:"].includes(url.protocol) ? url.href : null;
+    } catch {
+      return null;
+    }
+  };
+  const metadataValue = (selector) => document.querySelector(selector)?.getAttribute("content") || "";
+  const mediaType = String(raw?.productMediaType || "").toLowerCase();
+  const openGraphType = metadataValue('meta[property="og:type"]').toLowerCase();
+  const isExplicitVideo = mediaType === "video" || openGraphType.startsWith("video");
+  if (isExplicitVideo) return { productImage: null, productMediaType: "video" };
+
+  const candidateUrls = [
+    raw?.productImage,
+    metadataValue('meta[property="og:image"]'),
+    metadataValue('meta[name="twitter:image"]'),
+  ];
+  const imageSelectors = [
+    '[itemprop="image"]',
+    'main img',
+    '[role="main"] img',
+    '[class*="product"] img',
+    '[data-testid*="product"] img',
+  ];
+  for (const selector of imageSelectors) {
+    for (const image of document.querySelectorAll(selector)) {
+      const owner = image.closest?.('[class*="review"], [class*="avatar"], [class*="profile"], [class*="user"]');
+      const identity = [
+        image.getAttribute("alt"),
+        image.getAttribute("class"),
+        image.getAttribute("aria-label"),
+        image.getAttribute("src"),
+        owner?.getAttribute("class"),
+      ].join(" ").toLowerCase();
+      if (/(?:avatar|profile|reviewer|user[-_ ]?photo)/.test(identity)) continue;
+      candidateUrls.push(
+        image.currentSrc,
+        image.getAttribute("src"),
+        image.getAttribute("content"),
+        image.getAttribute("data-src"),
+        image.getAttribute("data-original"),
+      );
+    }
+  }
+  const productImage = candidateUrls.map(safeImageUrl).find(Boolean) || null;
+  if (productImage) return { productImage, productMediaType: "image" };
+
+  const hasVideo = document.querySelector("main video, [role='main'] video, meta[property='og:video']");
+  return { productImage: null, productMediaType: hasVideo ? "video" : null };
+}
+
+function getCanonicalPageUrl(platform, pageUrl) {
+  const parsedUrl = new URL(pageUrl, window.location.href);
+  parsedUrl.hash = "";
+  const retainedParams = new URLSearchParams();
+  const normalizedPlatform = String(platform || "").toLowerCase();
+  if (normalizedPlatform === "googleplay") {
+    const appId = parsedUrl.searchParams.get("id");
+    if (appId) retainedParams.set("id", appId);
+  } else if (normalizedPlatform === "shopee" && !/\/(?:product\/\d+\/\d+|i\.\d+\.\d+)/i.test(parsedUrl.pathname)) {
+    for (const key of ["itemid", "shopid"]) {
+      const value = parsedUrl.searchParams.get(key);
+      if (value) retainedParams.set(key, value);
+    }
+  } else if (normalizedPlatform === "lazada" && !/i\d+(?:-s\d+)?\.html/i.test(parsedUrl.pathname)) {
+    const itemId = parsedUrl.searchParams.get("itemid");
+    if (itemId) retainedParams.set("itemid", itemId);
+  }
+  parsedUrl.search = retainedParams.toString();
+  return parsedUrl.href;
 }
 
 // ── Extension context guard ──────────────────────────────────────────────────
@@ -53,6 +128,12 @@ const DEVELOPMENT_APP_ORIGINS = new Set([
   "http://127.0.0.1:5173",
 ]);
 
+function dispatchGoogleOAuthSourceDiag(source, status, details = {}) {
+  window.dispatchEvent(new CustomEvent("voxreview_google_oauth_source_diag", {
+    detail: { source, status, ...details },
+  }));
+}
+
 if (DEVELOPMENT_APP_ORIGINS.has(window.location.origin)) {
   window.addEventListener("voxreview_auth_sync", async (event) => {
     if (event.target !== window) return;
@@ -81,7 +162,18 @@ if (DEVELOPMENT_APP_ORIGINS.has(window.location.origin)) {
         const loggedOutUserIds = Array.isArray(logoutState?.[LOGGED_OUT_AUTH_USERS_STORAGE_KEY])
           ? logoutState[LOGGED_OUT_AUTH_USERS_STORAGE_KEY]
           : [];
-        if (loggedOutUserIds.includes(userId) && !event.detail?.clearLogoutMarker) {
+        const logoutMarkerPresent = loggedOutUserIds.includes(userId);
+        dispatchGoogleOAuthSourceDiag(
+          "logout-marker",
+          logoutMarkerPresent && !event.detail?.clearLogoutMarker
+            ? "logout-marker-blocked"
+            : "logout-marker-check",
+          {
+            logoutMarkerPresent,
+            messageAccepted: logoutMarkerPresent && !event.detail?.clearLogoutMarker,
+          },
+        );
+        if (logoutMarkerPresent && !event.detail?.clearLogoutMarker) {
           window.dispatchEvent(new CustomEvent("voxreview_extension_logout", {
             detail: { userId },
           }));
@@ -91,8 +183,12 @@ if (DEVELOPMENT_APP_ORIGINS.has(window.location.origin)) {
         const stored = await chrome.storage.local.get([EXTENSION_USER_AUTH_STORAGE_KEY]);
         const currentUserId = stored?.[EXTENSION_USER_AUTH_STORAGE_KEY]?.user?.id;
         if (!currentUserId || currentUserId === userId) {
-          await chrome.storage.local.set({ [EXTENSION_USER_AUTH_STORAGE_KEY]: session });
-          if (event.detail?.clearLogoutMarker === true) {
+          const persisted = await safeSendMessage({
+            type: "persistAuthSession",
+            session,
+            allowUserReplacement: event.detail?.clearLogoutMarker === true,
+          });
+          if (persisted?.ok && persisted.persisted && event.detail?.clearLogoutMarker === true) {
             await safeSendMessage({ type: "websiteLoginSync", userId });
           }
         }
@@ -111,6 +207,9 @@ if (DEVELOPMENT_APP_ORIGINS.has(window.location.origin)) {
       typeof message.userId === "string" &&
       message.userId
     ) {
+      dispatchGoogleOAuthSourceDiag("extension-message", "sync-message", {
+        messageAccepted: true,
+      });
       window.dispatchEvent(new CustomEvent("voxreview_extension_logout", {
         detail: { userId: message.userId },
       }));
@@ -173,7 +272,7 @@ if (platform === "unknown") {
     },
     steam: {
       content: ".apphub_CardTextContent",
-      cards: '[role="list"] > div > div[role="button"]',
+      cards: ".apphub_Card",
     },
   }[platform];
 
@@ -217,6 +316,7 @@ if (platform === "unknown") {
     isScraping = true;
     if (force) lastSentSignature = "";
     console.log("[SCRAPE] scrapeAndSend started", { platform, force });
+    let errorStage = "Review Extraction";
 
     try {
       console.log("[SCRAPE] scraper selected:", platform);
@@ -231,29 +331,51 @@ if (platform === "unknown") {
       const reviews = Array.isArray(raw) ? raw : (raw.reviews || []);
       const isProductPage = Array.isArray(raw) ? true : (raw.isProductPage ?? true);
       const productTitle = Array.isArray(raw) ? "" : (raw.productTitle || "");
-      const productImage = Array.isArray(raw) ? null : (raw.productImage || null);
-      const rating = Array.isArray(raw) ? null : (raw.rating || null);
-      const category = Array.isArray(raw) ? null : (raw.category || null);
-      const ratingFilter = Array.isArray(raw) ? "all" : (raw.ratingFilter || "all");
-      const productUrl = Array.isArray(raw) ? window.location.href
-        : (raw.productUrl || window.location.href);
+      const reviewDiagnostics = Array.isArray(raw) ? null : (raw.reviewDiagnostics || null);
+      const productImageMetadata = getProductImageMetadata(raw);
+      const productUrl = getCanonicalPageUrl(
+        platform,
+        Array.isArray(raw) ? window.location.href : (raw.productUrl || window.location.href),
+      );
       console.log("[SCRAPE] reviews returned:", reviews.length);
+      console.info("[RESCAN] extraction counts:", {
+        currentUrl: `${window.location.origin}${window.location.pathname}`,
+        matchedPlatform: platform,
+        layout: reviewDiagnostics?.layout ?? null,
+        reviewCardsFound: reviewDiagnostics?.reviewCardsFound ?? null,
+        nonEmptyReviewTexts: reviewDiagnostics?.nonEmptyReviewTexts ?? reviews.length,
+        reviewsReturnedToPopup: reviews.length,
+      });
 
+      errorStage = "Privacy Sanitization";
+      const sanitizeReviews = globalThis.__voxreviewPrivacyRedaction?.sanitizeReviewsForAnalysis;
+      if (typeof sanitizeReviews !== "function") {
+        throw new Error("Privacy filtering is unavailable; review data was withheld.");
+      }
+      let sanitizedReviews;
+      try {
+        sanitizedReviews = sanitizeReviews(reviews, platform).map((review) => (
+          typeof review === "string"
+            ? { text: review, platform }
+            : { ...review, platform }
+        ));
+        if (!Array.isArray(sanitizedReviews)) {
+          throw new Error("Privacy filtering returned an invalid result.");
+        }
+      } catch {
+        throw new Error("Privacy filtering failed; review data was withheld.");
+      }
+
+      errorStage = "Review Payload Preparation";
       // Build a lightweight signature of the current visible state.
       // Only send a message to background when something actually changed.
-      const reviewSignature = reviews.map((review) => {
-        if (typeof review === "string") return review;
-        if (!review || typeof review !== "object") return String(review);
-        const text = review.text || review.reviewText || review.comment || review.review || review.body || review.reviewBody || "";
-        return `${review.id || review.reviewId || ""}:${text}`;
-      }).join("\u001f");
-      const signature = `${productUrl}|${ratingFilter}|${isProductPage}|${reviewSignature}`;
+      const reviewSignature = JSON.stringify(sanitizedReviews);
+      const signature = `${productUrl}|${isProductPage}|${JSON.stringify(productImageMetadata)}|${reviewSignature}`;
 
       if (signature === lastSentSignature) {
         return; // DOM fired but nothing meaningful changed — skip
       }
 
-      lastSentSignature = signature;
       if (isProductPage && platform) {
         safeSendMessage({
           type: "pageDetected",
@@ -263,7 +385,7 @@ if (platform === "unknown") {
           productUrl: productUrl,
         });
       }
-      if (["shopee", "lazada", "google", "googleplay", "steam"].includes(platform)) {
+      if (["shopee", "lazada", "googleplay", "steam"].includes(platform)) {
         console.info("[TOPIC TRACE] scrape output", {
           platform,
           reviewsScraped: reviews.length,
@@ -304,35 +426,55 @@ if (platform === "unknown") {
       }
 
       console.log(
-        `VoxReview: Sending scrape — isProductPage:${isProductPage} filter:"${ratingFilter}" ` +
+        `VoxReview: Sending scrape — isProductPage:${isProductPage} ` +
         `reviews:${reviews.length} url:${productUrl.slice(-40)}`
       );
 
+      errorStage = "Background Message Delivery";
       const response = await safeSendMessage({
         type: "reviewsScraped",
         forceRefresh: force,
         platform: platform,
         isProductPage: isProductPage,
         productTitle: productTitle,
-        productImage: productImage,
-        rating: rating,
-        category: category,
-        ratingFilter: ratingFilter,
+        ...productImageMetadata,
         url: productUrl,
-        reviews: reviews,   // always the FULL current visible set
+        reviews: sanitizedReviews,
+        reviewDiagnostics,
+        hasError: !Array.isArray(raw) && Boolean(raw.hasError),
+        errorMessage: !Array.isArray(raw) ? raw.errorMessage || null : null,
         rescanRequestId,
       });
-      console.log("[SCRAPE] reviewsScraped sent:", response?.ok !== false);
+      if (!response || response.ok === false) {
+        throw new Error("Scrape results could not be delivered to the extension service worker.");
+      }
+      lastSentSignature = signature;
+      console.log("[SCRAPE] reviewsScraped handled:", {
+        messageAccepted: response.ok !== false,
+        extractionSucceeded: response?.extractionSucceeded ?? null,
+        reviewCount: response?.reviewCount ?? reviews.length,
+        reason: response?.reason || null,
+      });
 
     } catch (err) {
-      console.error("VoxReview scrapeAndSend error:", err);
+      const reportedStage = err?.scrapeStage || errorStage;
+      const errorName = typeof err?.name === "string" && /^[A-Za-z][A-Za-z0-9]*$/.test(err.name)
+        ? err.name
+        : "Error";
+      const errorMessage = `Scrape failed during ${reportedStage} (${errorName}).`;
+      console.error(
+        "VoxReview scrapeAndSend error:",
+        "platform:", platform,
+        "errorStage:", reportedStage,
+        "errorMessage:", errorMessage,
+      );
 
       // Report the error to background.js for health tracking
       await safeSendMessage({
         type: "scrapeError",
         platform: platform,
-        errorStage: "Review Extraction",
-        errorMessage: err.message || "An unknown error occurred during scraping.",
+        errorStage: reportedStage,
+        errorMessage,
         url: window.location.href,
         rescanRequestId,
       });
@@ -470,7 +612,10 @@ if (platform === "unknown") {
       // Queue behind an in-flight scrape instead of dropping the user's request.
       scrapeAndSend(true, message.requestId || null);
       sendResponse({ ok: true, queued: isScraping });
+      return;
     }
+
   });
+  globalThis.__voxreviewContentScriptInitialized = true;
 }
 }

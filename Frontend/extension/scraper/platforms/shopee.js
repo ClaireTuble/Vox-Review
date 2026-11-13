@@ -28,27 +28,9 @@ function getShopeeProductMetadata() {
     productTitle = document.title.split("|")[0].split("-")[0].trim();
   }
 
-  const imgEl = document.querySelector(
-    "div.page-product__image img, div[class*='product-image'] img, [class*='gallery'] img, [class*='product'] img[src*='scontent']"
-  );
-  const productImage = imgEl ? (imgEl.src || imgEl.getAttribute("src")) : null;
-
-  const ratingEl = document.querySelector("._1k47d8, [class*='rating-overview'] [class*='score'], div._12r-bH");
-  const rating = ratingEl ? ratingEl.innerText?.trim() : null;
-
-  const breadcrumbEls = document.querySelectorAll(".shopee-header-section__content a, [class*='breadcrumb'] a");
-  let category = null;
-  if (breadcrumbEls && breadcrumbEls.length > 0) {
-    const categories = Array.from(breadcrumbEls).map(el => el.innerText?.trim()).filter(Boolean);
-    category = categories.join(" / ");
-  }
-
   return {
     productTitle: productTitle || "Shopee Product",
-    productImage: productImage,
-    rating: rating || null,
-    category: category || "Shopee Products",
-    ratingFilter: "all",
+    platform: "shopee",
     productUrl: window.location.href,
   };
 }
@@ -84,6 +66,20 @@ function getShopeeReviewBody(card) {
   return { rawText: "", text: "", bodyEl: null, selector: "" };
 }
 
+function extractShopeeReviewLikes(card) {
+  if (!globalThis.__voxreviewHelpfulness?.isCollectionEnabled("shopee")) {
+    return { helpfulCount: null, helpfulnessMetric: null, helpfulnessAvailable: false };
+  }
+  const element = card.querySelector(".shopee-product-rating__like-count");
+  const text = (element?.innerText || element?.textContent || "").trim();
+  const count = globalThis.__voxreviewHelpfulness?.parseNonNegativeSafeInteger(text) ?? null;
+  return globalThis.__voxreviewHelpfulness?.buildHelpfulnessFields(
+    "shopee",
+    "review_likes",
+    count,
+  ) || { helpfulCount: null, helpfulnessMetric: null, helpfulnessAvailable: false };
+}
+
 function scrapeShopeeReviews() {
   const isProduct = isShopeeProductPage();
   if (!isProduct) {
@@ -100,12 +96,10 @@ function scrapeShopeeReviews() {
     card: bodyEl.closest("[data-cmtid], .shopee-product-rating, .product-ratings__list > div") || bodyEl.parentElement,
     bodyEl,
   }));
-  let cardSelectorUsed = ".product-ratings__list .YNedDV";
 
   if (reviewEntries.length === 0) {
     const cards = Array.from(document.querySelectorAll("[data-cmtid], .shopee-product-rating"));
     reviewEntries = cards.map((card) => ({ card, bodyEl: null }));
-    cardSelectorUsed = "[data-cmtid], .shopee-product-rating";
   }
 
   if (reviewEntries.length === 0) {
@@ -116,59 +110,32 @@ function scrapeShopeeReviews() {
       return text.length > 20 && !/helpful|report|translate|variation|size|color/i.test(text);
     });
     reviewEntries = cards.map((card) => ({ card, bodyEl: null }));
-    cardSelectorUsed = "[class*='rating'], [class*='review'], [class*='comment'], [class*='feedback']";
   }
 
   console.log("[Shopee] Found review cards:", reviewEntries.length);
 
   const reviews = [];
   const seenTexts = new Set();
-  let debuggedReview = false;
 
-  reviewEntries.forEach(({ card, bodyEl: preferredBodyEl }, index) => {
+  reviewEntries.forEach(({ card, bodyEl: preferredBodyEl }) => {
     if (!card) return;
-    const cmtId = card.getAttribute("data-cmtid");
-
-    // 1. Reviewer Name
-    const reviewerEl = card.querySelector(".shopee-product-rating__author-name, [class*='author-name'], [class*='user-name']");
-    let reviewer = reviewerEl ? reviewerEl.innerText?.trim() : "Shopee Buyer";
-
-    // 2. Date
     const dateEl = card.querySelector(".shopee-product-rating__time, [class*='rating__time'], [class*='time']");
     const date = dateEl ? dateEl.innerText?.trim() : "";
 
-    // 3. Read only the dedicated review-body element; never scrape the whole card.
-    const { rawText, text, bodyEl, selector } = preferredBodyEl
-      ? { rawText: preferredBodyEl.innerText || preferredBodyEl.textContent || "", text: cleanShopeeCommentText(preferredBodyEl.innerText || preferredBodyEl.textContent || ""), bodyEl: preferredBodyEl, selector: ".product-ratings__list .YNedDV" }
+    const { text } = preferredBodyEl
+      ? { text: cleanShopeeCommentText(preferredBodyEl.innerText || preferredBodyEl.textContent || "") }
       : getShopeeReviewBody(card);
 
     // Must be non-empty genuine comment text written by user
     if (!text || text.length < 2) return;
 
-    if (!debuggedReview) {
-      console.log("[Shopee] REVIEW CARD SELECTOR", cardSelectorUsed);
-      console.log("[Shopee] REVIEW CARD CHILDREN", Array.from(card.children).map((child) => ({
-        tag: child.tagName,
-        className: child.className,
-        text: (child.innerText || child.textContent || "").trim(),
-      })));
-      console.log("[Shopee] REVIEW BODY SELECTOR", selector);
-      console.log("[Shopee] REVIEW BODY ELEMENT", bodyEl);
-      console.log("[Shopee] EXTRACTED REVIEW TEXT", text);
-      debuggedReview = true;
-    }
-
-    const key = cmtId || text.toLowerCase();
+    const key = text.toLowerCase();
     if (!seenTexts.has(key)) {
       seenTexts.add(key);
       reviews.push({
-        id: cmtId || `shopee-review-${index}`,
-        reviewer: reviewer || "Shopee Buyer",
-        rating: null, // Per-review star ratings excluded per instructions
-        helpfulCount: null,
-        date: date || "",
-        text: text,
-        review: text,
+        ...(date ? { date } : {}),
+        ...extractShopeeReviewLikes(card),
+        text,
         platform: "shopee",
       });
     }

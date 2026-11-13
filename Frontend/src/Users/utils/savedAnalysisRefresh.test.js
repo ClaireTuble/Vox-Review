@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getNewReviews, getSavedReviewIdentity, alignSavedAnalysisRefreshBatch } from './savedAnalysisRefresh.js';
+import {
+  getNewReviews,
+  getSavedRefreshScrapeFailure,
+  getSavedReviewIdentity,
+  alignSavedAnalysisRefreshBatch,
+  refreshSavedAnalysisFromScrape,
+} from './savedAnalysisRefresh.js';
 import { prepareReviewsForAnalysis } from './reviewLanguage.js';
 
 test('uses a stable source review ID even when review text was edited', () => {
@@ -62,6 +68,59 @@ test('does not rediscover reviews after they are merged into the saved batch', (
   assert.deepEqual(getNewReviews(merged, [...newlyDetected, ...saved]), []);
 });
 
+test('rejects a Steam saved-refresh scrape with no loaded review cards', () => {
+  const scrape = {
+    platform: 'steam',
+    isProductPage: true,
+    reviews: [],
+    hasError: true,
+    errorMessage: "Steam has not loaded any review cards yet. Use Steam's review controls or scroll the page, then select Rescan.",
+  };
+
+  assert.equal(getSavedRefreshScrapeFailure(scrape), scrape.errorMessage);
+  assert.equal(getSavedRefreshScrapeFailure({
+    platform: 'steam',
+    isProductPage: true,
+    reviews: [{ id: 'steam-dom-1', text: 'A loaded review.' }],
+    hasError: false,
+  }), null);
+});
+
+test('does not write an empty Steam rescan over the saved review baseline', async () => {
+  const savedItem = {
+    id: 'snapshot-1',
+    platform: 'steam',
+    reviews: Array.from({ length: 53 }, (_, index) => ({
+      id: `saved-${index}`,
+      text: `Saved review ${index}`,
+    })),
+    last_refreshed_at: 123,
+  };
+  const originalSavedItem = structuredClone(savedItem);
+  let saveCalled = false;
+
+  await assert.rejects(
+    refreshSavedAnalysisFromScrape(
+      savedItem,
+      {
+        platform: 'steam',
+        isProductPage: true,
+        reviews: [],
+        hasError: true,
+        errorMessage: "Steam has not loaded any review cards yet. Use Steam's review controls or scroll the page, then select Rescan.",
+      },
+      async () => {
+        saveCalled = true;
+        return savedItem;
+      },
+    ),
+    /Steam has not loaded any review cards yet/,
+  );
+
+  assert.equal(saveCalled, false);
+  assert.deepEqual(savedItem, originalSavedItem);
+});
+
 test('aligns saved-refresh emotion results to accepted reviews in a mixed-language batch', async () => {
   const supportedReview = { id: 'en-1', text: 'The package arrived safely and works as expected.' };
   const unsupportedReview = {
@@ -79,4 +138,24 @@ test('aligns saved-refresh emotion results to accepted reviews in a mixed-langua
   assert.equal(prepared.skippedReviews[0].review, unsupportedReview);
   assert.equal(prepared.skippedReviews[0].status, 'skipped');
   assert.equal(prepared.skippedReviews[0].reason, 'unsupported_language');
+});
+
+test('excludes Indonesian reviews from the saved-refresh analysis batch', async () => {
+  const supportedReview = { id: 'en-1', text: 'The package arrived safely and works as expected.' };
+  const indonesianReview = {
+    id: 'id-1',
+    text: 'The quality is bagus, tapi pengiriman sangat lambat.',
+  };
+  const prepared = await prepareReviewsForAnalysis([supportedReview, indonesianReview]);
+  const batch = alignSavedAnalysisRefreshBatch(prepared.reviews, [2]);
+
+  assert.deepEqual(batch, {
+    reviews: [supportedReview],
+    predictions: [2],
+  });
+  assert.equal(prepared.skippedReviews.length, 1);
+  assert.equal(prepared.skippedReviews[0].review, indonesianReview);
+  assert.equal(prepared.skippedReviews[0].status, 'skipped');
+  assert.equal(prepared.skippedReviews[0].reason, 'unsupported_language');
+  assert.equal(prepared.skippedReviews[0].detectedLanguage, 'id');
 });

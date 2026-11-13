@@ -1,8 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useBlocker, useNavigate } from 'react-router-dom';
 import authService, { openWebAppAuth } from '../../services/authService.js';
 import { shouldRefreshProfileForAuthChange } from '../../services/userProfileSync.js';
-import { getAnalysisForPage, getSavedAnalysisCount, saveAnalysisForPage, getPageKey } from '../../services/pageAnalysisStorage.js';
+import {
+  ensureLegacyReviewPrivacyMigration,
+  sanitizeActiveAnalysisState,
+  sanitizeLegacyScrapeRecord,
+} from '../../services/legacyReviewPrivacyMigration.js';
+import { getAnalysisForPage, getAnalysisById, getSavedAnalysisCount, saveAnalysisForPage, getPageKey } from '../../services/pageAnalysisStorage.js';
 import {
   ACTIVE_ANALYSIS_STORAGE_KEY,
   deleteActiveAnalysisForPage,
@@ -23,31 +28,68 @@ import NoReviewsView from '../components/NoReviewsView.jsx';
 import PlatformUnavailableView from '../components/PlatformUnavailableView.jsx';
 import LogoutConfirmationModalExtension from '../components/LogoutConfirmationModalExtension.jsx';
 import UnsavedChangesConfirmationModal from '../components/UnsavedChangesConfirmationModal.jsx';
-import { detectPlatformFromUrl } from '../utils/platformDetection.js';
 import {
   aggregateTopicsForReviews,
   filterSubstantiveReviews,
+  getTopicAssignmentCounts,
   getReviewId,
   getReviewText,
   isSubstantiveReviewText,
   getTopicKeywordCandidates,
   getTopicKeywordDiagnostics,
 } from '../utils/reviewTopics.js';
-import { prepareReviewsForAnalysis } from '../utils/reviewLanguage.js';
-import { alignSavedAnalysisRefreshBatch, getNewReviews } from '../utils/savedAnalysisRefresh.js';
+import { identifyReviewLanguage, prepareReviewsForAnalysis } from '../utils/reviewLanguage.js';
+import {
+  alignSavedAnalysisRefreshBatch,
+  getSavedRefreshScrapeFailure,
+  refreshSavedAnalysisFromScrape,
+} from '../utils/savedAnalysisRefresh.js';
 import { attachReviewPriorities } from '../utils/priorityEngine.js';
+import { isValidEmotionAnalysisData } from '../utils/emotionResultDisplay.js';
 import { getSvmEmotionKeywords } from '../utils/emotionDrivers.js';
 import { clearPopupAuthState } from '../utils/popupAuthSession.js';
 import { isMatchingRescanScrape } from '../utils/analysisScrapeState.js';
 import { requestSvmBatch } from '../utils/svmRequest.js';
+import { sanitizeReviewText } from '../../services/privacyRedaction.js';
+import {
+  createAnalysisReviewSample,
+  getCommonEmotionModelIdentifier,
+  getEmotionModelDisplayName,
+  mergeSvmBatchResponses,
+  mergeTopicBatchResponses,
+  requestReviewBatches,
+} from '../utils/analysisReviewBatching.js';
 import { createPlatformAvailabilityChecker } from '../utils/platformAvailability.js';
+import { detectPlatformFromUrl } from '../utils/platformDetection.js';
 import {
   createTopicAnalysisRequestCoordinator,
   getTopicReviewSetSignature,
   createTopicRequestTimeout,
+  getMissingTopicKeywordCandidates,
+  runTopicKeywordScoring,
   requestTopicAnalysis as sendTopicAnalysisRequest,
+  TOPIC_KEYWORD_SCORE_BATCH_SIZE,
 } from '../utils/topicAnalysisRequest.js';
 import { createUnsavedChangesGuard } from '../utils/unsavedChangesGuard.js';
+import { canStartManualAnalysis } from '../utils/manualAnalysisAvailability.js';
+import {
+  associateSuspiciousReviewResults,
+  filterEligibleReviewEntries,
+  getReviewAggregateEligibilityMask,
+  runSuspiciousReviewCheck,
+  summarizeEmotionPredictions,
+  validateSuspiciousReviewResponse,
+} from '../utils/suspiciousReviewDetection.js';
+import {
+  assessReviewIntegrity,
+  DEFAULT_RIA_RULE_IDS,
+  toggleReviewIntegrityRuleSelection,
+} from '../utils/reviewIntegrityAssessment.js';
+import {
+  applyReviewScreeningMetadata,
+  createReviewScreeningMetadata,
+  restoreReviewScreeningMetadata,
+} from '../utils/reviewScreeningMetadata.js';
 import '../css/PopupPage.css';
 
 const ENABLE_TOPIC_ANALYSIS = import.meta.env.VITE_ENABLE_TOPIC_ANALYSIS !== 'false';
@@ -106,12 +148,23 @@ async function requestTopicAnalysis(
   force = false,
   operation = 'classify',
 ) {
+  const acceptedReviewIndices = operation === 'keyword-scores'
+    ? reviewTexts.map((_, index) => index)
+    : (await Promise.all(reviewTexts.map(identifyReviewLanguage)))
+      .flatMap((decision, index) => decision.status === 'unsupported' ? [] : [index]);
+  if (acceptedReviewIndices.length === 0) {
+    throw new Error('No supported-language reviews are available for topic analysis.');
+  }
+  const requestedReviewTexts = acceptedReviewIndices.length === reviewTexts.length
+    ? reviewTexts
+    : acceptedReviewIndices.map((index) => reviewTexts[index]);
+  let topicResult;
   if (pageKey && globalThis.chrome?.runtime?.sendMessage && globalThis.chrome?.storage?.local) {
     const response = await new Promise((resolve, reject) => {
       globalThis.chrome.runtime.sendMessage({
         type: 'requestTopicAnalysis',
         request: {
-          reviews: reviewTexts,
+          reviews: requestedReviewTexts,
           platform,
           pageKey,
           requestContext,
@@ -129,29 +182,44 @@ async function requestTopicAnalysis(
       error.code = response?.code || null;
       throw error;
     }
-    return response.result;
-  }
-  if (!pageKey) {
-    return sendTopicAnalysisRequest(reviewTexts, platform, {
+    topicResult = response.result;
+  } else if (!pageKey) {
+    topicResult = await sendTopicAnalysisRequest(requestedReviewTexts, platform, {
       signal,
       requestContext,
       operation,
     });
+  } else {
+    topicResult = await popupTopicRequests.request(requestedReviewTexts, platform, {
+      pageKey,
+      requestContext,
+      operation,
+      signal,
+      force,
+    });
   }
-  return popupTopicRequests.request(reviewTexts, platform, {
-    pageKey,
-    requestContext,
-    operation,
-    signal,
-    force,
-  });
+
+  if (acceptedReviewIndices.length !== reviewTexts.length &&
+    Array.isArray(topicResult?.results) &&
+    topicResult.results.length === acceptedReviewIndices.length) {
+    const resultByReviewIndex = new Map(acceptedReviewIndices.map((reviewIndex, resultIndex) => (
+      [reviewIndex, topicResult.results[resultIndex]]
+    )));
+    topicResult = {
+      ...topicResult,
+      results: reviewTexts.map((_, reviewIndex) => {
+        const result = resultByReviewIndex.get(reviewIndex);
+        return resultByReviewIndex.has(reviewIndex)
+          ? { ...result, reviewIndex }
+          : { reviewIndex, topics: [] };
+      }),
+    };
+  }
+  return topicResult;
 }
 
 function getReviewerName(review, platform) {
-  if (review && typeof review === 'object') {
-    return review.reviewer || review.author || review.userName || review.reviewerName || `${platform || 'Current Source'} Reviewer`;
-  }
-  return `${platform || 'Current Source'} Reviewer`;
+  return `${getPlatformLabel(platform)} review`;
 }
 
 function getPlatformLabel(platform) {
@@ -178,10 +246,7 @@ function getAvailabilityPlatformKey(platform) {
 }
 
 function getPlatformDisplayName(platform) {
-  const normalized = String(platform || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (['google', 'googlemaps', 'googlereviews'].includes(normalized)) return 'Google Maps';
   const names = {
-    google: 'Google Maps',
     googleplay: 'Google Play Store',
     lazada: 'Lazada',
     shopee: 'Shopee',
@@ -195,6 +260,39 @@ function isPlatformDisabledError(error) {
     /PLATFORM_DISABLED|analysis for this platform is currently disabled/i.test(error?.message || '');
 }
 
+function createEmotionModelProvenanceRun(modelProvenance, predictions, analyzedAt, reviewOffset = 0) {
+  const responsePredictions = modelProvenance?.reviewPredictions;
+  const associationsMatch = Array.isArray(responsePredictions) &&
+    responsePredictions.length === predictions.length &&
+    responsePredictions.every((entry, index) => (
+      entry?.reviewIndex === index && entry?.prediction === predictions[index]
+    ));
+  const modelIdentifier = associationsMatch &&
+    getEmotionModelDisplayName(modelProvenance?.modelIdentifier)
+    ? modelProvenance.modelIdentifier
+    : null;
+  const artifactSha256 = associationsMatch &&
+    typeof modelProvenance?.artifactSha256 === 'string' &&
+    /^[a-f0-9]{64}$/i.test(modelProvenance.artifactSha256)
+    ? modelProvenance.artifactSha256.toLowerCase()
+    : null;
+
+  return {
+    modelIdentifier,
+    artifactSha256,
+    selectionConfiguration: associationsMatch &&
+      modelProvenance?.selectionConfiguration &&
+      typeof modelProvenance.selectionConfiguration === 'object'
+      ? modelProvenance.selectionConfiguration
+      : null,
+    analyzedAt,
+    reviewPredictions: predictions.map((prediction, index) => ({
+      reviewIndex: reviewOffset + index,
+      prediction,
+    })),
+  };
+}
+
 function buildEmotionData(
   reviews,
   predictions,
@@ -203,36 +301,100 @@ function buildEmotionData(
   topicStatus = 'pending',
   explanationResults = [],
   skippedReviews = [],
+  suspiciousReviewDetection = null,
+  excludeFlaggedFromEmotion = false,
+  analysisSampleInfo = null,
+  modelIdentifier = null,
+  reviewIntegrityAssessment = null,
+  reviewIntegrityEnabled = true,
 ) {
   const validReviewIndexes = reviews
     .map((review, index) => isSubstantiveReviewText(getReviewText(review)) ? index : -1)
     .filter((index) => index >= 0);
-  reviews = validReviewIndexes.map((index) => reviews[index]);
+  const collectedAnalysisReviewCount = reviews.length;
+  let validatedDetection = null;
+  if (suspiciousReviewDetection?.status === 'complete') {
+    try {
+      validatedDetection = validateSuspiciousReviewResponse(
+        suspiciousReviewDetection,
+        reviews.length,
+      );
+    } catch {
+      validatedDetection = null;
+    }
+  }
+  const riaResults = Array.isArray(reviewIntegrityAssessment)
+    ? reviewIntegrityAssessment
+    : Array.isArray(reviewIntegrityAssessment?.results)
+      ? reviewIntegrityAssessment.results
+      : null;
+  const inclusionMask = getReviewAggregateEligibilityMask(
+    reviews.length,
+    validatedDetection,
+    excludeFlaggedFromEmotion,
+    riaResults,
+    reviewIntegrityEnabled,
+  );
+  const reviewDetectionEntries = associateSuspiciousReviewResults(reviews, validatedDetection);
+  const filteredReviewDetectionEntries = validReviewIndexes.map((index) => reviewDetectionEntries[index]);
+  reviews = filteredReviewDetectionEntries.map(({ review }) => review);
   predictions = validReviewIndexes.map((index) => predictions[index]);
   explanationResults = validReviewIndexes.map((index) => explanationResults[index] || {});
-
-  const counts = predictions.reduce((summary, category) => {
-    summary[category] += 1;
-    return summary;
-  }, { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 });
-  const totalReviews = predictions.length;
-  const dominantCategory = Number(Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0]);
+  const alignedInclusionMask = validReviewIndexes.map((index) => inclusionMask[index]);
+  const unfilteredSummary = summarizeEmotionPredictions(predictions);
+  const primarySummary = summarizeEmotionPredictions(predictions, alignedInclusionMask);
+  const counts = primarySummary.counts;
+  const totalReviews = primarySummary.totalReviews;
+  const dominantCategory = primarySummary.dominantCategory;
   const dominantDisplay = CATEGORY_DISPLAY[dominantCategory];
+  const flaggedCount = validatedDetection?.results.filter(
+    (result) => result.label === 'Repeated Review',
+  ).length || 0;
+  const excludedCount = alignedInclusionMask.filter((included) => !included).length;
+  const filteringApplied = Boolean(
+    excludeFlaggedFromEmotion && excludedCount > 0,
+  );
+  const detectorStatus = validatedDetection?.status ||
+    (suspiciousReviewDetection?.status === 'complete'
+      ? 'invalid'
+      : suspiciousReviewDetection?.status || 'disabled');
+  const detectorReason = validatedDetection
+    ? null
+    : suspiciousReviewDetection?.status === 'complete'
+      ? 'invalid_response'
+      : suspiciousReviewDetection?.reason || null;
+  const model = getEmotionModelDisplayName(modelIdentifier);
 
   const emotions = Object.entries(CATEGORY_DISPLAY).map(([category, display]) => ({
     id: display.label.toLowerCase(),
     category: Number(category),
     label: display.label,
     emoji: display.emoji,
-    percentage: totalReviews ? Math.round((counts[category] / totalReviews) * 100) : 0,
+    percentage: primarySummary.percentages[category],
     count: counts[category],
-    model: 'SVM',
+    model,
     keywords: getSvmEmotionKeywords(explanationResults, Number(category), reviews),
     color: display.color,
   }));
+  const unfilteredEmotionSummary = filteringApplied
+    ? {
+        totalReviews: unfilteredSummary.totalReviews,
+        emotions: Object.entries(CATEGORY_DISPLAY).map(([category, display]) => ({
+          id: display.label.toLowerCase(),
+          label: display.label,
+          count: unfilteredSummary.counts[category],
+          percentage: unfilteredSummary.percentages[category],
+        })),
+      }
+    : null;
 
+  const topicEntries = reviews.map((review, topicResultIndex) => ({
+    review,
+    topicResultIndex,
+    aggregateEligible: alignedInclusionMask[topicResultIndex],
+  }));
   const topics = aggregateTopicsForReviews(
-    reviews.map((review, topicResultIndex) => ({ review, topicResultIndex })),
+    filterEligibleReviewEntries(topicEntries),
     topicResponse,
   );
   const quotes = reviews.map((review, index) => {
@@ -241,6 +403,7 @@ function buildEmotionData(
     return {
       id: getReviewId(review, index),
       topicResultIndex: index,
+      sourceReviewIndex: validReviewIndexes[index],
       category,
       emotion: display.label,
       emoji: display.emoji,
@@ -250,18 +413,47 @@ function buildEmotionData(
       date: review?.date || review?.reviewDate || '',
       rating: review?.rating ?? null,
       helpfulCount: review?.helpfulCount ?? null,
+      helpfulnessMetric: review?.helpfulnessMetric ?? null,
+      helpfulnessAvailable: review?.helpfulnessAvailable === true,
+      recommendation: review?.recommendation ?? null,
+      aggregateEligible: alignedInclusionMask[index],
+      ...(filteredReviewDetectionEntries[index]?.result
+        ? {
+            suspiciousReviewLabel: filteredReviewDetectionEntries[index].result.label,
+            suspiciousReviewScore: filteredReviewDetectionEntries[index].result.score,
+            ...(filteredReviewDetectionEntries[index].result.reason
+              ? { suspiciousReviewReason: filteredReviewDetectionEntries[index].result.reason }
+              : {}),
+          }
+        : {}),
     };
   });
 
   return {
     totalReviews,
     dominantEmotion: {
-      label: dominantDisplay.label,
-      emoji: dominantDisplay.emoji,
+      label: dominantDisplay?.label || 'No included reviews',
+      emoji: dominantDisplay?.emoji || '—',
       percentage: totalReviews ? Math.round((counts[dominantCategory] / totalReviews) * 100) : 0,
-      model: 'SVM',
+      model,
     },
     emotions,
+    collectedReviewCount: analysisSampleInfo?.sourceReviewCount ?? collectedAnalysisReviewCount,
+    analyzedReviewCount: predictions.length,
+    emotionDenominator: totalReviews,
+    excludedReviewCount: excludedCount,
+    filteringApplied,
+    suspiciousReviewDetection: {
+      status: detectorStatus,
+      reason: detectorReason,
+      evaluatedCount: validatedDetection?.evaluatedCount || 0,
+      flaggedCount,
+      includedCount: totalReviews,
+      excludedCount,
+      filteringEnabled: Boolean(excludeFlaggedFromEmotion),
+      filteringApplied,
+    },
+    unfilteredEmotionSummary,
     topics,
     topicStatus,
     topicModel: topicResponse?.model || null,
@@ -283,6 +475,34 @@ function filterActiveAnalysisStateReviews(activeState) {
   const filterAligned = (values) => Array.isArray(values) && values.length === originalReviews.length
     ? validReviewIndexes.map((index) => values[index])
     : values;
+  const reviewIndexMap = new Map(
+    validReviewIndexes.map((originalIndex, filteredIndex) => [originalIndex, filteredIndex]),
+  );
+  const emotionModelProvenance = Array.isArray(activeState.emotionModelProvenance?.runs)
+    ? {
+        ...activeState.emotionModelProvenance,
+        runs: activeState.emotionModelProvenance.runs.map((run) => ({
+          ...run,
+          reviewPredictions: Array.isArray(run.reviewPredictions)
+            ? run.reviewPredictions.flatMap((entry) => (
+                reviewIndexMap.has(entry.reviewIndex)
+                  ? [{ ...entry, reviewIndex: reviewIndexMap.get(entry.reviewIndex) }]
+                  : []
+              ))
+            : [],
+        })),
+      }
+    : activeState.svmResult?.modelProvenance
+      ? {
+          runs: [
+            createEmotionModelProvenanceRun(
+              activeState.svmResult.modelProvenance,
+              activeState.svmResult.predictions || [],
+              activeState.completedAt ? new Date(activeState.completedAt).toISOString() : new Date().toISOString(),
+            ),
+          ],
+        }
+      : activeState.emotionModelProvenance;
   const svmResult = activeState.svmResult && {
     ...activeState.svmResult,
     predictions: filterAligned(activeState.svmResult.predictions),
@@ -298,23 +518,58 @@ function filterActiveAnalysisStateReviews(activeState) {
         }))
       : activeState.topicResult.results,
   };
+  let suspiciousReviewDetection = activeState.suspiciousReviewDetection;
+  if (activeState.suspiciousReviewDetection?.status === 'complete') {
+    try {
+      const validatedDetection = validateSuspiciousReviewResponse(
+        activeState.suspiciousReviewDetection,
+        originalReviews.length,
+      );
+      suspiciousReviewDetection = {
+        ...validatedDetection,
+        evaluatedCount: validReviewIndexes.length,
+        results: validReviewIndexes.map((index, reviewIndex) => ({
+          ...validatedDetection.results[index],
+          reviewIndex,
+        })),
+      };
+    } catch {
+      suspiciousReviewDetection = activeState.suspiciousReviewDetection;
+    }
+  }
 
   return {
     ...activeState,
     reviews: filteredReviews,
+    emotionModelProvenance,
     reviewSetSignature: getTopicReviewSetSignature(filteredReviews.map(getReviewText)),
     svmResult,
     topicResult,
+    suspiciousReviewDetection,
   };
 }
 
-function buildActiveAnalysisView(activeState) {
+export function buildActiveAnalysisView(activeState, fallbackReviewIntegrityAssessment = null) {
   activeState = filterActiveAnalysisStateReviews(activeState);
   const reviews = Array.isArray(activeState?.reviews) ? activeState.reviews : [];
   const predictions = activeState?.svmResult?.predictions;
   if (!Array.isArray(predictions) || predictions.length !== reviews.length || reviews.length === 0) {
     return { record: activeState, emotionData: null, topicAnalysis: null };
   }
+  const emotionModelProvenance = activeState.emotionModelProvenance ||
+    (activeState.svmResult?.modelProvenance
+      ? {
+          runs: [
+            createEmotionModelProvenanceRun(
+              activeState.svmResult.modelProvenance,
+              predictions,
+              activeState.completedAt
+                ? new Date(activeState.completedAt).toISOString()
+                : null,
+            ),
+          ],
+        }
+      : null);
 
   const originalExplanationResults = activeState.svmResult.results;
   const explanationResults = Array.isArray(originalExplanationResults) &&
@@ -325,6 +580,13 @@ function buildActiveAnalysisView(activeState) {
         emotionDrivers: Array.isArray(result?.emotionDrivers)
           ? result.emotionDrivers.filter((driver) => typeof driver === 'string')
           : [],
+        ...(result?.mode === 'baseline' || result?.mode === 'specialist_trigger'
+          ? { mode: result.mode }
+          : {}),
+        ...(result?.routing_mode === 'baseline_default' ||
+          result?.routing_mode === 'specialist_override'
+          ? { routing_mode: result.routing_mode }
+          : {}),
         contextualResolution: typeof result?.contextualResolution?.explanation === 'string'
           ? result.contextualResolution
           : null,
@@ -335,6 +597,14 @@ function buildActiveAnalysisView(activeState) {
   const topicAnalysis = hasValidTopicAnalysis(filteredTopicResult, reviews.length)
     ? filteredTopicResult
     : null;
+  console.info('VoxReview: Topic assignments validated for active-page restoration.', {
+    requestId: filteredTopicResult?.clientRequestId ?? filteredTopicResult?.requestId ?? activeState.runId ?? null,
+    pageKey: activeState.pageKey,
+    reviewCount: reviews.length,
+    beforeValidation: getTopicAssignmentCounts(filteredTopicResult),
+    afterValidation: getTopicAssignmentCounts(topicAnalysis),
+    outcome: topicAnalysis ? 'retained' : 'rejected',
+  });
   const topicStatus = topicAnalysis
     ? 'ready'
     : activeState.topicError ? 'unavailable' : ENABLE_TOPIC_ANALYSIS ? 'pending' : 'disabled';
@@ -346,11 +616,22 @@ function buildActiveAnalysisView(activeState) {
     topicStatus,
     explanationResults,
     activeState.skippedReviews || [],
+    activeState.suspiciousReviewDetection || null,
+    activeState.excludeFlaggedFromEmotion === true,
+    activeState.analysisSampleInfo || null,
+    getCommonEmotionModelIdentifier(emotionModelProvenance, reviews.length) ||
+      activeState.svmResult?.modelProvenance?.modelIdentifier ||
+      activeState.emotionData?.dominantEmotion?.model ||
+      null,
+    activeState.reviewIntegrityAssessment || fallbackReviewIntegrityAssessment || null,
+    activeState.reviewIntegrityEnabled !== false,
   );
   const reviewAnalysis = explanationResults.map((result, index) => ({
     review: reviews[index],
     category: result.category,
     emotionDrivers: result.emotionDrivers,
+    ...(result.mode ? { mode: result.mode } : {}),
+    ...(result.routing_mode ? { routing_mode: result.routing_mode } : {}),
     contextualResolution: result.contextualResolution,
   }));
   const record = {
@@ -361,6 +642,7 @@ function buildActiveAnalysisView(activeState) {
     productTitle: activeState.productTitle || activeState.targetTitle || 'Product Review',
     targetTitle: activeState.targetTitle || activeState.productTitle || 'Product Review',
     reviews,
+    emotionModelProvenance,
     svmResult: {
       ...activeState.svmResult,
       predictions,
@@ -372,6 +654,13 @@ function buildActiveAnalysisView(activeState) {
     emotionData,
   };
   return { record, emotionData, topicAnalysis };
+}
+
+export function getActiveAnalysisDisplayStatus(activeState, emotionData) {
+  if (activeState?.status === 'error') return 'idle';
+  if (activeState?.status === 'completed' || emotionData) return 'completed';
+  if (activeState?.status === 'analyzing') return 'analyzing';
+  return 'idle';
 }
 
 /**
@@ -398,16 +687,22 @@ export default function PopupPage() {
   const navigate = useNavigate();
 
   // Synchronized authenticated user state
-  const [currentUser, setCurrentUser] = useState(() => authService.getCurrentUser());
-  const [savedProfile, setSavedProfile] = useState(() => authService.getCurrentUser());
+  const [currentUser, setCurrentUser] = useState(() => (
+    globalThis.chrome?.runtime?.id ? null : authService.getCurrentUser()
+  ));
+  const [savedProfile, setSavedProfile] = useState(() => (
+    globalThis.chrome?.runtime?.id ? null : authService.getCurrentUser()
+  ));
   const setAuthenticatedUser = (user) => {
     setCurrentUser(user);
     setSavedProfile(user);
+    setAuthVerificationUnavailable(false);
   };
   const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
+  const [authVerificationUnavailable, setAuthVerificationUnavailable] = useState(false);
   const [isProfileDirty, setIsProfileDirty] = useState(false);
   const [showUnsavedChangesConfirmation, setShowUnsavedChangesConfirmation] = useState(false);
-  const isLoggedIn = !!currentUser;
+  const isLoggedIn = !!currentUser && !authVerificationUnavailable;
 
   const [theme, setTheme] = useState(() => localStorage.getItem('voxreview-theme') || 'light');
   const [authToastMessage, setAuthToastMessage] = useState('');
@@ -420,7 +715,23 @@ export default function PopupPage() {
   const [isPlatformAvailabilityChecking, setIsPlatformAvailabilityChecking] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState('idle');
   const [analysisError, setAnalysisError] = useState('');
+  const [analysisProgress, setAnalysisProgress] = useState(null);
+  const [analysisSampleInfo, setAnalysisSampleInfo] = useState(null);
+  const [suspiciousReviewDetectionEnabled, setSuspiciousReviewDetectionEnabled] = useState(true);
+  const [reviewIntegrityEnabled, setReviewIntegrityEnabled] = useState(true);
+  const [reviewIntegrityError, setReviewIntegrityError] = useState('');
+  const [excludeFlaggedFromEmotion, setExcludeFlaggedFromEmotion] = useState(false);
   const [emotionData, setEmotionData] = useState(null);
+  const [reviewIntegrityAssessment, setReviewIntegrityAssessment] = useState(null);
+  const [enabledRiaRuleIds, setEnabledRiaRuleIds] = useState(DEFAULT_RIA_RULE_IDS);
+  const enabledRiaRuleIdsRef = useRef(enabledRiaRuleIds);
+  const reviewIntegrityEnabledRef = useRef(reviewIntegrityEnabled);
+  const reviewIntegrityAssessmentRef = useRef(reviewIntegrityAssessment);
+  useLayoutEffect(() => {
+    enabledRiaRuleIdsRef.current = enabledRiaRuleIds;
+    reviewIntegrityEnabledRef.current = reviewIntegrityEnabled;
+    reviewIntegrityAssessmentRef.current = reviewIntegrityAssessment;
+  }, [enabledRiaRuleIds, reviewIntegrityEnabled, reviewIntegrityAssessment]);
   const [topicAnalysis, setTopicAnalysis] = useState(null);
   const [currentAnalysisRecord, setCurrentAnalysisRecord] = useState(null);
   const emotionDataRef = useRef(emotionData);
@@ -429,6 +740,7 @@ export default function PopupPage() {
   emotionDataRef.current = emotionData;
   topicAnalysisRef.current = topicAnalysis;
   currentAnalysisRecordRef.current = currentAnalysisRecord;
+  const topicKeywordContextRef = useRef(null);
   const [isSavingAnalysis, setIsSavingAnalysis] = useState(false);
   const [hasSavedAnalysis, setHasSavedAnalysis] = useState(false);
   const [saveAnalysisError, setSaveAnalysisError] = useState('');
@@ -446,10 +758,17 @@ export default function PopupPage() {
   const [scrapedCategory, setScrapedCategory] = useState(null);
   const [scrapedRating, setScrapedRating] = useState(null);
   const [scrapedProductImage, setScrapedProductImage] = useState(null);
+  const [scrapedProductMediaType, setScrapedProductMediaType] = useState(null);
   const [scrapedReviews, setScrapedReviews] = useState([]);
   const [scrapedHasError, setScrapedHasError] = useState(false);
   const [scrapedErrorMessage, setScrapedErrorMessage] = useState('');
   const topicKeywordScoringRef = useRef(0);
+  useLayoutEffect(() => {
+    topicKeywordContextRef.current = {
+      reviewSetSignature: getTopicReviewSetSignature(scrapedReviews),
+      topicAnalysis,
+    };
+  });
 
   // Real-time refs to avoid closure staleness during async events
   const activeTabUrlRef = useRef(activeTabUrl);
@@ -459,10 +778,13 @@ export default function PopupPage() {
   const lastScrapedReviewsRef = useRef([]);
   const rescanAnalysisPendingRef = useRef(null);
   const rescanTimeoutRef = useRef(null);
+  const rescanPreviousStateRef = useRef(null);
   const rescanRequestCounterRef = useRef(0);
   const ignoreAutomaticScrapesRef = useRef(false);
   const analysisRevisionRef = useRef(0);
   const analysisResolvedPageKeyRef = useRef(null);
+  const activeTabRestoreRequestRef = useRef(0);
+  const analysisControllerRef = useRef(null);
   const lastAuthUserIdRef = useRef(null);
   const profileRefreshRef = useRef({ userId: null, promise: null });
   const availabilityRequestRef = useRef(0);
@@ -477,31 +799,52 @@ export default function PopupPage() {
   blockerRef.current = blocker;
 
   useEffect(() => {
-    if (!ENABLE_TOPIC_ANALYSIS ||
-      !hasValidTopicAnalysis(topicAnalysis, scrapedReviews.length) ||
-      topicAnalysis.keywordScores) return undefined;
+    const reviewSetSignature = getTopicReviewSetSignature(scrapedReviews);
+    if (!ENABLE_TOPIC_ANALYSIS) return undefined;
+    if (!hasValidTopicAnalysis(topicAnalysis, scrapedReviews.length)) return undefined;
 
-    const reviewEntries = scrapedReviews.map((review, topicResultIndex) => ({
+    const reviewEntries = filterEligibleReviewEntries(scrapedReviews.map((review, topicResultIndex) => ({
       review,
       topicResultIndex,
-    }));
+      aggregateEligible: emotionData?.quotes?.[topicResultIndex]?.aggregateEligible,
+    })));
     const candidateTerms = getTopicKeywordCandidates(reviewEntries, topicAnalysis);
+    const missingCandidateTerms = getMissingTopicKeywordCandidates(
+      candidateTerms,
+      topicAnalysis.keywordScores,
+    );
+    if (missingCandidateTerms.length === 0) return undefined;
+
     const requestId = ++topicKeywordScoringRef.current;
     const controller = new AbortController();
     let isCurrent = true;
     console.info('VoxReview: topic keyword scoring candidates prepared.', {
-      pageKey: activeContextRef.current.pageKey || currentAnalysisRecord?.pageKey || null,
-      reviewCount: scrapedReviews.length,
+      pageKey: activeContextRef.current.pageKey || currentAnalysisRecordRef.current?.pageKey || null,
+      reviewCount: reviewEntries.length,
       uniqueCandidateCount: candidateTerms.length,
-      requestBatchCount: Math.ceil(candidateTerms.length / 500),
+      missingCandidateCount: missingCandidateTerms.length,
+      plannedRequestBatchCount: Math.ceil(
+        missingCandidateTerms.length / TOPIC_KEYWORD_SCORE_BATCH_SIZE,
+      ),
+      maximumBatchSize: TOPIC_KEYWORD_SCORE_BATCH_SIZE,
       requestContext: 'topic-keyword-scoring',
     });
 
     const applyKeywordScores = (keywordScores) => {
-      if (!isCurrent || topicKeywordScoringRef.current !== requestId) return;
-      const enrichedTopicAnalysis = { ...topicAnalysis, keywordScores };
+      if (!isCurrent || topicKeywordScoringRef.current !== requestId ||
+        topicKeywordContextRef.current.reviewSetSignature !== reviewSetSignature ||
+        topicKeywordContextRef.current.topicAnalysis !== topicAnalysis) return;
+      const enrichedTopicAnalysis = {
+        ...topicAnalysis,
+        keywordScores: {
+          ...(topicAnalysis.keywordScores || {}),
+          ...keywordScores,
+        },
+      };
       const entriesByTopic = new Map();
       topicAnalysis.results.forEach((result, topicResultIndex) => {
+        const quote = emotionData?.quotes?.[topicResultIndex];
+        if (quote?.aggregateEligible === false) return;
         new Set((result?.topics || []).map(({ label }) => label)).forEach((label) => {
           if (!entriesByTopic.has(label)) entriesByTopic.set(label, []);
           entriesByTopic.get(label).push({
@@ -511,7 +854,7 @@ export default function PopupPage() {
         });
       });
       console.info('VoxReview: topic keyword selection diagnostics.', {
-        pageKey: activeContextRef.current.pageKey || currentAnalysisRecord?.pageKey || null,
+        pageKey: activeContextRef.current.pageKey || currentAnalysisRecordRef.current?.pageKey || null,
         uniqueScoredCandidateCount: Object.keys(keywordScores).length,
         topics: [...entriesByTopic.entries()].map(([label, entries]) => (
           getTopicKeywordDiagnostics(entries, label, enrichedTopicAnalysis)
@@ -519,11 +862,12 @@ export default function PopupPage() {
       });
       const enrichEmotionData = (currentData) => {
         if (!currentData) return currentData;
-        const topicEntries = (currentData.quotes || []).map((quote, topicResultIndex) => ({
+        const topicEntries = filterEligibleReviewEntries((currentData.quotes || []).map((quote, topicResultIndex) => ({
           review: scrapedReviews[topicResultIndex] ?? quote,
           category: quote.category ?? CATEGORY_BY_EMOTION_ID.get(quote.emotion?.toLowerCase()),
           topicResultIndex,
-        }));
+          aggregateEligible: quote.aggregateEligible,
+        })));
         return {
           ...currentData,
           topics: aggregateTopicsForReviews(topicEntries, enrichedTopicAnalysis),
@@ -545,50 +889,52 @@ export default function PopupPage() {
           emotionData: enrichEmotionData(current.emotionData),
         };
       });
+      return enrichedTopicAnalysis;
     };
-
-    if (candidateTerms.length === 0) {
-      applyKeywordScores({});
-      return () => {
-        isCurrent = false;
-        controller.abort(new DOMException('Topic keyword scoring was superseded.', 'AbortError'));
-      };
-    }
-
     let timeout;
-    const scoreCandidates = async () => {
-      const keywordScores = {};
-      for (let start = 0; start < candidateTerms.length; start += 500) {
-        const batch = candidateTerms.slice(start, start + 500);
+    const scoreCandidates = async () => runTopicKeywordScoring({
+      candidates: missingCandidateTerms,
+      requestBatch: async (batch) => {
         timeout = createTopicRequestTimeout(controller, batch.length);
-        const payload = await requestTopicAnalysis(
-          batch,
-          controller.signal,
-          getPlatformLabel(detectedPlatform),
-          'topic-keyword-scoring',
-          activeContextRef.current.pageKey || currentAnalysisRecord?.pageKey,
-          false,
-          'keyword-scores',
-        );
-        timeout.clear();
-        timeout = null;
-        if (!hasValidTopicKeywordScores(payload, batch.length)) {
+        try {
+          return await requestTopicAnalysis(
+            batch,
+            controller.signal,
+            getPlatformLabel(detectedPlatform),
+            'topic-keyword-scoring',
+            activeContextRef.current.pageKey || currentAnalysisRecordRef.current?.pageKey,
+            false,
+            'keyword-scores',
+          );
+        } finally {
+          timeout?.clear();
+          timeout = null;
+        }
+      },
+      isCurrent: () => isCurrent &&
+        topicKeywordScoringRef.current === requestId &&
+        topicKeywordContextRef.current.reviewSetSignature === reviewSetSignature &&
+        topicKeywordContextRef.current.topicAnalysis === topicAnalysis,
+      onSuccess: (payload) => {
+        if (!hasValidTopicKeywordScores(payload, missingCandidateTerms.length)) {
           throw new Error('E5 topic keyword scores were missing or invalid.');
         }
-        payload.results.forEach((result, index) => {
-          const key = batch[index].toLocaleLowerCase();
+        const keywordScores = {};
+        payload.results.forEach((result) => {
+          const key = missingCandidateTerms[result.reviewIndex].toLocaleLowerCase();
           keywordScores[key] = Object.fromEntries(
             result.topicScores.map(({ label, score }) => [label, score]),
           );
         });
-      }
-      applyKeywordScores(keywordScores);
-    };
+        return applyKeywordScores(keywordScores);
+      },
+      batchSize: TOPIC_KEYWORD_SCORE_BATCH_SIZE,
+    });
 
     scoreCandidates().catch((error) => {
       if (isCurrent && topicKeywordScoringRef.current === requestId) {
         console.warn('VoxReview: topic-specific keyword scoring unavailable.', {
-          pageKey: activeContextRef.current.pageKey || currentAnalysisRecord?.pageKey || null,
+          pageKey: activeContextRef.current.pageKey || currentAnalysisRecordRef.current?.pageKey || null,
           requestContext: 'topic-keyword-scoring',
           candidateCount: candidateTerms.length,
           httpStatus: error?.httpStatus ?? null,
@@ -605,10 +951,13 @@ export default function PopupPage() {
 
     return () => {
       isCurrent = false;
+      if (topicKeywordScoringRef.current === requestId) {
+        topicKeywordScoringRef.current += 1;
+      }
       if (timeout) timeout.clear();
       controller.abort(new DOMException('Topic keyword scoring was superseded.', 'AbortError'));
     };
-  }, [detectedPlatform, scrapedReviews, topicAnalysis]);
+  }, [detectedPlatform, emotionData, scrapedReviews, topicAnalysis]);
 
   const checkCurrentPlatformAvailability = useCallback(async ({ force = false } = {}) => {
     const platformKey = getAvailabilityPlatformKey(activeContextRef.current.platform)
@@ -738,8 +1087,47 @@ export default function PopupPage() {
 
   const applyActiveAnalysisState = (activeState) => {
     if (!activeState?.pageKey || activeState.pageKey !== activeContextRef.current.pageKey) return;
-    activeState = filterActiveAnalysisStateReviews(activeState);
+    try {
+      activeState = filterActiveAnalysisStateReviews(sanitizeActiveAnalysisState(activeState));
+    } catch {
+      setScrapedHasError(true);
+      setScrapedErrorMessage('Stored review data could not be safely privacy-migrated.');
+      return;
+    }
     const incomingReviews = Array.isArray(activeState.reviews) ? activeState.reviews : [];
+    const incomingReviewSetSignature = getTopicReviewSetSignature(incomingReviews.map((review) => (
+      sanitizeReviewText(getReviewText(review))
+    )));
+    let restoredAssessment = null;
+    if (reviewIntegrityAssessmentRef.current?.pageKey === activeState.pageKey &&
+        reviewIntegrityAssessmentRef.current.reviewSetSignature === incomingReviewSetSignature) {
+      restoredAssessment = reviewIntegrityAssessmentRef.current;
+    } else if (activeState.reviewIntegrityAssessment?.results) {
+      restoredAssessment = {
+        pageKey: activeState.pageKey,
+        reviewSetSignature: incomingReviewSetSignature,
+        results: activeState.reviewIntegrityAssessment.results,
+      };
+    } else if (activeState.reviewIntegrityEnabled !== false && incomingReviews.length > 0) {
+      try {
+        const results = assessReviewIntegrity(
+          incomingReviews.map((review, reviewIndex) => ({
+            reviewIndex,
+            text: sanitizeReviewText(getReviewText(review)),
+          })),
+          { enabledRuleIds: enabledRiaRuleIdsRef.current },
+        );
+        restoredAssessment = {
+          pageKey: activeState.pageKey,
+          reviewSetSignature: incomingReviewSetSignature,
+          results,
+        };
+      } catch (err) {
+        console.error('VoxReview: Auto-assessment of review integrity failed.', err);
+      }
+    }
+    setReviewIntegrityAssessment(restoredAssessment);
+    reviewIntegrityAssessmentRef.current = restoredAssessment;
     const currentRecord = currentAnalysisRecordRef.current;
     const currentTopics = topicAnalysisRef.current;
     const currentEmotionData = emotionDataRef.current;
@@ -758,7 +1146,20 @@ export default function PopupPage() {
       !hasValidTopicAnalysis(activeState.topicResult, incomingReviews.length)
       ? { ...activeState, topicResult: preservedTopics, topicError: null }
       : activeState;
-    const { record, emotionData: restoredEmotionData, topicAnalysis: restoredTopics } = buildActiveAnalysisView(stateForView);
+    const { record, emotionData: restoredEmotionData, topicAnalysis: restoredTopics } = buildActiveAnalysisView(
+      stateForView,
+      restoredAssessment?.results || null,
+    );
+    console.info('VoxReview: Topic assignments applied to popup state.', {
+      requestId: stateForView.topicResult?.clientRequestId ??
+        stateForView.topicResult?.requestId ??
+        stateForView.runId ??
+        null,
+      pageKey: stateForView.pageKey,
+      reviewCount: incomingReviews.length,
+      beforeStateApplication: getTopicAssignmentCounts(stateForView.topicResult),
+      afterStateApplication: getTopicAssignmentCounts(restoredTopics),
+    });
     analysisResolvedPageKeyRef.current = activeState.pageKey;
     setCurrentAnalysisRecord(record);
     setHasResolvedActiveTab(true);
@@ -768,18 +1169,22 @@ export default function PopupPage() {
     setScrapedCategory(activeState.category ?? null);
     setScrapedRating(activeState.rating ?? null);
     setScrapedProductImage(activeState.productImage ?? null);
+    setScrapedProductMediaType(activeState.productMediaType ?? null);
     setScrapedReviews(Array.isArray(activeState.reviews) ? activeState.reviews : []);
     lastScrapedReviewsRef.current = Array.isArray(activeState.reviews) ? activeState.reviews : [];
     setScrapedHasError(false);
     setScrapedErrorMessage('');
     setEmotionData(restoredEmotionData);
     setTopicAnalysis(restoredTopics);
+    setAnalysisProgress(activeState.analysisProgress || null);
+    setAnalysisSampleInfo(activeState.analysisSampleInfo || null);
+    setSuspiciousReviewDetectionEnabled(activeState.suspiciousReviewDetectionEnabled !== false);
+    setReviewIntegrityEnabled(activeState.reviewIntegrityEnabled !== false);
+    setExcludeFlaggedFromEmotion(activeState.excludeFlaggedFromEmotion === true);
     setHasSavedAnalysis(false);
     setSaveAnalysisError('');
     setAnalysisError(activeState.error || '');
-    setAnalysisStatus(activeState.status === 'error'
-      ? 'idle'
-      : restoredEmotionData ? 'completed' : activeState.status === 'analyzing' ? 'analyzing' : 'idle');
+    setAnalysisStatus(getActiveAnalysisDisplayStatus(activeState, restoredEmotionData));
 
     if (ENABLE_TOPIC_ANALYSIS &&
       activeState.status === 'completed' &&
@@ -891,6 +1296,23 @@ export default function PopupPage() {
       }
     }
   };
+  const applyActiveAnalysisStateRef = useRef(null);
+  applyActiveAnalysisStateRef.current = applyActiveAnalysisState;
+
+  useEffect(() => {
+    const handleActiveAnalysisChange = (changes, areaName) => {
+      if (areaName !== 'local' || !changes[ACTIVE_ANALYSIS_STORAGE_KEY]) return;
+      const pageKey = activeContextRef.current.pageKey;
+      const state = changes[ACTIVE_ANALYSIS_STORAGE_KEY].newValue?.[pageKey];
+      if (state && state.pageKey === pageKey) {
+        applyActiveAnalysisStateRef.current?.(state);
+      }
+    };
+    globalThis.chrome?.storage?.onChanged?.addListener(handleActiveAnalysisChange);
+    return () => {
+      globalThis.chrome?.storage?.onChanged?.removeListener(handleActiveAnalysisChange);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -903,15 +1325,8 @@ export default function PopupPage() {
     };
 
     refreshCount();
-    const handleStorageChange = (changes, areaName) => {
-      if (areaName !== 'local' || !changes.voxreview_page_analyses) return;
-      setSavedAnalysisCount(Object.keys(changes.voxreview_page_analyses.newValue || {}).length);
-    };
-    globalThis.chrome?.storage?.onChanged?.addListener(handleStorageChange);
-
     return () => {
       isMounted = false;
-      globalThis.chrome?.storage?.onChanged?.removeListener(handleStorageChange);
     };
   }, []);
 
@@ -944,6 +1359,13 @@ export default function PopupPage() {
 
   const syncScrapeData = (data) => {
     if (!data) return;
+    try {
+      data = sanitizeLegacyScrapeRecord(data);
+    } catch {
+      setScrapedHasError(true);
+      setScrapedErrorMessage('Stored review data could not be safely privacy-migrated.');
+      return;
+    }
     const scrapeStartedAt = performance.now();
     console.log('[Analyze] scrape start');
 
@@ -1034,6 +1456,30 @@ export default function PopupPage() {
       }
     }
 
+    const savedRefreshFailure = pendingRescan?.savedItem
+      ? getSavedRefreshScrapeFailure(data)
+      : null;
+    if (pendingRescan?.savedItem) {
+      console.info('[RESCAN] matching saved-page scrape received:', {
+        currentUrl: (() => {
+          try {
+            const url = new URL(scrapeUrl);
+            return `${url.origin}${url.pathname}`;
+          } catch {
+            return '';
+          }
+        })(),
+        matchedPlatform: scrapePlatform,
+        pageKey: getPageKey(scrapePlatform, scrapeUrl),
+        layout: data.reviewDiagnostics?.layout ?? null,
+        reviewCardsFound: data.reviewDiagnostics?.reviewCardsFound ?? null,
+        nonEmptyReviewTexts: data.reviewDiagnostics?.nonEmptyReviewTexts ?? null,
+        reviewsReturnedToPopup: Array.isArray(data.reviews) ? data.reviews.length : 0,
+        success: !savedRefreshFailure,
+        reason: savedRefreshFailure,
+      });
+    }
+
     console.log('[POPUP] applying reviews:', Array.isArray(data.reviews) ? data.reviews.length : 0);
     if (data.platform) setDetectedPlatform(data.platform);
     if (data.isProductPage !== undefined) setScrapedIsProductPage(data.isProductPage);
@@ -1041,7 +1487,8 @@ export default function PopupPage() {
     if (data.category !== undefined) setScrapedCategory(data.category);
     if (data.rating !== undefined) setScrapedRating(data.rating);
     if (data.productImage !== undefined) setScrapedProductImage(data.productImage);
-    if (Array.isArray(data.reviews)) {
+    if (data.productMediaType !== undefined) setScrapedProductMediaType(data.productMediaType);
+    if (Array.isArray(data.reviews) && !savedRefreshFailure) {
       const validReviews = filterSubstantiveReviews(data.reviews);
       setScrapedReviews(validReviews);
       lastScrapedReviewsRef.current = validReviews;
@@ -1057,10 +1504,10 @@ export default function PopupPage() {
       rescanTimeoutRef.current = null;
       setIsRescanning(false);
       if (pendingRescan.savedItem) {
-        if (data.hasError || data.isProductPage === false || !Array.isArray(data.reviews)) {
+        if (savedRefreshFailure) {
           pendingRescan.resolveRefresh?.({
             success: false,
-            error: data.errorMessage || 'Unable to retrieve reviews from the saved source page.',
+            error: savedRefreshFailure,
           });
           return;
         }
@@ -1073,23 +1520,58 @@ export default function PopupPage() {
         return;
       }
       if (data.hasError) {
-        setEmotionData(null);
-        setTopicAnalysis(null);
-        setCurrentAnalysisRecord(null);
-        setHasSavedAnalysis(false);
-        setIsSavingAnalysis(false);
-        setSaveAnalysisError('');
-        setAnalysisStatus('idle');
+        if (rescanPreviousStateRef.current) {
+          const prev = rescanPreviousStateRef.current;
+          setAnalysisStatus(prev.analysisStatus);
+          setEmotionData(prev.emotionData);
+          setTopicAnalysis(prev.topicAnalysis);
+          setCurrentAnalysisRecord(prev.currentAnalysisRecord);
+          setHasSavedAnalysis(prev.hasSavedAnalysis);
+          setScrapedReviews(prev.scrapedReviews);
+          lastScrapedReviewsRef.current = prev.lastScrapedReviews;
+          setScrapedProductTitle(prev.scrapedProductTitle);
+          setScrapedCategory(prev.scrapedCategory);
+          setScrapedRating(prev.scrapedRating);
+          setScrapedProductImage(prev.scrapedProductImage);
+          setScrapedProductMediaType(prev.scrapedProductMediaType);
+          rescanPreviousStateRef.current = null;
+        }
+        setScrapedHasError(true);
+        setScrapedErrorMessage(data.errorMessage || 'Rescan failed. Preserved previous results.');
       } else if (data.isProductPage !== false && Array.isArray(data.reviews) && data.reviews.length > 0) {
+        const previousReviews = rescanPreviousStateRef.current?.scrapedReviews || [];
+        const areReviewsUnchanged = previousReviews.length > 0 &&
+          previousReviews.length === data.reviews.length &&
+          previousReviews.every((r, idx) => getReviewText(r) === getReviewText(data.reviews[idx]));
+
+        if (areReviewsUnchanged) {
+          setAuthToastMessage('No new or updated reviews found on this page.');
+          setTimeout(() => setAuthToastMessage(''), 4000);
+        } else {
+          setAuthToastMessage(`Rescan complete: ${data.reviews.length} reviews loaded.`);
+          setTimeout(() => setAuthToastMessage(''), 4000);
+        }
+        rescanPreviousStateRef.current = null;
         void handleAnalyzeClick(data.reviews, data);
       } else {
-        setEmotionData(null);
-        setTopicAnalysis(null);
-        setCurrentAnalysisRecord(null);
-        setHasSavedAnalysis(false);
-        setIsSavingAnalysis(false);
-        setSaveAnalysisError('');
-        setAnalysisStatus('idle');
+        if (rescanPreviousStateRef.current) {
+          const prev = rescanPreviousStateRef.current;
+          setAnalysisStatus(prev.analysisStatus);
+          setEmotionData(prev.emotionData);
+          setTopicAnalysis(prev.topicAnalysis);
+          setCurrentAnalysisRecord(prev.currentAnalysisRecord);
+          setHasSavedAnalysis(prev.hasSavedAnalysis);
+          setScrapedReviews(prev.scrapedReviews);
+          lastScrapedReviewsRef.current = prev.lastScrapedReviews;
+          setScrapedProductTitle(prev.scrapedProductTitle);
+          setScrapedCategory(prev.scrapedCategory);
+          setScrapedRating(prev.scrapedRating);
+          setScrapedProductImage(prev.scrapedProductImage);
+          setScrapedProductMediaType(prev.scrapedProductMediaType);
+          rescanPreviousStateRef.current = null;
+        }
+        setScrapedHasError(true);
+        setScrapedErrorMessage('No reviews were found during rescan. Preserved previous results.');
       }
     }
   };
@@ -1106,69 +1588,91 @@ export default function PopupPage() {
   useEffect(() => {
     let isMounted = true;
     const updateActiveTabContext = async () => {
-      if (!activeContextRef.current.isResolved) setHasResolvedActiveTab(false);
-      const activeTabObj = await resolveCurrentActiveTab();
-      if (!isMounted) return;
-      const activeUrl = activeTabObj?.url || '';
-      if (!activeUrl) return;
+      const requestId = ++activeTabRestoreRequestRef.current;
+      const requestUserId = lastAuthUserIdRef.current;
+      let restoreContext = null;
+      let restoreRevision = null;
+      const isCurrentTabRequest = () => isMounted &&
+        activeTabRestoreRequestRef.current === requestId &&
+        (!restoreContext || (
+          activeContextRef.current.generation === restoreContext.generation &&
+          activeContextRef.current.pageKey === restoreContext.pageKey
+        ));
+      const isCurrentRestore = () => isCurrentTabRequest() &&
+        lastAuthUserIdRef.current === requestUserId &&
+        (!restoreContext || analysisRevisionRef.current === restoreRevision);
 
-      const urlBasedPlatform = detectPlatformFromUrl(activeUrl);
-      const newPageKey = getPageKey(urlBasedPlatform, activeUrl);
-      const previousContext = activeContextRef.current;
+      try {
+        await ensureLegacyReviewPrivacyMigration();
+        if (!activeContextRef.current.isResolved) setHasResolvedActiveTab(false);
+        const activeTabObj = await resolveCurrentActiveTab();
+        if (!isCurrentRestore()) return;
+        const activeUrl = activeTabObj?.url || '';
+        if (!activeUrl) {
+          setScrapedHasError(true);
+          setScrapedErrorMessage('Could not identify the current browser tab. Close and reopen the popup, then try again.');
+          return;
+        }
 
-      const pageGenuinelyChanged = previousContext.isResolved && (
-        (previousContext.pageKey && newPageKey && previousContext.pageKey !== newPageKey) ||
-        (previousContext.platform !== urlBasedPlatform)
-      );
-      if (pageGenuinelyChanged) {
-        analysisRevisionRef.current += 1;
-        analysisResolvedPageKeyRef.current = null;
-      }
-      const restoreRevision = analysisRevisionRef.current;
+        const urlBasedPlatform = detectPlatformFromUrl(activeUrl);
+        const newPageKey = getPageKey(urlBasedPlatform, activeUrl);
+        const previousContext = activeContextRef.current;
 
-      const context = {
-        tabId: activeTabObj.id,
-        url: activeUrl,
-        platform: urlBasedPlatform,
-        pageKey: newPageKey,
-        generation: pageGenuinelyChanged ? previousContext.generation + 1 : previousContext.generation,
-        isResolved: true,
-      };
-      activeContextRef.current = context;
-      setActiveTabUrl(activeUrl);
+        const pageGenuinelyChanged = previousContext.isResolved && (
+          (previousContext.pageKey && newPageKey && previousContext.pageKey !== newPageKey) ||
+          (previousContext.platform !== urlBasedPlatform)
+        );
+        if (pageGenuinelyChanged) {
+          analysisRevisionRef.current += 1;
+          analysisResolvedPageKeyRef.current = null;
+        }
+        restoreRevision = analysisRevisionRef.current;
 
-      console.log('[POPUP] current tab:', { tabId: context.tabId, url: activeUrl, platform: urlBasedPlatform });
-      console.log('[POPUP] page key:', newPageKey);
+        const context = {
+          tabId: activeTabObj.id,
+          url: activeUrl,
+          platform: urlBasedPlatform,
+          pageKey: newPageKey,
+          generation: pageGenuinelyChanged ? previousContext.generation + 1 : previousContext.generation,
+          isResolved: true,
+        };
+        restoreContext = context;
+        activeContextRef.current = context;
+        setActiveTabUrl(activeUrl);
 
-      if (urlBasedPlatform === 'unknown') {
-        setHasResolvedActiveTab(true);
-        ignoreAutomaticScrapesRef.current = false;
-        rescanAnalysisPendingRef.current = null;
-        if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
-        rescanTimeoutRef.current = null;
-        setIsRescanning(false);
-        setDetectedPlatform('');
-        setScrapedIsProductPage(false);
-        setScrapedProductTitle(null);
-        setScrapedCategory(null);
-        setScrapedRating(null);
-        setScrapedProductImage(null);
-        setScrapedReviews([]);
-        lastScrapedReviewsRef.current = [];
-        setScrapedHasError(false);
-        setScrapedErrorMessage('');
-        setEmotionData(null);
-        setTopicAnalysis(null);
-        setCurrentAnalysisRecord(null);
-        setHasSavedAnalysis(false);
-        analysisResolvedPageKeyRef.current = null;
-        setAnalysisStatus('idle');
-        return;
-      }
+        console.log('[POPUP] current tab:', { tabId: context.tabId, url: activeUrl, platform: urlBasedPlatform });
+        console.log('[POPUP] page key:', newPageKey);
 
-      setDetectedPlatform(urlBasedPlatform);
+        if (urlBasedPlatform === 'unknown') {
+          setHasResolvedActiveTab(true);
+          ignoreAutomaticScrapesRef.current = false;
+          rescanAnalysisPendingRef.current = null;
+          if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
+          rescanTimeoutRef.current = null;
+          setIsRescanning(false);
+          setDetectedPlatform('');
+          setScrapedIsProductPage(false);
+          setScrapedProductTitle(null);
+          setScrapedCategory(null);
+          setScrapedRating(null);
+          setScrapedProductImage(null);
+          setScrapedProductMediaType(null);
+          setScrapedReviews([]);
+          lastScrapedReviewsRef.current = [];
+          setScrapedHasError(false);
+          setScrapedErrorMessage('');
+          setEmotionData(null);
+          setTopicAnalysis(null);
+          setCurrentAnalysisRecord(null);
+          setHasSavedAnalysis(false);
+          analysisResolvedPageKeyRef.current = null;
+          setAnalysisStatus('idle');
+          return;
+        }
 
-      if (pageGenuinelyChanged) {
+        setDetectedPlatform(urlBasedPlatform);
+
+        if (pageGenuinelyChanged) {
         setHasResolvedActiveTab(false);
         ignoreAutomaticScrapesRef.current = false;
         rescanAnalysisPendingRef.current = null;
@@ -1180,6 +1684,7 @@ export default function PopupPage() {
         setScrapedCategory(null);
         setScrapedRating(null);
         setScrapedProductImage(null);
+        setScrapedProductMediaType(null);
         setScrapedReviews([]);
         lastScrapedReviewsRef.current = [];
         setScrapedHasError(false);
@@ -1191,12 +1696,24 @@ export default function PopupPage() {
         setAnalysisStatus('idle');
       }
 
-      const existingAnalysis = await getAnalysisForPage(urlBasedPlatform, activeUrl);
-      if (activeContextRef.current.generation !== context.generation || analysisRevisionRef.current !== restoreRevision) return;
-      if (analysisResolvedPageKeyRef.current === context.pageKey) return;
+        let existingAnalysis = null;
+        try {
+          existingAnalysis = await getAnalysisForPage(urlBasedPlatform, activeUrl);
+        } catch (error) {
+          if (!isCurrentRestore()) return;
+          console.warn('VoxReview: Cloud Saved Analyses lookup failed; continuing with local page state.', {
+            pageKey: context.pageKey,
+            errorType: error?.name || 'Error',
+          });
+          setSaveAnalysisError(
+            'Cloud Saved Analyses are unavailable. Check your connection; local page analysis can still be restored.',
+          );
+        }
+        if (!isCurrentRestore()) return;
+        if (analysisResolvedPageKeyRef.current === context.pageKey) return;
 
-      const activeAnalysis = await getActiveAnalysisForPage(context.pageKey);
-      if (activeContextRef.current.generation !== context.generation || analysisRevisionRef.current !== restoreRevision) return;
+        const activeAnalysis = await getActiveAnalysisForPage(context.pageKey);
+        if (!isCurrentRestore()) return;
       if (activeAnalysis) {
         const savedTopicResult = getMatchingSavedTopicResult(activeAnalysis, existingAnalysis);
         const activeReviewCount = Array.isArray(activeAnalysis.reviews) ? activeAnalysis.reviews.length : 0;
@@ -1238,8 +1755,7 @@ export default function PopupPage() {
             preservedSuccessfulResult: hasValidTopicAnalysis(stateToRestore.topicResult, activeReviewCount),
           });
         }
-        if (activeContextRef.current.generation !== context.generation ||
-          analysisRevisionRef.current !== restoreRevision) return;
+        if (!isCurrentRestore()) return;
         applyActiveAnalysisState(stateToRestore);
         return;
       }
@@ -1259,18 +1775,34 @@ export default function PopupPage() {
         if (existingAnalysis.rating) setScrapedRating(existingAnalysis.rating);
         if (existingAnalysis.category) setScrapedCategory(existingAnalysis.category);
         if (existingAnalysis.productImage) setScrapedProductImage(existingAnalysis.productImage);
-        if (existingAnalysis.emotionData) {
-          const savedReviews = Array.isArray(existingAnalysis.reviews) ? existingAnalysis.reviews : [];
+        if (existingAnalysis.productMediaType) setScrapedProductMediaType(existingAnalysis.productMediaType);
+        const savedReviews = Array.isArray(existingAnalysis.reviews) ? existingAnalysis.reviews : [];
+        const restoredScreeningMetadata = restoreReviewScreeningMetadata(
+          existingAnalysis.reviewScreeningMetadata,
+          savedReviews,
+        );
+        if (isValidEmotionAnalysisData(existingAnalysis.emotionData)) {
           const savedReviewAnalysis = Array.isArray(existingAnalysis.reviewAnalysis) ? existingAnalysis.reviewAnalysis : [];
           const savedTopics = existingAnalysis.topicAnalysis;
           const hasSavedTopicResults = hasValidTopicAnalysis(savedTopics, savedReviews.length);
-          const restoredQuotes = attachReviewPriorities(savedReviewAnalysis.length === savedReviews.length
+          const savedModelIdentifier = getCommonEmotionModelIdentifier(
+            existingAnalysis.emotionModelProvenance,
+            savedReviews.length,
+          );
+          const savedModel = getEmotionModelDisplayName(savedModelIdentifier) ||
+            getEmotionModelDisplayName(existingAnalysis.emotionModelProvenance?.modelIdentifier) ||
+            getEmotionModelDisplayName(existingAnalysis.emotionData?.dominantEmotion?.model) ||
+            (typeof existingAnalysis.emotionData?.dominantEmotion?.model === 'string' && existingAnalysis.emotionData.dominantEmotion.model.trim()
+              ? existingAnalysis.emotionData.dominantEmotion.model.trim()
+              : null);
+          const restoredQuoteRecords = savedReviewAnalysis.length === savedReviews.length
             ? savedReviewAnalysis.map((analysis, index) => {
                 const review = savedReviews[index] ?? analysis.review;
                 const category = analysis.category;
                 const display = CATEGORY_DISPLAY[category];
                 return {
-                  id: review?.id ?? review?.reviewId ?? index + 1,
+                  ...(existingAnalysis.emotionData.quotes?.[index] || {}),
+                  id: index + 1,
                   topicResultIndex: index,
                   category,
                   emotion: display?.label || 'Pending',
@@ -1280,21 +1812,42 @@ export default function PopupPage() {
                   author: getReviewerName(review, existingAnalysis.platform),
                   rating: review?.rating ?? null,
                   helpfulCount: review?.helpfulCount ?? null,
+                  helpfulnessMetric: review?.helpfulnessMetric ?? null,
+                  helpfulnessAvailable: review?.helpfulnessAvailable === true,
+                  recommendation: review?.recommendation ?? null,
                 };
               })
-            : (existingAnalysis.emotionData.quotes || []).map((quote, index) => ({
+            : (Array.isArray(existingAnalysis.emotionData.quotes)
+              ? existingAnalysis.emotionData.quotes
+              : []).map((quote, index) => ({
                 ...quote,
                 id: quote.id ?? index + 1,
                 topicResultIndex: index,
                 category: quote.category ?? CATEGORY_BY_EMOTION_ID.get(quote.emotion?.toLowerCase()),
                 rating: savedReviews[index]?.rating ?? quote.rating ?? null,
                 helpfulCount: savedReviews[index]?.helpfulCount ?? quote.helpfulCount ?? null,
-              })), savedTopics);
+                helpfulnessMetric: savedReviews[index]?.helpfulnessMetric ?? quote.helpfulnessMetric ?? null,
+                helpfulnessAvailable: savedReviews[index]?.helpfulnessAvailable ?? quote.helpfulnessAvailable ?? false,
+                recommendation: savedReviews[index]?.recommendation ?? quote.recommendation ?? null,
+              }));
+          const restoredQuotes = attachReviewPriorities(
+            applyReviewScreeningMetadata(restoredQuoteRecords, restoredScreeningMetadata, {
+              excludeDuplicatesFromAggregates: restoredScreeningMetadata?.excludeDuplicatesFromAggregates ??
+                existingAnalysis.emotionData.suspiciousReviewDetection?.filteringEnabled === true,
+            }),
+            savedTopics,
+          );
+          const restoredTopicEntries = restoredQuotes.map((quote, topicResultIndex) => ({
+            review: savedReviews[topicResultIndex] ?? quote,
+            topicResultIndex,
+            aggregateEligible: quote.aggregateEligible,
+          }));
           const savedEmotions = (existingAnalysis.emotionData.emotions || []).map((emotion) => {
             const category = emotion.category ?? CATEGORY_BY_EMOTION_ID.get(emotion.id);
             return {
               ...emotion,
               category,
+              model: savedModel,
               ...(savedReviewAnalysis.length === savedReviews.length && category != null
                 ? { keywords: getSvmEmotionKeywords(savedReviewAnalysis, Number(category), savedReviews) }
                 : {}),
@@ -1302,12 +1855,18 @@ export default function PopupPage() {
           });
           const restoredEmotionData = {
             ...existingAnalysis.emotionData,
+            dominantEmotion: existingAnalysis.emotionData.dominantEmotion
+              ? {
+                  ...existingAnalysis.emotionData.dominantEmotion,
+                  model: savedModel || existingAnalysis.emotionData.dominantEmotion.model || null,
+                }
+              : existingAnalysis.emotionData.dominantEmotion,
             emotions: savedEmotions,
             quotes: restoredQuotes,
             ...(hasSavedTopicResults
               ? {
                   topics: aggregateTopicsForReviews(
-                    savedReviews.map((review, topicResultIndex) => ({ review, topicResultIndex })),
+                    filterEligibleReviewEntries(restoredTopicEntries),
                     savedTopics,
                   ),
                   topicStatus: 'ready',
@@ -1341,7 +1900,7 @@ export default function PopupPage() {
                   ...restoredEmotionData,
                   quotes: attachReviewPriorities(restoredEmotionData.quotes, topicPayload),
                   topics: aggregateTopicsForReviews(
-                    savedReviews.map((review, topicResultIndex) => ({ review, topicResultIndex })),
+                    filterEligibleReviewEntries(restoredTopicEntries),
                     topicPayload,
                   ),
                   topicStatus: 'ready',
@@ -1374,10 +1933,29 @@ export default function PopupPage() {
               })
               .finally(() => topicTimeout.clear());
           }
-        } else {
+          } else {
           setEmotionData(null);
           setTopicAnalysis(null);
         }
+        setReviewIntegrityEnabled(restoredScreeningMetadata?.reviewIntegrity.enabled ?? true);
+        reviewIntegrityEnabledRef.current = restoredScreeningMetadata?.reviewIntegrity.enabled ?? true;
+        const restoredRuleIds = restoredScreeningMetadata?.reviewIntegrity.enabledRuleIds || DEFAULT_RIA_RULE_IDS;
+        setEnabledRiaRuleIds(restoredRuleIds);
+        enabledRiaRuleIdsRef.current = restoredRuleIds;
+        setSuspiciousReviewDetectionEnabled(restoredScreeningMetadata?.duplicateCheckEnabled ??
+          existingAnalysis.emotionData?.suspiciousReviewDetection?.status !== 'disabled');
+        setExcludeFlaggedFromEmotion(restoredScreeningMetadata?.excludeDuplicatesFromAggregates ??
+          existingAnalysis.emotionData?.suspiciousReviewDetection?.filteringEnabled === true);
+        const restoredAssessment = restoredScreeningMetadata?.reviewIntegrity.results
+          ? {
+              pageKey: context.pageKey,
+              reviewSetSignature: restoredScreeningMetadata.reviewSetSignature,
+              results: restoredScreeningMetadata.reviewIntegrity.results,
+            }
+          : null;
+        setReviewIntegrityAssessment(restoredAssessment);
+        reviewIntegrityAssessmentRef.current = restoredAssessment;
+        setReviewIntegrityError('');
         setScrapedHasError(false);
         setScrapedErrorMessage('');
         setAnalysisStatus('completed');
@@ -1403,6 +1981,20 @@ export default function PopupPage() {
             }
           });
         }
+        }
+      } catch (error) {
+        if (isCurrentRestore()) {
+          setScrapedHasError(true);
+          setScrapedErrorMessage(
+            'Could not restore the current page analysis from local storage. Reload the extension and try again.',
+          );
+          console.warn('VoxReview: Current page analysis restore failed.', {
+            pageKey: restoreContext?.pageKey || null,
+            errorType: error?.name || 'Error',
+          });
+        }
+      } finally {
+        if (isCurrentTabRequest()) setHasResolvedActiveTab(true);
       }
     };
 
@@ -1453,7 +2045,12 @@ export default function PopupPage() {
           return refreshPromise;
         };
 
-        chrome.storage.local.get(['voxreviewLastScrape', 'voxreview_auth_session'], async (result) => {
+        void ensureLegacyReviewPrivacyMigration().then(() => new Promise((resolve, reject) => {
+          chrome.storage.local.get(['voxreviewLastScrape', 'voxreview_auth_session'], (result) => {
+            if (chrome.runtime.lastError) reject(new Error('Stored review data could not be safely privacy-migrated.'));
+            else resolve(result || {});
+          });
+        })).then(async (result) => {
           syncScrapeData(result?.voxreviewLastScrape);
 
           const extSession = result?.voxreview_auth_session;
@@ -1461,6 +2058,13 @@ export default function PopupPage() {
             const validation = await authService.validateExtensionSession(extSession);
             const latestStorage = await chrome.storage.local.get(['voxreview_auth_session']);
             const latestSession = latestStorage?.voxreview_auth_session;
+            if (validation.status === 'unavailable') {
+              lastAuthUserIdRef.current = null;
+              authService.cacheSessionLocally(null);
+              setAuthenticatedUser(null);
+              setAuthVerificationUnavailable(true);
+              return;
+            }
             if (
               validation.status === 'invalid' ||
               latestSession?.user?.id !== extSession.user.id
@@ -1489,6 +2093,11 @@ export default function PopupPage() {
             authService.cacheSessionLocally(null);
             setAuthenticatedUser(null);
           }
+        }).catch(() => {
+          if (isMounted) {
+            setScrapedHasError(true);
+            setScrapedErrorMessage('Stored review data could not be safely privacy-migrated.');
+          }
         });
 
         handleStorageChange = (changes, areaName) => {
@@ -1502,18 +2111,67 @@ export default function PopupPage() {
           if (changes.voxreview_auth_session) {
             const newSession = changes.voxreview_auth_session.newValue;
             if (newSession && newSession.user) {
-              authService.cacheSessionLocally(newSession);
-              const authChanged = shouldRefreshProfileForAuthChange(
-                { user: { id: lastAuthUserIdRef.current } },
-                newSession,
-              );
-              lastAuthUserIdRef.current = newSession.user.id || null;
-              if (authChanged) {
-                setAuthenticatedUser(newSession.user);
-                refreshProfileOnce(newSession.user.id);
-                setAuthToastMessage("You're now signed in.");
-                setTimeout(() => setAuthToastMessage(''), 4000);
-              }
+              void authService.validateExtensionSession(newSession)
+                .then((validation) => chrome.storage.local.get(['voxreview_auth_session'])
+                  .then((latest) => ({ validation, latestSession: latest?.voxreview_auth_session })))
+                .then(({ validation, latestSession }) => {
+                  if (!latestSession) {
+                    clearPopupAuthState({
+                      authService,
+                      lastAuthUserIdRef,
+                      profileRefreshRef,
+                      setAuthenticatedUser,
+                      setAuthToastMessage,
+                    });
+                    return;
+                  }
+                  if (latestSession.user?.id !== newSession.user.id) return;
+                  if (validation.status === 'unavailable') {
+                    lastAuthUserIdRef.current = null;
+                    authService.cacheSessionLocally(null);
+                    setAuthenticatedUser(null);
+                    setAuthVerificationUnavailable(true);
+                    return;
+                  }
+                  if (validation.status !== 'valid') {
+                    clearPopupAuthState({
+                      authService,
+                      lastAuthUserIdRef,
+                      profileRefreshRef,
+                      setAuthenticatedUser,
+                      setAuthToastMessage,
+                    });
+                    return;
+                  }
+
+                  const authChanged = shouldRefreshProfileForAuthChange(
+                    { user: { id: lastAuthUserIdRef.current } },
+                    validation.session,
+                  );
+                  lastAuthUserIdRef.current = newSession.user.id || null;
+                  authService.cacheSessionLocally(validation.session);
+                  setAuthenticatedUser(validation.user);
+                  if (authChanged) {
+                    analysisRevisionRef.current += 1;
+                    analysisResolvedPageKeyRef.current = null;
+                    setHasResolvedActiveTab(false);
+                    setEmotionData(null);
+                    setTopicAnalysis(null);
+                    setCurrentAnalysisRecord(null);
+                    setHasSavedAnalysis(false);
+                    refreshProfileOnce(newSession.user.id);
+                    setAuthToastMessage("You're now signed in.");
+                    setTimeout(() => setAuthToastMessage(''), 4000);
+                    void updateActiveTabContext();
+                  }
+                })
+                .catch((error) => {
+                  console.warn('VoxReview: Extension session verification is temporarily unavailable.', {
+                    code: error?.code || null,
+                  });
+                  setAuthenticatedUser(null);
+                  setAuthVerificationUnavailable(true);
+                });
             } else {
               clearPopupAuthState({
                 authService,
@@ -1522,6 +2180,14 @@ export default function PopupPage() {
                 setAuthenticatedUser,
                 setAuthToastMessage,
               });
+              analysisRevisionRef.current += 1;
+              analysisResolvedPageKeyRef.current = null;
+              setHasResolvedActiveTab(false);
+              setEmotionData(null);
+              setTopicAnalysis(null);
+              setCurrentAnalysisRecord(null);
+              setHasSavedAnalysis(false);
+              void updateActiveTabContext();
             }
           }
 
@@ -1538,6 +2204,7 @@ export default function PopupPage() {
 
       return () => {
         isMounted = false;
+        activeTabRestoreRequestRef.current += 1;
         chrome.tabs?.onActivated?.removeListener(handleTabActivated);
         chrome.tabs?.onUpdated?.removeListener(handleTabUpdated);
         chrome.windows?.onFocusChanged?.removeListener(handleWindowFocusChanged);
@@ -1561,8 +2228,9 @@ export default function PopupPage() {
     ? platformAvailability.name
     : getPlatformDisplayName(availabilityPlatformKey);
 
-  const handleAnalyzeClick = async (reviewsToAnalyze = scrapedReviews, scrapeMetadata = null) => {
-    if (analysisStatus === 'analyzing' || availabilityStatus !== 'available') return;
+  const handleAnalyzeClick = async (reviewsToAnalyze = scrapedReviews, scrapeMetadata = null, sampleOffset = 0) => {
+    if (!canStartManualAnalysis(analysisStatus, availabilityStatus)) return;
+    setReviewIntegrityAssessment(null);
     const analyzeStartedAt = performance.now();
     const analysisRevision = ++analysisRevisionRef.current;
     analysisResolvedPageKeyRef.current = activeContextRef.current.pageKey || getPageKey(
@@ -1572,10 +2240,39 @@ export default function PopupPage() {
     const requestedReviews = Array.isArray(reviewsToAnalyze) && reviewsToAnalyze.length > 0
       ? reviewsToAnalyze
       : scrapedReviews.length > 0 ? scrapedReviews : lastScrapedReviewsRef.current;
-    const sourceReviews = filterSubstantiveReviews(requestedReviews);
+    const analysisPlatform = scrapeMetadata?.platform
+      || activeContextRef.current.platform
+      || detectedPlatform;
+    const sample = createAnalysisReviewSample(requestedReviews, {
+      platform: analysisPlatform,
+      offset: sampleOffset,
+      sourceReviewCount: requestedReviews.length,
+    });
+    const sourceReviews = filterSubstantiveReviews(sample.reviews);
+    const emptyReviewRecords = sample.reviews.filter((review) => (
+      !isSubstantiveReviewText(getReviewText(review))
+    ));
+    const emptyReviewSkips = emptyReviewRecords.map((review) => ({
+      review,
+      status: 'skipped',
+      reason: 'empty_review',
+    }));
     const preparedAnalysis = await prepareReviewsForAnalysis(sourceReviews);
     const analysisReviews = preparedAnalysis.reviews;
-    const skippedReviews = preparedAnalysis.skippedReviews;
+    const skippedReviews = [...emptyReviewSkips, ...preparedAnalysis.skippedReviews];
+    const nextSampleInfo = {
+      ...sample.sampleInfo,
+      extractedReviewCount: requestedReviews.length,
+      emptyReviewCount: Math.max(0, requestedReviews.length - sourceReviews.length),
+      supportedReviewCount: preparedAnalysis.supportedReviewCount,
+      uncertainReviewCount: preparedAnalysis.uncertainReviewCount,
+      analyzedReviewCount: 0,
+      failedReviewCount: 0,
+      cancelledReviewCount: 0,
+      topicFailedReviewCount: 0,
+      unsupportedReviewCount: preparedAnalysis.skippedReviews.length,
+    };
+    setAnalysisSampleInfo(nextSampleInfo);
     if (analysisReviews.length === 0) {
       setAnalysisStatus('idle');
       setAnalysisError(
@@ -1586,9 +2283,6 @@ export default function PopupPage() {
     const analysisPlatformLabel = scrapeMetadata?.platform
       ? getPlatformLabel(scrapeMetadata.platform)
       : platformLabel;
-    const analysisPlatform = scrapeMetadata?.platform
-      || activeContextRef.current.platform
-      || detectedPlatform;
     const analysisPageUrl = scrapeMetadata?.url || activeTabUrlRef.current || window.location.href;
     const analysisPageKey = getPageKey(analysisPlatform, analysisPageUrl);
     const priorRecordPageKey = currentAnalysisRecord?.pageKey ||
@@ -1605,12 +2299,34 @@ export default function PopupPage() {
     setSaveAnalysisError('');
     setAnalysisError('');
     setIsSavingAnalysis(false);
-    setScrapedReviews(sourceReviews);
+    setScrapedReviews(analysisReviews);
+    const integrityReviewSetSignature = getTopicReviewSetSignature(analysisReviews.map((review) => (
+      sanitizeReviewText(getReviewText(review))
+    )));
+    const reviewIntegrityResults = assessReviewIntegrity(analysisReviews.map((review, reviewIndex) => ({
+      reviewIndex,
+      text: sanitizeReviewText(getReviewText(review)),
+    })), { enabledRuleIds: enabledRiaRuleIds });
+    if (analysisRevisionRef.current === analysisRevision) {
+      setReviewIntegrityAssessment(reviewIntegrityEnabled ? {
+        pageKey: analysisPageKey || activeContextRef.current.pageKey,
+        reviewSetSignature: integrityReviewSetSignature,
+        results: reviewIntegrityResults,
+      } : null);
+    }
     if (!preserveCurrentTopics) {
       setTopicAnalysis(null);
       setEmotionData(null);
     }
     setAnalysisStatus('analyzing');
+    setAnalysisProgress({
+      stage: 'svm',
+      completedReviews: 0,
+      totalReviews: analysisReviews.length,
+      completedBatches: 0,
+      totalBatches: Math.ceil(analysisReviews.length / sample.sampleInfo.batchSize),
+      batchSize: sample.sampleInfo.batchSize,
+    });
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage && chrome.storage?.local) {
       const pageUrl = analysisPageUrl;
@@ -1626,11 +2342,16 @@ export default function PopupPage() {
         rating: scrapeMetadata?.rating ?? scrapedRating,
         category: scrapeMetadata?.category ?? scrapedCategory,
         productImage: scrapeMetadata?.productImage ?? scrapedProductImage,
-        reviews: analysisReviews,
-        skippedReviews,
+        productMediaType: scrapeMetadata?.productMediaType ?? scrapedProductMediaType,
+        reviews: sample.reviews,
+        sourceReviewCount: requestedReviews.length,
+        sampleOffset: sample.sampleInfo.sampleOffset,
+        analysisSampleInfo: nextSampleInfo,
+        skippedReviews: [],
         force: Boolean(scrapeMetadata?.rescanRequestId),
+        suspiciousReviewDetectionEnabled,
+        excludeFlaggedFromEmotion,
       };
-
       try {
         const response = await new Promise((resolve, reject) => {
           chrome.runtime.sendMessage({ type: 'startAnalysis', analysis }, (result) => {
@@ -1674,21 +2395,31 @@ export default function PopupPage() {
 
       const svmStartedAt = performance.now();
       console.log('[Analyze] SVM request start');
-      const payload = await requestSvmBatch(reviewTexts, {
-        platform: analysisPlatform,
-        onFailure: (error) => {
-          if (analysisRevisionRef.current !== analysisRevision) return;
-          if (isPlatformDisabledError(error)) {
-            setPlatformAvailability({
-              platform: getAvailabilityPlatformKey(analysisPlatform) || availabilityPlatformKey,
-              name: getPlatformDisplayName(analysisPlatform),
-              status: 'disabled',
-            });
-          }
-          setAnalysisStatus('idle');
-          setAnalysisError(error.message || 'SVM analysis failed. Please retry.');
-        },
+      const directController = new AbortController();
+      analysisControllerRef.current = directController;
+      const svmResponses = await requestReviewBatches(reviewTexts, {
+        batchSize: sample.sampleInfo.batchSize,
+        signal: directController.signal,
+        request: (batch, { start }) => requestSvmBatch(batch, {
+          platform: analysisPlatform,
+          reviewOffset: start,
+          signal: directController.signal,
+          onFailure: (error) => {
+            if (analysisRevisionRef.current !== analysisRevision) return;
+            if (isPlatformDisabledError(error)) {
+              setPlatformAvailability({
+                platform: getAvailabilityPlatformKey(analysisPlatform) || availabilityPlatformKey,
+                name: getPlatformDisplayName(analysisPlatform),
+                status: 'disabled',
+              });
+            }
+            setAnalysisStatus('idle');
+            setAnalysisError(error.message || 'SVM analysis failed. Please retry.');
+          },
+        }),
+        onProgress: (progress) => setAnalysisProgress({ ...progress, stage: 'svm' }),
       });
+      const payload = mergeSvmBatchResponses(svmResponses, reviewTexts.length);
       console.log(`[Analyze] SVM: ${Math.round(performance.now() - svmStartedAt)} ms`);
       if (!Array.isArray(payload.predictions) ||
         payload.predictions.length !== analysisReviews.length ||
@@ -1705,6 +2436,13 @@ export default function PopupPage() {
             emotionDrivers: Array.isArray(result?.emotionDrivers)
               ? result.emotionDrivers.filter((driver) => typeof driver === 'string')
               : [],
+            ...(result?.mode === 'baseline' || result?.mode === 'specialist_trigger'
+              ? { mode: result.mode }
+              : {}),
+            ...(result?.routing_mode === 'baseline_default' ||
+              result?.routing_mode === 'specialist_override'
+              ? { routing_mode: result.routing_mode }
+              : {}),
             contextualResolution: typeof result?.contextualResolution?.explanation === 'string'
               ? result.contextualResolution
               : null,
@@ -1714,6 +2452,25 @@ export default function PopupPage() {
             emotionDrivers: [],
             contextualResolution: null,
           }));
+      const suspiciousReviewDetection = await runSuspiciousReviewCheck(analysisReviews, {
+        enabled: suspiciousReviewDetectionEnabled,
+        signal: directController.signal,
+      });
+      if (analysisRevisionRef.current !== analysisRevision) return;
+      let completedSampleInfo = {
+          ...nextSampleInfo,
+          analyzedReviewCount: analysisReviews.length,
+          failedReviewCount: 0,
+          cancelledReviewCount: 0,
+      };
+      const analysisTimestamp = new Date().toISOString();
+      const emotionModelRun = createEmotionModelProvenanceRun(
+        payload.modelProvenance,
+        payload.predictions,
+        analysisTimestamp,
+      );
+      const emotionModelProvenance = { runs: [emotionModelRun] };
+      setAnalysisSampleInfo(completedSampleInfo);
       const nextEmotionData = buildEmotionData(
         analysisReviews,
         payload.predictions,
@@ -1722,9 +2479,23 @@ export default function PopupPage() {
         preserveCurrentTopics ? 'ready' : ENABLE_TOPIC_ANALYSIS ? 'pending' : 'disabled',
         explanationResults,
         skippedReviews,
+        suspiciousReviewDetection,
+        excludeFlaggedFromEmotion,
+        completedSampleInfo,
+        emotionModelRun.modelIdentifier,
+        reviewIntegrityAssessmentRef.current?.results || reviewIntegrityResults,
+        reviewIntegrityEnabled,
       );
       setEmotionData(nextEmotionData);
       setAnalysisStatus('completed');
+      setAnalysisProgress({
+        stage: ENABLE_TOPIC_ANALYSIS ? 'topics' : 'complete',
+        completedReviews: ENABLE_TOPIC_ANALYSIS ? 0 : analysisReviews.length,
+        totalReviews: analysisReviews.length,
+        completedBatches: 0,
+        totalBatches: Math.ceil(analysisReviews.length / sample.sampleInfo.batchSize),
+        batchSize: sample.sampleInfo.batchSize,
+      });
       setTimeout(() => {
         console.log(`[Analyze] UI render: ${Math.round(performance.now() - analyzeStartedAt)} ms`);
       }, 0);
@@ -1741,17 +2512,25 @@ export default function PopupPage() {
         percentage: `${nextEmotionData.dominantEmotion.percentage}%`,
         reviews: analysisReviews,
         skippedReviews,
+        analysisSampleInfo: completedSampleInfo,
+        suspiciousReviewDetection,
+        suspiciousReviewDetectionEnabled,
+        excludeFlaggedFromEmotion,
         reviewAnalysis: explanationResults.map((result, index) => ({
           review: analysisReviews[index],
           category: result.category,
           emotionDrivers: result.emotionDrivers,
+          ...(result.mode ? { mode: result.mode } : {}),
+          ...(result.routing_mode ? { routing_mode: result.routing_mode } : {}),
           contextualResolution: result.contextualResolution,
         })),
+        emotionModelProvenance,
         topicAnalysis: preserveCurrentTopics ? topicAnalysis : null,
         emotionData: nextEmotionData,
         rating: scrapeMetadata?.rating ?? scrapedRating,
         category: scrapeMetadata?.category ?? scrapedCategory,
         productImage: scrapeMetadata?.productImage ?? scrapedProductImage,
+        productMediaType: scrapeMetadata?.productMediaType ?? scrapedProductMediaType,
         timestamp: Date.now()
       };
       setCurrentAnalysisRecord(record);
@@ -1764,16 +2543,32 @@ export default function PopupPage() {
 
       const topicStartedAt = performance.now();
       console.log('[Analyze] topic request start');
-      const topicAbortController = new AbortController();
-      const topicTimeout = createTopicRequestTimeout(topicAbortController, reviewTexts.length);
       try {
-        const topicPayload = await requestTopicAnalysis(
-          reviewTexts,
-          topicAbortController.signal,
-          analysisPlatformLabel,
-          'popup-analysis',
-          record.pageKey,
-        );
+        const topicResponses = await requestReviewBatches(reviewTexts, {
+          batchSize: sample.sampleInfo.batchSize,
+          signal: directController.signal,
+          request: async (batch) => {
+            const topicAbortController = new AbortController();
+            const forwardAbort = () => topicAbortController.abort(directController.signal.reason);
+            if (directController.signal.aborted) forwardAbort();
+            else directController.signal.addEventListener('abort', forwardAbort, { once: true });
+            const topicTimeout = createTopicRequestTimeout(topicAbortController, batch.length);
+            try {
+              return await requestTopicAnalysis(
+                batch,
+                topicAbortController.signal,
+                analysisPlatformLabel,
+                'popup-analysis',
+                record.pageKey,
+              );
+            } finally {
+              topicTimeout.clear();
+              directController.signal.removeEventListener('abort', forwardAbort);
+            }
+          },
+          onProgress: (progress) => setAnalysisProgress({ ...progress, stage: 'topics' }),
+        });
+        const topicPayload = mergeTopicBatchResponses(topicResponses, reviewTexts.length);
         console.log(`[Analyze] Topics: ${Math.round(performance.now() - topicStartedAt)} ms`);
         if (analysisRevisionRef.current !== analysisRevision) return;
 
@@ -1785,6 +2580,12 @@ export default function PopupPage() {
           'ready',
           explanationResults,
           skippedReviews,
+          suspiciousReviewDetection,
+          excludeFlaggedFromEmotion,
+          completedSampleInfo,
+          emotionModelRun.modelIdentifier,
+          visibleReviewIntegrityAssessment || reviewIntegrityAssessmentRef.current?.results,
+          reviewIntegrityEnabled,
         );
         if (analysisRevisionRef.current !== analysisRevision) return;
         analysisRevisionRef.current += 1;
@@ -1792,6 +2593,14 @@ export default function PopupPage() {
         setEmotionData(topicData);
         setTopicAnalysis(topicPayload);
         setCurrentAnalysisRecord({ ...record, topicAnalysis: topicPayload, emotionData: topicData });
+        setAnalysisProgress({
+          stage: 'complete',
+          completedReviews: reviewTexts.length,
+          totalReviews: reviewTexts.length,
+          completedBatches: Math.ceil(reviewTexts.length / sample.sampleInfo.batchSize),
+          totalBatches: Math.ceil(reviewTexts.length / sample.sampleInfo.batchSize),
+          batchSize: sample.sampleInfo.batchSize,
+        });
         setHasSavedAnalysis(false);
       } catch (topicError) {
         if (analysisRevisionRef.current !== analysisRevision) return;
@@ -1804,7 +2613,7 @@ export default function PopupPage() {
           setCurrentAnalysisRecord(null);
           setEmotionData(null);
           setTopicAnalysis(null);
-          setAnalysisStatus('idle');
+          setAnalysisStatus(emotionDataRef.current ? 'completed' : 'idle');
           return;
         }
         console.warn('VoxReview: review topic analysis unavailable:', topicError);
@@ -1817,10 +2626,24 @@ export default function PopupPage() {
             'ready',
             explanationResults,
             skippedReviews,
+            suspiciousReviewDetection,
+            excludeFlaggedFromEmotion,
+            completedSampleInfo,
+            emotionModelRun.modelIdentifier,
+            visibleReviewIntegrityAssessment || reviewIntegrityAssessmentRef.current?.results,
+            reviewIntegrityEnabled,
           );
           analysisRevisionRef.current += 1;
           setTopicAnalysis(topicAnalysis);
           setEmotionData(retainedTopicData);
+          setAnalysisProgress({
+            stage: 'complete',
+            completedReviews: reviewTexts.length,
+            totalReviews: reviewTexts.length,
+            completedBatches: Math.ceil(reviewTexts.length / sample.sampleInfo.batchSize),
+            totalBatches: Math.ceil(reviewTexts.length / sample.sampleInfo.batchSize),
+            batchSize: sample.sampleInfo.batchSize,
+          });
           setCurrentAnalysisRecord({
             ...record,
             topicAnalysis,
@@ -1840,16 +2663,44 @@ export default function PopupPage() {
           'unavailable',
           explanationResults,
           skippedReviews,
+          suspiciousReviewDetection,
+          excludeFlaggedFromEmotion,
+          completedSampleInfo,
+          emotionModelRun.modelIdentifier,
+          visibleReviewIntegrityAssessment || reviewIntegrityAssessmentRef.current?.results,
+          reviewIntegrityEnabled,
         );
+        completedSampleInfo = {
+          ...completedSampleInfo,
+          topicFailedReviewCount: analysisReviews.length,
+        };
+        setAnalysisSampleInfo(completedSampleInfo);
         setEmotionData(unavailableData);
-        setCurrentAnalysisRecord({ ...record, topicAnalysis: null, emotionData: unavailableData });
+        setAnalysisProgress({
+          stage: 'complete',
+          completedReviews: reviewTexts.length,
+          totalReviews: reviewTexts.length,
+          completedBatches: Math.ceil(reviewTexts.length / sample.sampleInfo.batchSize),
+          totalBatches: Math.ceil(reviewTexts.length / sample.sampleInfo.batchSize),
+          batchSize: sample.sampleInfo.batchSize,
+        });
+        setCurrentAnalysisRecord({
+          ...record,
+          analysisSampleInfo: completedSampleInfo,
+          topicAnalysis: null,
+          emotionData: unavailableData,
+        });
         setHasSavedAnalysis(false);
-      } finally {
-        topicTimeout.clear();
       }
     } catch (error) {
       if (analysisRevisionRef.current !== analysisRevision) return;
       console.error('VoxReview: SVM analysis failed:', error);
+      setAnalysisSampleInfo({
+        ...nextSampleInfo,
+        analyzedReviewCount: 0,
+        failedReviewCount: analysisReviews.length,
+        cancelledReviewCount: 0,
+      });
       analysisRevisionRef.current += 1;
       analysisResolvedPageKeyRef.current = null;
       setEmotionData(null);
@@ -1858,27 +2709,35 @@ export default function PopupPage() {
       setHasSavedAnalysis(false);
       setAnalysisStatus('idle');
       setAnalysisError(error.message || 'Emotion analysis failed. Please retry.');
+    } finally {
+      analysisControllerRef.current = null;
     }
   };
 
+  const handleCancelAnalysis = async () => {
+    analysisRevisionRef.current += 1;
+    analysisControllerRef.current?.abort(new DOMException('Analysis was cancelled.', 'AbortError'));
+    analysisControllerRef.current = null;
+    const pageKey = activeContextRef.current.pageKey || currentAnalysisRecordRef.current?.pageKey;
+    if (pageKey && globalThis.chrome?.runtime?.sendMessage) {
+      try {
+        await new Promise((resolve, reject) => {
+          globalThis.chrome.runtime.sendMessage({ type: 'cancelAnalysis', pageKey }, (response) => {
+            if (globalThis.chrome.runtime.lastError) reject(new Error(globalThis.chrome.runtime.lastError.message));
+            else if (!response?.ok) reject(new Error(response?.error || 'Analysis cancellation failed.'));
+            else resolve(response);
+          });
+        });
+      } catch (error) {
+        setAnalysisError(error.message || 'Analysis could not be cancelled.');
+      }
+    }
+    setAnalysisStatus('idle');
+    setAnalysisProgress((current) => current ? { ...current, stage: 'cancelled' } : null);
+  };
+
   const handleSavedAnalysisRefresh = async (savedItem, scrapeData) => {
-    const savedReviews = Array.isArray(savedItem.reviews) ? savedItem.reviews : [];
-    const fetchedReviews = Array.isArray(scrapeData.reviews) ? scrapeData.reviews : [];
-    const newReviews = getNewReviews(savedReviews, fetchedReviews);
-    const refreshedAt = Date.now();
-    const updatedRecord = await saveAnalysisForPage({
-      ...savedItem,
-      last_refreshed_at: refreshedAt,
-    });
-    if (!updatedRecord) throw new Error('Unable to update the saved refresh timestamp.');
-    return {
-      success: true,
-      newReviewCount: newReviews.length,
-      newReviews,
-      message: newReviews.length ? `${newReviews.length} new reviews detected` : 'No new reviews found',
-      record: updatedRecord,
-      lastRefreshedAt: refreshedAt,
-    };
+    return refreshSavedAnalysisFromScrape(savedItem, scrapeData, saveAnalysisForPage);
   };
 
   const handleAnalyzeNewSavedReviews = async (savedItem, newReviews) => {
@@ -1890,6 +2749,12 @@ export default function PopupPage() {
     const savedQuotes = Array.isArray(savedItem.emotionData?.quotes)
       ? savedItem.emotionData.quotes
       : [];
+    const savedScreeningMetadata = restoreReviewScreeningMetadata(
+      savedItem.reviewScreeningMetadata,
+      savedReviews,
+    );
+    const excludeSavedDuplicates = savedScreeningMetadata?.excludeDuplicatesFromAggregates ??
+      savedItem.emotionData?.suspiciousReviewDetection?.filteringApplied === true;
     const storedReviewAnalysis = Array.isArray(savedItem.reviewAnalysis) &&
       savedItem.reviewAnalysis.length === savedReviews.length
       ? savedItem.reviewAnalysis
@@ -1905,6 +2770,13 @@ export default function PopupPage() {
       review: savedReviews[index],
       category: Number(analysis.category),
       emotionDrivers: Array.isArray(analysis.emotionDrivers) ? analysis.emotionDrivers : [],
+      ...(analysis.mode === 'baseline' || analysis.mode === 'specialist_trigger'
+        ? { mode: analysis.mode }
+        : {}),
+      ...(analysis.routing_mode === 'baseline_default' ||
+        analysis.routing_mode === 'specialist_override'
+        ? { routing_mode: analysis.routing_mode }
+        : {}),
     }));
     if (savedReviewAnalysis.length !== savedReviews.length ||
       savedReviewAnalysis.some((analysis) => !VALID_CATEGORIES.has(analysis.category))) {
@@ -1950,6 +2822,13 @@ export default function PopupPage() {
           emotionDrivers: Array.isArray(result?.emotionDrivers)
             ? result.emotionDrivers.filter((driver) => typeof driver === 'string')
             : [],
+          ...(result?.mode === 'baseline' || result?.mode === 'specialist_trigger'
+            ? { mode: result.mode }
+            : {}),
+          ...(result?.routing_mode === 'baseline_default' ||
+            result?.routing_mode === 'specialist_override'
+            ? { routing_mode: result.routing_mode }
+            : {}),
           contextualResolution: typeof result?.contextualResolution?.explanation === 'string'
             ? result.contextualResolution
             : null,
@@ -1979,6 +2858,12 @@ export default function PopupPage() {
     }
 
     const alignedAnalysisBatch = alignSavedAnalysisRefreshBatch(analysisReviews, svmPayload.predictions);
+    const newEmotionModelRun = createEmotionModelProvenanceRun(
+      svmPayload.modelProvenance,
+      alignedAnalysisBatch.predictions,
+      new Date(refreshedAt).toISOString(),
+      savedReviews.length,
+    );
     const newEmotionData = buildEmotionData(
       alignedAnalysisBatch.reviews,
       alignedAnalysisBatch.predictions,
@@ -1987,12 +2872,29 @@ export default function PopupPage() {
       ENABLE_TOPIC_ANALYSIS ? 'ready' : 'disabled',
       newExplanationResults,
       skippedReviews,
+      null,
+      false,
+      null,
+      newEmotionModelRun.modelIdentifier,
     );
+    const previousEmotionModelRuns = Array.isArray(savedItem.emotionModelProvenance?.runs)
+      ? savedItem.emotionModelProvenance.runs
+      : [];
+    const emotionModelProvenance = {
+      runs: [...previousEmotionModelRuns, newEmotionModelRun],
+    };
+    const combinedModelIdentifier = getCommonEmotionModelIdentifier(
+      emotionModelProvenance,
+      savedReviews.length + analysisReviews.length,
+    );
+    const combinedModel = getEmotionModelDisplayName(combinedModelIdentifier);
     const combinedReviews = [...savedReviews, ...analysisReviews];
     const combinedReviewAnalysis = [...savedReviewAnalysis, ...newExplanationResults.map((result, index) => ({
       review: analysisReviews[index],
       category: result.category,
       emotionDrivers: result.emotionDrivers,
+      ...(result.mode ? { mode: result.mode } : {}),
+      ...(result.routing_mode ? { routing_mode: result.routing_mode } : {}),
       contextualResolution: result.contextualResolution,
     }))];
     const combinedPredictions = combinedReviewAnalysis.map((result) => result.category);
@@ -2014,13 +2916,22 @@ export default function PopupPage() {
           results: combinedTopicResults,
         }
       : null;
-    const counts = combinedPredictions.reduce((result, category) => {
+    const combinedAggregateEligibility = combinedPredictions.map((_, index) => {
+      if (index >= savedReviews.length) return true;
+      const savedQuote = savedQuotes[index] || {};
+      return savedQuote.aggregateEligible !== false &&
+        !(excludeSavedDuplicates && savedQuote.suspiciousReviewLabel === 'Repeated Review');
+    });
+    const counts = combinedPredictions.reduce((result, category, index) => {
+      if (!combinedAggregateEligibility[index]) return result;
       result[category] += 1;
       return result;
     }, { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 });
-    const totalReviews = combinedReviews.length;
+    const totalReviews = Object.values(counts).reduce((total, count) => total + count, 0);
     const dominantCategory = Number(Object.keys(counts).sort((first, second) => counts[second] - counts[first])[0]);
     const dominantDisplay = CATEGORY_DISPLAY[dominantCategory];
+    const aggregateReviews = combinedReviews.filter((_, index) => combinedAggregateEligibility[index]);
+    const aggregateReviewAnalysis = combinedReviewAnalysis.filter((_, index) => combinedAggregateEligibility[index]);
     const emotions = Object.entries(CATEGORY_DISPLAY).map(([category, display]) => ({
       id: display.label.toLowerCase(),
       category: Number(category),
@@ -2028,33 +2939,38 @@ export default function PopupPage() {
       emoji: display.emoji,
       percentage: totalReviews ? Math.round((counts[category] / totalReviews) * 100) : 0,
       count: counts[category],
-      model: 'SVM',
-      keywords: getSvmEmotionKeywords(combinedReviewAnalysis, Number(category), combinedReviews),
+      model: combinedModel,
+      keywords: getSvmEmotionKeywords(aggregateReviewAnalysis, Number(category), aggregateReviews),
       color: display.color,
     }));
     const combinedTopicReviews = combinedReviews.map((review, topicResultIndex) => ({
       review,
       category: combinedPredictions[topicResultIndex],
       topicResultIndex,
+      aggregateEligible: combinedAggregateEligibility[topicResultIndex],
     }));
-    const combinedQuotes = [
+    const combinedQuotes = attachReviewPriorities([
       ...savedReviews.map((review, index) => {
         const existingQuote = savedQuotes[index] || {};
         const category = combinedPredictions[index];
         const display = CATEGORY_DISPLAY[category];
         return {
           ...existingQuote,
-          id: existingQuote.id ?? review?.id ?? index + 1,
+          id: index + 1,
           topicResultIndex: index,
           category,
           emotion: display.label,
           emoji: display.emoji,
           driver: existingQuote.driver || `${savedItem.platform || 'Current Source'} Review`,
           text: getReviewText(review),
-          author: existingQuote.author || getReviewerName(review, savedItem.platform),
+          author: getReviewerName(review, savedItem.platform),
           date: existingQuote.date || review?.date || review?.reviewDate || '',
           rating: review?.rating ?? existingQuote.rating ?? null,
           helpfulCount: review?.helpfulCount ?? existingQuote.helpfulCount ?? null,
+          helpfulnessMetric: review?.helpfulnessMetric ?? existingQuote.helpfulnessMetric ?? null,
+          helpfulnessAvailable: review?.helpfulnessAvailable ?? existingQuote.helpfulnessAvailable ?? false,
+          recommendation: review?.recommendation ?? existingQuote.recommendation ?? null,
+          aggregateEligible: combinedAggregateEligibility[index],
           priority: existingQuote.priority ?? savedItem.priorityResults?.[index] ?? null,
         };
       }),
@@ -2062,19 +2978,24 @@ export default function PopupPage() {
         ...quote,
         id: savedReviews.length + index + 1,
         topicResultIndex: savedReviews.length + index,
+        aggregateEligible: combinedAggregateEligibility[savedReviews.length + index],
       })),
-    ];
+    ], combinedTopicAnalysis);
     const mergedEmotionData = {
       totalReviews,
       dominantEmotion: {
-        label: dominantDisplay.label,
-        emoji: dominantDisplay.emoji,
+        label: totalReviews ? dominantDisplay.label : 'No included reviews',
+        emoji: totalReviews ? dominantDisplay.emoji : '—',
         percentage: totalReviews ? Math.round((counts[dominantCategory] / totalReviews) * 100) : 0,
-        model: 'SVM',
+        model: combinedModel,
       },
       emotions,
+      emotionModelProvenance,
       topics: combinedTopicAnalysis
-        ? aggregateTopicsForReviews(combinedTopicReviews, combinedTopicAnalysis)
+        ? aggregateTopicsForReviews(
+            filterEligibleReviewEntries(combinedTopicReviews),
+            combinedTopicAnalysis,
+          )
         : [],
       topicStatus: ENABLE_TOPIC_ANALYSIS
         ? 'ready'
@@ -2098,7 +3019,19 @@ export default function PopupPage() {
       reviewAnalysis: combinedReviewAnalysis,
       topicAnalysis: combinedTopicAnalysis,
       emotionData: mergedEmotionData,
+      reviewScreeningMetadata: createReviewScreeningMetadata({
+        reviews: combinedReviews,
+        emotionData: mergedEmotionData,
+        reviewIntegrityAssessment: null,
+        reviewIntegrityEnabled: savedScreeningMetadata?.reviewIntegrity.enabled ?? true,
+        enabledRiaRuleIds: savedScreeningMetadata?.reviewIntegrity.enabledRuleIds || DEFAULT_RIA_RULE_IDS,
+        duplicateCheckEnabled: savedScreeningMetadata?.duplicateCheckEnabled ??
+          savedItem.emotionData?.suspiciousReviewDetection?.status !== 'disabled',
+        excludeDuplicatesFromAggregates: excludeSavedDuplicates,
+        pageKey: savedItem.pageKey || getPageKey(savedItem.platform, savedItem.page_url),
+      }),
       dominantEmotion: mergedEmotionData.dominantEmotion.label,
+      emotionModelProvenance,
       percentage: `${mergedEmotionData.dominantEmotion.percentage}%`,
       priorityResults: combinedQuotes.map((quote) => quote.priority).filter(Boolean),
       timestamp: refreshedAt,
@@ -2128,8 +3061,8 @@ export default function PopupPage() {
     };
   };
 
-  const handleSaveAnalysis = async () => {
-    if (!currentAnalysisRecord || isSavingAnalysis || hasSavedAnalysis) return false;
+  const handleSaveAnalysis = async (customLabel, customNotes) => {
+    if (!currentAnalysisRecord || isSavingAnalysis) return false;
     setIsSavingAnalysis(true);
     setSaveAnalysisError('');
     const saveRevision = analysisRevisionRef.current;
@@ -2139,11 +3072,26 @@ export default function PopupPage() {
         currentAnalysisRecord.page_url,
       ) || currentAnalysisRecord.pageKey;
       if (!pageKey) throw new Error('Unable to identify this page for saving.');
+      const reviewsForSave = currentAnalysisRecord.reviews || scrapedReviews;
+      const emotionDataForSave = emotionData || currentAnalysisRecord.emotionData;
       const recordToSave = {
         ...currentAnalysisRecord,
+        id: undefined, // Create a new independent snapshot
+        label: typeof customLabel === 'string' && customLabel.trim() ? customLabel.trim() : undefined,
+        notes: typeof customNotes === 'string' && customNotes.trim() ? customNotes.trim() : '',
         pageKey,
-        reviews: currentAnalysisRecord.reviews || scrapedReviews,
-        emotionData: emotionData || currentAnalysisRecord.emotionData,
+        reviews: reviewsForSave,
+        emotionData: emotionDataForSave,
+        reviewScreeningMetadata: createReviewScreeningMetadata({
+          reviews: reviewsForSave,
+          emotionData: emotionDataForSave,
+          reviewIntegrityAssessment,
+          reviewIntegrityEnabled,
+          enabledRiaRuleIds,
+          duplicateCheckEnabled: suspiciousReviewDetectionEnabled,
+          excludeDuplicatesFromAggregates: excludeFlaggedFromEmotion,
+          pageKey,
+        }),
         topicAnalysis,
         priorityResults: (emotionData?.quotes || currentAnalysisRecord.emotionData?.quotes || [])
           .map((quote) => quote.priority)
@@ -2162,7 +3110,7 @@ export default function PopupPage() {
     } catch (error) {
       if (import.meta.env.DEV) console.error('VoxReview: Could not save analysis:', error);
       if (analysisRevisionRef.current === saveRevision) {
-        setSaveAnalysisError('Unable to save this analysis. Please try again.');
+        setSaveAnalysisError('Could not save this analysis to your account. Check your connection or sign in again; it was not saved.');
       }
       return false;
     } finally {
@@ -2180,6 +3128,7 @@ export default function PopupPage() {
     pendingScrapeDataRef.current = null;
     setIsRescanning(false);
     setEmotionData(null);
+    setReviewIntegrityAssessment(null);
     setTopicAnalysis(null);
     setCurrentAnalysisRecord(null);
     setHasSavedAnalysis(false);
@@ -2192,12 +3141,220 @@ export default function PopupPage() {
     setScrapedHasError(false);
     setScrapedErrorMessage('');
     setAnalysisStatus('idle');
+    setExcludeFlaggedFromEmotion(false);
     setAnalysisViewRevision((revision) => revision + 1);
   };
+
+  const isExactCheckComplete = suspiciousReviewDetectionEnabled &&
+    (emotionData?.suspiciousReviewDetection?.status === 'complete' ||
+     currentAnalysisRecord?.suspiciousReviewDetection?.status === 'complete');
+  const exactDupesCount = (
+    emotionData?.suspiciousReviewDetection?.flaggedCount ??
+    currentAnalysisRecord?.suspiciousReviewDetection?.flaggedCount
+  ) || 0;
+  const hasDuplicateMatches = Boolean(isExactCheckComplete && exactDupesCount > 0);
+
+  const activeReviewsForSignature = Array.isArray(currentAnalysisRecord?.reviews) && currentAnalysisRecord.reviews.length > 0
+    ? currentAnalysisRecord.reviews
+    : scrapedReviews;
+  const activeReviewSetSignature = getTopicReviewSetSignature(
+    activeReviewsForSignature.map((review) => sanitizeReviewText(getReviewText(review)))
+  );
+
+  const visibleReviewIntegrityAssessment = reviewIntegrityAssessment &&
+    reviewIntegrityAssessment.pageKey === (
+      currentAnalysisRecord?.pageKey || getPageKey(detectedPlatform, activeTabUrl)
+    ) &&
+    (
+      reviewIntegrityAssessment.reviewSetSignature === activeReviewSetSignature ||
+      (Array.isArray(reviewIntegrityAssessment.results) &&
+       reviewIntegrityAssessment.results.length === activeReviewsForSignature.length)
+    )
+    ? reviewIntegrityAssessment.results
+    : null;
+
+  const activeRiaAssessment = visibleReviewIntegrityAssessment ||
+    reviewIntegrityAssessmentRef.current?.results ||
+    (Array.isArray(reviewIntegrityAssessment) ? reviewIntegrityAssessment : reviewIntegrityAssessment?.results);
+  const isRiaComplete = Boolean(
+    reviewIntegrityEnabled &&
+    Array.isArray(activeRiaAssessment) &&
+    activeRiaAssessment.length > 0 &&
+    !reviewIntegrityError,
+  );
+  const riaFlaggedCount = isRiaComplete
+    ? activeRiaAssessment.filter((r) => (
+        r?.assessmentStatus === 'Patterns Detected' ||
+        (Array.isArray(r?.triggeredRules) && r.triggeredRules.length > 0)
+      )).length
+    : 0;
+  const hasRiaPatternFlags = Boolean(isRiaComplete && riaFlaggedCount > 0);
+
+  const isExclusionAvailable = Boolean(hasDuplicateMatches || hasRiaPatternFlags);
+
+  const handleToggleExcludeRepeated = (checked) => {
+    if (!isExclusionAvailable && checked) return;
+    setExcludeFlaggedFromEmotion(checked);
+    if (currentAnalysisRecord && (isExactCheckComplete || isRiaComplete)) {
+      const detection = emotionData?.suspiciousReviewDetection || currentAnalysisRecord.suspiciousReviewDetection;
+      const reviewPredictions = Array.isArray(currentAnalysisRecord.reviewAnalysis)
+        ? currentAnalysisRecord.reviewAnalysis.map((r) => r.category)
+        : currentAnalysisRecord.predictions || [];
+      if (reviewPredictions.length > 0 && Array.isArray(currentAnalysisRecord.reviews)) {
+        const nextEmotionData = buildEmotionData(
+          currentAnalysisRecord.reviews,
+          reviewPredictions,
+          currentAnalysisRecord.platform,
+          currentAnalysisRecord.topicAnalysis,
+          currentAnalysisRecord.topicAnalysis ? 'ready' : (ENABLE_TOPIC_ANALYSIS ? 'unavailable' : 'disabled'),
+          currentAnalysisRecord.reviewAnalysis,
+          currentAnalysisRecord.skippedReviews || [],
+          detection,
+          checked,
+          currentAnalysisRecord.analysisSampleInfo,
+          getCommonEmotionModelIdentifier(
+            currentAnalysisRecord.emotionModelProvenance,
+            currentAnalysisRecord.reviews.length,
+          ),
+          activeRiaAssessment,
+          reviewIntegrityEnabled,
+        );
+        setEmotionData(nextEmotionData);
+        setCurrentAnalysisRecord((prev) => prev ? ({
+          ...prev,
+          excludeFlaggedFromEmotion: checked,
+          emotionData: nextEmotionData,
+          dominantEmotion: nextEmotionData.dominantEmotion.label,
+          percentage: `${nextEmotionData.dominantEmotion.percentage}%`,
+        }) : prev);
+      }
+    }
+  };
+
+  const handleToggleDetectionEnabled = (checked) => {
+    setSuspiciousReviewDetectionEnabled(checked);
+    if (!checked && !hasRiaPatternFlags) {
+      handleToggleExcludeRepeated(false);
+    }
+  };
+
+  const qualityCheckStatus = useMemo(() => {
+    if (!suspiciousReviewDetectionEnabled) return 'not_run';
+    if (analysisStatus === 'analyzing') return 'checking';
+    const status = emotionData?.suspiciousReviewDetection?.status;
+    if (status === 'complete') return 'complete';
+    if (status === 'unavailable' || status === 'invalid') return 'unavailable';
+    return 'ready';
+  }, [suspiciousReviewDetectionEnabled, analysisStatus, emotionData?.suspiciousReviewDetection?.status]);
+
+  const qualityCheckBadge = useMemo(() => {
+    switch (qualityCheckStatus) {
+      case 'ready':
+        return { label: 'Ready to run', className: 'quality-status-badge--ready' };
+      case 'checking':
+        return { label: 'Checking...', className: 'quality-status-badge--checking' };
+      case 'complete':
+        return { label: 'Check complete', className: 'quality-status-badge--complete' };
+      case 'unavailable':
+        return { label: 'Check unavailable', className: 'quality-status-badge--unavailable' };
+      case 'not_run':
+      default:
+        return { label: 'Not run', className: 'quality-status-badge--not-run' };
+    }
+  }, [qualityCheckStatus]);
+
+  const handleToggleReviewIntegrityEnabled = useCallback((checked) => {
+    setReviewIntegrityEnabled(checked);
+    reviewIntegrityEnabledRef.current = checked;
+    setReviewIntegrityError('');
+    if (!checked) {
+      setReviewIntegrityAssessment(null);
+      reviewIntegrityAssessmentRef.current = null;
+      setReviewIntegrityError('');
+      if (!hasDuplicateMatches) {
+        handleToggleExcludeRepeated(false);
+      }
+      return;
+    }
+    const currentScrapedReviews = lastScrapedReviewsRef.current ?? [];
+    if (currentScrapedReviews.length === 0) return;
+    const analysisRevision = ++analysisRevisionRef.current;
+    try {
+      const reviewIntegrityResults = assessReviewIntegrity(
+        currentScrapedReviews.map((review, reviewIndex) => ({
+          reviewIndex,
+          text: sanitizeReviewText(getReviewText(review)),
+        })),
+        { enabledRuleIds: enabledRiaRuleIdsRef.current },
+      );
+      if (analysisRevisionRef.current === analysisRevision) {
+        const integrityReviewSetSignature = getTopicReviewSetSignature(
+          currentScrapedReviews.map((review) => sanitizeReviewText(getReviewText(review)))
+        );
+        const nextAssessment = {
+          pageKey: currentAnalysisRecordRef.current?.pageKey || activeContextRef.current.pageKey,
+          reviewSetSignature: integrityReviewSetSignature,
+          results: reviewIntegrityResults,
+        };
+        reviewIntegrityAssessmentRef.current = nextAssessment;
+        setReviewIntegrityAssessment(nextAssessment);
+        setReviewIntegrityError('');
+      }
+    } catch (error) {
+      if (analysisRevisionRef.current === analysisRevision) {
+        reviewIntegrityAssessmentRef.current = null;
+        setReviewIntegrityAssessment(null);
+        setReviewIntegrityError('Review Integrity Assessment failed. Try again after checking the selected rules.');
+        console.error('VoxReview: Review Integrity Assessment failed.', error);
+      }
+    }
+  }, []);
+
+  const handleToggleRiaRule = useCallback((ruleId) => {
+    const current = enabledRiaRuleIdsRef.current;
+    const next = toggleReviewIntegrityRuleSelection(current, ruleId);
+    if (next === current) return;
+    enabledRiaRuleIdsRef.current = next;
+    setEnabledRiaRuleIds(next);
+
+    if (reviewIntegrityEnabledRef.current && reviewIntegrityAssessmentRef.current) {
+      handleToggleReviewIntegrityEnabled(true);
+    }
+  }, []);
 
   // Log in / Sign up redirects to the existing Web Application authentication routes
   const handleOpenLogin = () => requestProfileLeave(() => openWebAppAuth('/login'));
   const handleOpenRegister = () => requestProfileLeave(() => openWebAppAuth('/register'));
+
+  const retryAuthVerification = async () => {
+    try {
+      const stored = await chrome.storage.local.get(['voxreview_auth_session']);
+      const session = stored?.voxreview_auth_session;
+      if (!session?.user?.id || !session.token) {
+        setAuthVerificationUnavailable(false);
+        setAuthenticatedUser(null);
+        return;
+      }
+      const validation = await authService.validateExtensionSession(session);
+      if (validation.status === 'valid') {
+        authService.cacheSessionLocally(validation.session);
+        setAuthenticatedUser(validation.user);
+        lastAuthUserIdRef.current = validation.user.id;
+      } else if (validation.status === 'invalid') {
+        authService.cacheSessionLocally(null);
+        setAuthenticatedUser(null);
+      } else {
+        setAuthenticatedUser(null);
+        setAuthVerificationUnavailable(true);
+      }
+    } catch (error) {
+      console.warn('VoxReview: Extension session verification retry failed.', {
+        code: error?.code || null,
+      });
+      setAuthenticatedUser(null);
+      setAuthVerificationUnavailable(true);
+    }
+  };
 
   // Logout clears session and notifies extension to return to Guest Mode
   const handleLogout = () => {
@@ -2215,6 +3372,9 @@ export default function PopupPage() {
 
   const handleSelectSavedItem = (item) => {
     if (!item) return;
+    setReviewIntegrityAssessment(null);
+    reviewIntegrityAssessmentRef.current = null;
+    setReviewIntegrityError('');
     analysisRevisionRef.current += 1;
     const platformFromUrl = detectPlatformFromUrl(item.page_url || '');
     const restoredPlatform = platformFromUrl !== 'unknown'
@@ -2225,13 +3385,21 @@ export default function PopupPage() {
     const savedTopics = item.topicAnalysis;
     const hasSavedTopicResults = hasValidTopicAnalysis(savedTopics, savedReviews.length);
     const savedReviewAnalysis = Array.isArray(item.reviewAnalysis) ? item.reviewAnalysis : [];
+    const savedEmotionQuotes = Array.isArray(item.emotionData?.quotes)
+      ? item.emotionData.quotes
+      : [];
+    const restoredScreeningMetadata = restoreReviewScreeningMetadata(
+      item.reviewScreeningMetadata,
+      savedReviews,
+    );
     const quotes = savedReviewAnalysis.length === savedReviews.length
       ? savedReviewAnalysis.map((analysis, index) => {
           const review = savedReviews[index] ?? analysis.review;
           const category = analysis.category;
           const display = CATEGORY_DISPLAY[category];
           return {
-            id: review?.id ?? review?.reviewId ?? index + 1,
+            ...(savedEmotionQuotes[index] || {}),
+            id: index + 1,
             topicResultIndex: index,
             category,
             emotion: display?.label || 'Pending',
@@ -2240,18 +3408,45 @@ export default function PopupPage() {
             text: getReviewText(review),
             author: getReviewerName(review, item.platform),
             rating: review?.rating ?? null,
+            recommendation: review?.recommendation ?? null,
           };
         })
-      : (item.emotionData?.quotes || []).map((quote, index) => ({
+      : savedEmotionQuotes.map((quote, index) => ({
           ...quote,
           id: quote.id ?? index + 1,
           topicResultIndex: index,
           category: quote.category ?? CATEGORY_BY_EMOTION_ID.get(quote.emotion?.toLowerCase()),
           rating: savedReviews[index]?.rating ?? quote.rating ?? null,
+          recommendation: savedReviews[index]?.recommendation ?? quote.recommendation ?? null,
         }));
-    const restoredEmotionData = item.emotionData
+    const restoredQuotes = applyReviewScreeningMetadata(quotes, restoredScreeningMetadata, {
+      excludeDuplicatesFromAggregates: restoredScreeningMetadata?.excludeDuplicatesFromAggregates ??
+        item.emotionData?.suspiciousReviewDetection?.filteringEnabled === true,
+    });
+    const restoredTopicEntries = restoredQuotes.map((quote, topicResultIndex) => ({
+      review: savedReviews[topicResultIndex] ?? quote,
+      topicResultIndex,
+      aggregateEligible: quote.aggregateEligible,
+    }));
+    const savedModelIdentifier = getCommonEmotionModelIdentifier(
+      item.emotionModelProvenance,
+      savedReviews.length,
+    );
+    const savedModel = getEmotionModelDisplayName(savedModelIdentifier) ||
+      getEmotionModelDisplayName(item.emotionModelProvenance?.modelIdentifier) ||
+      getEmotionModelDisplayName(item.emotionData?.dominantEmotion?.model) ||
+      (typeof item.emotionData?.dominantEmotion?.model === 'string' && item.emotionData.dominantEmotion.model.trim()
+        ? item.emotionData.dominantEmotion.model.trim()
+        : null);
+    const restoredEmotionData = isValidEmotionAnalysisData(item.emotionData)
       ? {
           ...item.emotionData,
+          dominantEmotion: item.emotionData.dominantEmotion
+            ? {
+                ...item.emotionData.dominantEmotion,
+                model: savedModel || item.emotionData.dominantEmotion.model || null,
+              }
+            : item.emotionData.dominantEmotion,
           ...(savedReviewAnalysis.length === savedReviews.length
             ? {
                 emotions: (item.emotionData.emotions || []).map((emotion) => {
@@ -2259,6 +3454,7 @@ export default function PopupPage() {
                   return {
                     ...emotion,
                     category,
+                    model: savedModel,
                     ...(category != null
                       ? { keywords: getSvmEmotionKeywords(savedReviewAnalysis, Number(category), savedReviews) }
                       : {}),
@@ -2266,7 +3462,13 @@ export default function PopupPage() {
                 }),
               }
             : {}),
-          quotes: attachReviewPriorities(quotes, hasSavedTopicResults ? savedTopics : null),
+          quotes: attachReviewPriorities(restoredQuotes, hasSavedTopicResults ? savedTopics : null),
+          topics: hasSavedTopicResults
+            ? aggregateTopicsForReviews(
+                filterEligibleReviewEntries(restoredTopicEntries),
+                savedTopics,
+              )
+            : item.emotionData.topics,
           topicStatus: hasSavedTopicResults
             ? 'ready'
             : !ENABLE_TOPIC_ANALYSIS ? 'disabled' : savedReviews.length > 0 ? 'pending' : 'not-analyzed',
@@ -2293,15 +3495,40 @@ export default function PopupPage() {
     setScrapedCategory(item.category ?? null);
     setScrapedRating(item.rating ?? null);
     setScrapedProductImage(item.productImage ?? null);
+    setScrapedProductMediaType(item.productMediaType ?? null);
     setScrapedHasError(false);
     setScrapedErrorMessage('');
     setEmotionData(restoredEmotionData);
     setTopicAnalysis(hasSavedTopicResults ? savedTopics : null);
     setCurrentAnalysisRecord({ ...item, pageKey, emotionData: restoredEmotionData });
+    const restoredRiaEnabled = restoredScreeningMetadata?.reviewIntegrity.enabled ?? true;
+    const restoredRuleIds = restoredScreeningMetadata?.reviewIntegrity.enabledRuleIds || DEFAULT_RIA_RULE_IDS;
+    setReviewIntegrityEnabled(restoredRiaEnabled);
+    reviewIntegrityEnabledRef.current = restoredRiaEnabled;
+    setEnabledRiaRuleIds(restoredRuleIds);
+    enabledRiaRuleIdsRef.current = restoredRuleIds;
+    setReviewIntegrityAssessment(restoredScreeningMetadata?.reviewIntegrity.results
+      ? {
+          pageKey,
+          reviewSetSignature: restoredScreeningMetadata.reviewSetSignature,
+          results: restoredScreeningMetadata.reviewIntegrity.results,
+        }
+      : null);
+    reviewIntegrityAssessmentRef.current = restoredScreeningMetadata?.reviewIntegrity.results
+      ? {
+          pageKey,
+          reviewSetSignature: restoredScreeningMetadata.reviewSetSignature,
+          results: restoredScreeningMetadata.reviewIntegrity.results,
+        }
+      : null;
+    setSuspiciousReviewDetectionEnabled(restoredScreeningMetadata?.duplicateCheckEnabled ??
+      item.emotionData?.suspiciousReviewDetection?.status !== 'disabled');
+    setExcludeFlaggedFromEmotion(restoredScreeningMetadata?.excludeDuplicatesFromAggregates ??
+      item.emotionData?.suspiciousReviewDetection?.filteringEnabled === true);
     setHasSavedAnalysis(hasSavedTopicResults || !ENABLE_TOPIC_ANALYSIS);
     setSaveAnalysisError('');
     setIsSavingAnalysis(false);
-    setAnalysisStatus(restoredEmotionData ? 'completed' : 'idle');
+    setAnalysisStatus('completed');
     analysisResolvedPageKeyRef.current = pageKey;
     setAnalysisViewRevision((revision) => revision + 1);
 
@@ -2324,7 +3551,7 @@ export default function PopupPage() {
               ...restoredEmotionData,
               quotes: attachReviewPriorities(restoredEmotionData.quotes, topicPayload),
               topics: aggregateTopicsForReviews(
-                savedReviews.map((review, topicResultIndex) => ({ review, topicResultIndex })),
+                filterEligibleReviewEntries(restoredTopicEntries),
                 topicPayload,
               ),
               topicStatus: 'ready',
@@ -2370,6 +3597,20 @@ export default function PopupPage() {
         const savedPageKey = getPageKey(savedItem.platform, savedItem.page_url) || savedItem.pageKey;
         activeTabObj = tabs.find((tab) => tab.id != null && tab.url &&
           getPageKey(detectPlatformFromUrl(tab.url), tab.url) === savedPageKey);
+        console.info('[RESCAN] saved-page tab lookup:', {
+          savedPageKey,
+          savedPlatform: savedItem.platform,
+          savedUrl: (() => {
+            try {
+              const url = new URL(savedItem.page_url);
+              return `${url.origin}${url.pathname}`;
+            } catch {
+              return '';
+            }
+          })(),
+          matchedTabId: activeTabObj?.id ?? null,
+          matchedPlatform: activeTabObj?.url ? detectPlatformFromUrl(activeTabObj.url) : null,
+        });
         if (!activeTabObj) {
           setIsRescanning(false);
           return { success: false, needsOpen: true };
@@ -2406,22 +3647,24 @@ export default function PopupPage() {
       setActiveTabUrl(currentUrl);
       setHasResolvedActiveTab(true);
       if (!savedItem) {
-        setAnalysisStatus('idle');
-        setEmotionData(null);
-        setTopicAnalysis(null);
-        setCurrentAnalysisRecord(null);
-        setHasSavedAnalysis(false);
+        rescanPreviousStateRef.current = {
+          analysisStatus,
+          emotionData,
+          topicAnalysis,
+          currentAnalysisRecord,
+          hasSavedAnalysis,
+          scrapedReviews: [...scrapedReviews],
+          lastScrapedReviews: [...lastScrapedReviewsRef.current],
+          scrapedProductTitle,
+          scrapedCategory,
+          scrapedRating,
+          scrapedProductImage,
+          scrapedProductMediaType,
+        };
         setSaveAnalysisError('');
         setIsSavingAnalysis(false);
-        setScrapedReviews([]);
-        lastScrapedReviewsRef.current = [];
-        setScrapedProductTitle(null);
-        setScrapedCategory(null);
-        setScrapedRating(null);
-        setScrapedProductImage(null);
         setScrapedHasError(false);
         setScrapedErrorMessage('');
-        setAnalysisViewRevision((revision) => revision + 1);
       }
 
       if (platform === 'unknown') {
@@ -2450,8 +3693,31 @@ export default function PopupPage() {
         rescanTimeoutRef.current = null;
         ignoreAutomaticScrapesRef.current = true;
         setIsRescanning(false);
+
+        // Restore previous successful state on timeout failure
+        if (rescanPreviousStateRef.current) {
+          const prev = rescanPreviousStateRef.current;
+          setAnalysisStatus(prev.analysisStatus);
+          setEmotionData(prev.emotionData);
+          setTopicAnalysis(prev.topicAnalysis);
+          setCurrentAnalysisRecord(prev.currentAnalysisRecord);
+          setHasSavedAnalysis(prev.hasSavedAnalysis);
+          setScrapedReviews(prev.scrapedReviews);
+          lastScrapedReviewsRef.current = prev.lastScrapedReviews;
+          setScrapedProductTitle(prev.scrapedProductTitle);
+          setScrapedCategory(prev.scrapedCategory);
+          setScrapedRating(prev.scrapedRating);
+          setScrapedProductImage(prev.scrapedProductImage);
+          setScrapedProductMediaType(prev.scrapedProductMediaType);
+          rescanPreviousStateRef.current = null;
+        }
+
         setScrapedHasError(true);
         setScrapedErrorMessage('Rescan did not return fresh data from this page. Try again.');
+        console.warn('[RESCAN] failed:', {
+          pageKey,
+          reason: 'Rescan did not return fresh data from this page. Try again.',
+        });
         pending.resolveRefresh?.({ success: false, error: 'Rescan did not return fresh data from this page. Try again.' });
       }, 30000);
 
@@ -2467,8 +3733,28 @@ export default function PopupPage() {
               if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
               rescanTimeoutRef.current = null;
               setIsRescanning(false);
+
+              // Restore previous successful state on failure
+              if (rescanPreviousStateRef.current) {
+                const prev = rescanPreviousStateRef.current;
+                setAnalysisStatus(prev.analysisStatus);
+                setEmotionData(prev.emotionData);
+                setTopicAnalysis(prev.topicAnalysis);
+                setCurrentAnalysisRecord(prev.currentAnalysisRecord);
+                setHasSavedAnalysis(prev.hasSavedAnalysis);
+                setScrapedReviews(prev.scrapedReviews);
+                lastScrapedReviewsRef.current = prev.lastScrapedReviews;
+                setScrapedProductTitle(prev.scrapedProductTitle);
+                setScrapedCategory(prev.scrapedCategory);
+                setScrapedRating(prev.scrapedRating);
+                setScrapedProductImage(prev.scrapedProductImage);
+                setScrapedProductMediaType(prev.scrapedProductMediaType);
+                rescanPreviousStateRef.current = null;
+              }
+
               setScrapedHasError(true);
               setScrapedErrorMessage(reason);
+              console.warn('[RESCAN] failed:', { pageKey, reason });
               pending.resolveRefresh?.({ success: false, error: reason });
             }
           }
@@ -2482,6 +3768,24 @@ export default function PopupPage() {
       if (rescanTimeoutRef.current) clearTimeout(rescanTimeoutRef.current);
       rescanTimeoutRef.current = null;
       setIsRescanning(false);
+
+      if (rescanPreviousStateRef.current) {
+        const prev = rescanPreviousStateRef.current;
+        setAnalysisStatus(prev.analysisStatus);
+        setEmotionData(prev.emotionData);
+        setTopicAnalysis(prev.topicAnalysis);
+        setCurrentAnalysisRecord(prev.currentAnalysisRecord);
+        setHasSavedAnalysis(prev.hasSavedAnalysis);
+        setScrapedReviews(prev.scrapedReviews);
+        lastScrapedReviewsRef.current = prev.lastScrapedReviews;
+        setScrapedProductTitle(prev.scrapedProductTitle);
+        setScrapedCategory(prev.scrapedCategory);
+        setScrapedRating(prev.scrapedRating);
+        setScrapedProductImage(prev.scrapedProductImage);
+        setScrapedProductMediaType(prev.scrapedProductMediaType);
+        rescanPreviousStateRef.current = null;
+      }
+
       setScrapedHasError(true);
       setScrapedErrorMessage(error.message || 'Unable to rescan this page.');
       return false;
@@ -2536,7 +3840,9 @@ export default function PopupPage() {
   };
 
   const handleAnalyzeNewReviews = async (savedItem, reviews) => {
-    const latestSavedItem = await getAnalysisForPage(savedItem.platform, savedItem.page_url) || savedItem;
+    const latestSavedItem = (savedItem?.id ? await getAnalysisById(savedItem.id) : null) ||
+      await getAnalysisForPage(savedItem.platform, savedItem.page_url) ||
+      savedItem;
     return handleAnalyzeNewSavedReviews(latestSavedItem, reviews);
   };
 
@@ -2558,10 +3864,17 @@ export default function PopupPage() {
 
         {/* Guest Notice Bar */}
         {!isLoggedIn && (
-          <div className="popup-guest-bar">
-            <span>Guest Mode — AI Analysis Active</span>
-            <button onClick={handleOpenLogin}>Sign In to Save</button>
-          </div>
+          authVerificationUnavailable ? (
+            <div className="popup-guest-bar" role="alert">
+              <span>Unable to verify your sign-in. Your saved session has been kept.</span>
+              <button onClick={retryAuthVerification}>Retry verification</button>
+            </div>
+          ) : (
+            <div className="popup-guest-bar">
+              <span>Guest Mode — AI Analysis Active</span>
+              <button onClick={handleOpenLogin}>Sign In to Save</button>
+            </div>
+          )
         )}
 
         {/* Signed In Success Notification Toast */}
@@ -2590,7 +3903,8 @@ export default function PopupPage() {
                   onRescan={handleRescanPage}
                   isRescanning={isRescanning}
                 />
-              ) : availabilityStatus !== 'available' ? (
+              ) : availabilityStatus === 'disabled' ||
+                (availabilityStatus !== 'available' && !hasReviewsForAnalysis) ? (
                 <PlatformUnavailableView
                   platformName={availabilityPlatformName}
                   status={availabilityStatus}
@@ -2637,6 +3951,7 @@ export default function PopupPage() {
                     category={scrapedCategory || 'Product Reviews'}
                     rating={scrapedRating ? String(scrapedRating) : null}
                     productImage={scrapedProductImage}
+                    productMediaType={scrapedProductMediaType}
                     reviewsCount={String(availableReviewCount)}
                     status={analysisStatus}
                   />
@@ -2678,6 +3993,65 @@ export default function PopupPage() {
                         </>
                       )}
                     </button>
+                    {analysisStatus !== 'completed' && (
+                      <div className="review-quality-check-card suspicious-review-options additional-review-checks-card" role="region" aria-label="Exact Repeated-Text Check">
+                        <div className="quality-card-header">
+                          <div className="quality-card-title-group">
+                            <svg className="quality-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                              <polyline points="9 12 11 14 15 10" />
+                            </svg>
+                            <span className="quality-card-title">Additional Review Checks</span>
+                          </div>
+                          <span className={`quality-status-badge ${qualityCheckBadge.className}`}>
+                            {qualityCheckBadge.label}
+                          </span>
+                        </div>
+
+                        <div className="checks-options-row">
+                          <label className="check-option-box">
+                            <input
+                              type="checkbox"
+                              checked={reviewIntegrityEnabled}
+                              onChange={(event) => handleToggleReviewIntegrityEnabled(event.target.checked)}
+                            />
+                            <div className="check-option-content">
+                              <strong className="check-option-title">Review Integrity</strong>
+                              <p className="check-option-desc">Detect selected suspicious textual patterns in individual reviews.</p>
+                            </div>
+                          </label>
+
+                          <label className="check-option-box">
+                            <input
+                              type="checkbox"
+                              checked={suspiciousReviewDetectionEnabled}
+                              onChange={(event) => handleToggleDetectionEnabled(event.target.checked)}
+                            />
+                            <div className="check-option-content">
+                              <strong className="check-option-title">Exact Repeated-Text Check</strong>
+                              <p className="check-option-desc">Checks for identical normalized review text across available reviews.</p>
+                            </div>
+                          </label>
+                        </div>
+
+
+
+                        {qualityCheckStatus === 'unavailable' && (
+                          <div className="quality-unavailable-banner">
+                            <p>We couldn't check your reviews right now. All collected reviews remain included in aggregate results.</p>
+                          </div>
+                        )}
+
+                        <div className="quality-card-footer">
+                          <p className="quality-card-explanation">
+                            Compares identical normalized review text within the reviews available to this analysis. Identical entries may have already been merged during collection. This check does not identify bots, paraphrased reviews, or review authenticity.
+                          </p>
+                          <p className="quality-card-disclaimer">
+                            Only reviews designated as exact duplicates are excluded from emotion, topic, and priority aggregates. Other suspicious-pattern findings are not automatically excluded, and individual review records remain visible.
+                          </p>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="secondary-toolbar">
                       <div className="detected-platform-pill">
@@ -2709,12 +4083,29 @@ export default function PopupPage() {
                     hasSavedAnalysis={hasSavedAnalysis}
                     saveError={saveAnalysisError}
                     emotionData={emotionData}
+                    reviewIntegrityAssessment={visibleReviewIntegrityAssessment}
+                    reviewIntegrityError={reviewIntegrityError}
                     topicAnalysis={topicAnalysis}
+                    analysisProgress={analysisProgress}
+                    onCancelAnalysis={analysisStatus === 'analyzing' || analysisProgress?.stage === 'topics'
+                      ? handleCancelAnalysis
+                      : undefined}
                     scrapedReviews={scrapedReviews}
                     onSaveRedirect={handleOpenLogin}
                     onOpenLogin={handleOpenLogin}
                     onClearAnalysis={handleClearAnalysis}
                     platform={detectedPlatform}
+                    repeatedTextCheckEnabled={suspiciousReviewDetectionEnabled}
+                    onToggleRepeatedTextCheck={handleToggleDetectionEnabled}
+                    excludeRepeatedFromEmotion={excludeFlaggedFromEmotion}
+                    onToggleExcludeRepeated={handleToggleExcludeRepeated}
+                    isExclusionAvailable={isExclusionAvailable}
+                    qualityCheckStatus={qualityCheckStatus}
+                    qualityCheckBadge={qualityCheckBadge}
+                    reviewIntegrityEnabled={reviewIntegrityEnabled}
+                    onToggleReviewIntegrity={handleToggleReviewIntegrityEnabled}
+                    enabledRiaRuleIds={enabledRiaRuleIds}
+                    onToggleRiaRule={handleToggleRiaRule}
                   />
                 </>
                   )}
@@ -2726,6 +4117,7 @@ export default function PopupPage() {
           {activeTab === 'saved' && (
             <SavedAnalysesView
               isLoggedIn={isLoggedIn}
+              currentUserId={currentUser?.id || null}
               onLoginClick={handleOpenLogin}
               onSelectSaved={handleSelectSavedItem}
               onRefreshSaved={handleRescanPage}

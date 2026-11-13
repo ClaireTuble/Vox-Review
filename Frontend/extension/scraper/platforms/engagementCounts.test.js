@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 const platformDirectory = new URL("./", import.meta.url);
+const helpfulnessSource = await readFile(new URL("../helpfulness.js", platformDirectory), "utf8");
 
 async function loadScraper(fileName, bindings, functionName) {
   const source = await readFile(new URL(fileName, platformDirectory), "utf8");
@@ -12,6 +13,13 @@ async function loadScraper(fileName, bindings, functionName) {
     ...bindings,
   };
   vm.createContext(context);
+  vm.runInContext(helpfulnessSource, context);
+  context.__voxreviewHelpfulnessCollection = {
+    steam: true,
+    googleplay: true,
+    shopee: true,
+    lazada: true,
+  };
   vm.runInContext(`${source}\nglobalThis.scrapeForTest = ${functionName};`, context);
   return context.scrapeForTest;
 }
@@ -119,16 +127,22 @@ test("Google Play thumbs-up counts use the matching review card data attribute",
     },
   };
   const scrape = await loadScraper("googlePlay.js", {
+    URL,
     document,
     window: { location: { href: "https://play.google.com/store/apps/details?id=test", pathname: "/store/apps/details" } },
   }, "scrapeGooglePlayReviews");
 
   const result = scrape();
 
-  assert.deepEqual(Array.from(result.reviews, (review) => [review.id, review.helpfulCount]), [
-    ["play-1", 6026],
-    ["play-2", null],
+  assert.deepEqual(Array.from(result.reviews, (review) => [
+    review.helpfulCount,
+    review.helpfulnessMetric,
+    review.helpfulnessAvailable,
+  ]), [
+    [6026, "helpful_votes", true],
+    [null, null, false],
   ]);
+  assert.ok(result.reviews.every((review) => !("id" in review)));
 });
 
 test("Shopee leaves helpfulCount null when its current review object has no count source", async () => {
@@ -159,6 +173,8 @@ test("Shopee leaves helpfulCount null when its current review object has no coun
 
   const result = scrape();
 
-  assert.equal(result.reviews[0].id, "comment-1");
+  assert.equal(result.reviews[0].id, undefined);
   assert.equal(result.reviews[0].helpfulCount, null);
+  assert.equal(result.reviews[0].helpfulnessMetric, null);
+  assert.equal(result.reviews[0].helpfulnessAvailable, false);
 });

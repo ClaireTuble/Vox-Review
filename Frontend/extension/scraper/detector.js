@@ -1,8 +1,14 @@
 function detectPlatform() {
     const host = window.location.hostname.toLowerCase();
 
-    // Steam Store (store.steampowered.com)
+    // Steam Store and the Community "See All Reviews" route.
     if (host === "store.steampowered.com" || host.endsWith(".steampowered.com") || host.includes("steampowered.com")) {
+        return "steam";
+    }
+    if (
+        host === "steamcommunity.com" &&
+        /^\/app\/\d+\/reviews\/?$/i.test(path)
+    ) {
         return "steam";
     }
 

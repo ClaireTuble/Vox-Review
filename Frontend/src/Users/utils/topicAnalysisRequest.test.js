@@ -1,13 +1,45 @@
+/* global setImmediate */
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createTopicAnalysisRequestCoordinator,
   createTopicRequestTimeout,
   getTopicAnalysisUrl,
+  getTopicFailureReason,
   getTopicReviewSetSignature,
   getTopicRequestTimeoutMs,
+  getMissingTopicKeywordCandidates,
+  requestTopicKeywordScoresInBatches,
   requestTopicAnalysis,
+  runTopicKeywordScoring,
 } from './topicAnalysisRequest.js';
+
+const TOPIC_LABELS = [
+  'Quality', 'Performance / Functionality', 'Features / Content',
+  'Service / Support', 'Delivery / Transaction', 'Price / Value',
+  'Usability / Experience', 'Accuracy / Expectations',
+  'Availability / Accessibility', 'Environment / Location', 'Other / General',
+];
+
+function makeKeywordScoreResponse(candidates) {
+  return {
+    success: true,
+    results: candidates.map((candidate, reviewIndex) => ({
+      reviewIndex,
+      topicScores: TOPIC_LABELS.map((label, topicIndex) => ({
+        label,
+        score: (Number(candidate.split('-').at(-1)) + topicIndex) / 1000,
+      })),
+    })),
+  };
+}
+
+function makeCompleteKeywordScoreMap(candidates) {
+  return Object.fromEntries(candidates.map((candidate) => [
+    candidate.toLocaleLowerCase(),
+    Object.fromEntries(TOPIC_LABELS.map((label, index) => [label, index / 100])),
+  ]));
+}
 
 test('deduplicates identical page review sets and reuses only successful results', async () => {
   let calls = 0;
@@ -116,6 +148,7 @@ test('coordinator diagnostics include safe request identity, operation, status, 
     console.warn = originalWarn;
   }
 
+  assert.equal(warning[0], 'VoxReview: Topic analysis request failed.');
   assert.equal(warning[1].requestId.startsWith('topic-'), true);
   assert.equal(warning[1].operation, 'classify');
   assert.equal(warning[1].status, 504);
@@ -173,6 +206,22 @@ test('failed keyword scoring does not evict a successful classification result',
   }), { httpStatus: 503 });
   assert.equal(await coordinator.request(['review'], 'google', identity), classification);
   assert.equal(calls, 2);
+});
+
+test('sends sanitized review text to the topic-analysis endpoint', async () => {
+  let requestBody;
+  const response = { success: true, results: [{ reviewIndex: 0, topics: [{ label: 'Quality', score: 0.8 }] }] };
+  const result = await requestTopicAnalysis([
+    { reviewer: 'Jane', reviewText: 'Great item. Order #ABCD1234 and email jane@example.com.' },
+  ], 'shopee', {
+    fetchImpl: async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return { ok: true, status: 200, json: async () => response };
+    },
+  });
+
+  assert.deepEqual(requestBody.reviews, ['Great item. Order [ORDER_ID] and email [EMAIL].']);
+  assert.deepEqual(result, response);
 });
 
 test('allows extra inference and queue time for a three-review topic request', () => {
@@ -280,6 +329,276 @@ test('keyword scoring requests use the raw-score operation response shape', asyn
   assert.equal(result.results[0].topics, undefined);
 });
 
+test('splits 253 keyword candidates at the backend review limit and restores global indexes', async () => {
+  const candidates = Array.from({ length: 253 }, (_, index) => `candidate-${index}`);
+  const batchSizes = [];
+  const response = await requestTopicKeywordScoresInBatches(candidates, async (batch) => {
+    batchSizes.push(batch.length);
+    return makeKeywordScoreResponse(batch);
+  });
+
+  assert.deepEqual(batchSizes, [50, 50, 50, 50, 50, 3]);
+  assert.equal(response.results.length, candidates.length);
+  assert.deepEqual(
+    response.results.map(({ reviewIndex }) => reviewIndex),
+    candidates.map((_, index) => index),
+  );
+  assert.equal(response.results[50].topicScores[0].score, 0.05);
+  assert.equal(response.results[252].topicScores[0].score, 0.252);
+});
+
+test('splits a batch again after HTTP 413 and keeps candidate-to-score alignment', async () => {
+  const candidates = Array.from({ length: 27 }, (_, index) => `candidate-${index}`);
+  const attemptedBatchSizes = [];
+  const successfulBatchSizes = [];
+  const response = await requestTopicKeywordScoresInBatches(
+    candidates,
+    async (batch) => {
+      attemptedBatchSizes.push(batch.length);
+      if (batch.length > 8) {
+        throw Object.assign(new Error('Topic request count exceeds configured limit.'), {
+          httpStatus: 413,
+          code: 'TOPIC_INPUT_LIMIT_EXCEEDED',
+        });
+      }
+      successfulBatchSizes.push(batch.length);
+      return makeKeywordScoreResponse(batch);
+    },
+    27,
+  );
+
+  assert.ok(attemptedBatchSizes.includes(27));
+  assert.ok(attemptedBatchSizes.every((size) => size <= 27));
+  assert.deepEqual(successfulBatchSizes, [7, 7, 7, 6]);
+  assert.ok(successfulBatchSizes.every((size) => size <= 8));
+  assert.equal(response.results.length, candidates.length);
+  response.results.forEach((result, index) => {
+    assert.equal(result.reviewIndex, index);
+    assert.equal(result.topicScores[0].score, index / 1000);
+  });
+});
+
+test('does not return partial keyword scores when a required batch fails', async () => {
+  let calls = 0;
+  await assert.rejects(
+    requestTopicKeywordScoresInBatches(
+      Array.from({ length: 51 }, (_, index) => `candidate-${index}`),
+      async (batch) => {
+        calls += 1;
+        if (calls > 1) {
+          throw Object.assign(new Error('Keyword worker unavailable.'), {
+            httpStatus: 503,
+            code: 'TOPIC_WORKER_UNAVAILABLE',
+          });
+        }
+        return makeKeywordScoreResponse(batch);
+      },
+    ),
+    { httpStatus: 503, code: 'TOPIC_WORKER_UNAVAILABLE' },
+  );
+  assert.equal(calls, 2);
+});
+
+test('incremental refresh scores new candidates and preserves valid scores for unchanged candidates', async () => {
+  const oldCandidate = 'old-candidate-100';
+  const newCandidate = 'new-candidate-200';
+  const priorScores = makeCompleteKeywordScoreMap([oldCandidate]);
+  const candidates = [oldCandidate, newCandidate];
+  const missingCandidates = getMissingTopicKeywordCandidates(candidates, priorScores);
+  const requestedCandidates = [];
+  const scored = await requestTopicKeywordScoresInBatches(missingCandidates, async (batch) => {
+    requestedCandidates.push(...batch);
+    return makeKeywordScoreResponse(batch);
+  });
+  const mergedScores = {
+    ...priorScores,
+    ...Object.fromEntries(scored.results.map((result) => [
+      missingCandidates[result.reviewIndex].toLocaleLowerCase(),
+      Object.fromEntries(result.topicScores.map(({ label, score }) => [label, score])),
+    ])),
+  };
+
+  assert.deepEqual(missingCandidates, [newCandidate]);
+  assert.deepEqual(requestedCandidates, [newCandidate]);
+  assert.deepEqual(mergedScores[oldCandidate], priorScores[oldCandidate]);
+  assert.deepEqual(getMissingTopicKeywordCandidates(candidates, mergedScores), []);
+});
+
+test('complete keyword score coverage skips redundant scoring', () => {
+  const candidates = ['phrase-1', 'phrase-2'];
+  assert.deepEqual(
+    getMissingTopicKeywordCandidates(candidates, makeCompleteKeywordScoreMap(candidates)),
+    [],
+  );
+});
+
+test('missing or incomplete candidate scores are scheduled for scoring', () => {
+  const candidates = ['complete-phrase-1', 'missing-phrase-2', 'partial-phrase-3'];
+  const scores = makeCompleteKeywordScoreMap(['complete-phrase-1']);
+  scores['partial-phrase-3'] = { Quality: 0.9 };
+
+  assert.deepEqual(
+    getMissingTopicKeywordCandidates(candidates, scores),
+    ['missing-phrase-2', 'partial-phrase-3'],
+  );
+});
+
+test('incremental scoring failure retains old scores and retry fills only missing candidates', async () => {
+  const oldCandidate = 'retained-candidate-100';
+  const newCandidate = 'new-candidate-200';
+  const priorScores = makeCompleteKeywordScoreMap([oldCandidate]);
+  const candidates = [oldCandidate, newCandidate];
+  const missingCandidates = getMissingTopicKeywordCandidates(candidates, priorScores);
+  const statuses = [];
+  let calls = 0;
+  let mergedScores = priorScores;
+  const requestBatch = async (batch) => {
+    calls += 1;
+    if (calls === 1) {
+      throw Object.assign(new Error('Keyword worker unavailable.'), {
+        httpStatus: 503,
+        code: 'TOPIC_WORKER_UNAVAILABLE',
+      });
+    }
+    return makeKeywordScoreResponse(batch);
+  };
+  const options = {
+    candidates: missingCandidates,
+    requestBatch,
+    isCurrent: () => true,
+    onStatusChange: (status) => statuses.push(status),
+    onSuccess: (payload) => {
+      mergedScores = {
+        ...mergedScores,
+        ...Object.fromEntries(payload.results.map((result) => [
+          missingCandidates[result.reviewIndex].toLocaleLowerCase(),
+          Object.fromEntries(result.topicScores.map(({ label, score }) => [label, score])),
+        ])),
+      };
+    },
+  };
+
+  await assert.rejects(runTopicKeywordScoring(options), { code: 'TOPIC_WORKER_UNAVAILABLE' });
+  assert.deepEqual(statuses, ['loading', 'error']);
+  assert.deepEqual(mergedScores[oldCandidate], priorScores[oldCandidate]);
+  assert.deepEqual(getMissingTopicKeywordCandidates(candidates, mergedScores), [newCandidate]);
+
+  assert.equal(await runTopicKeywordScoring(options), true);
+  assert.deepEqual(statuses, ['loading', 'error', 'loading', 'success']);
+  assert.deepEqual(mergedScores[oldCandidate], priorScores[oldCandidate]);
+  assert.deepEqual(getMissingTopicKeywordCandidates(candidates, mergedScores), []);
+});
+
+test('keyword scoring reports loading while delayed batches run and succeeds after applying scores', async () => {
+  let resolveBatch;
+  const statuses = [];
+  let appliedPayload = null;
+  const operation = runTopicKeywordScoring({
+    candidates: ['delayed-candidate-1'],
+    requestBatch: () => new Promise((resolve) => { resolveBatch = resolve; }),
+    isCurrent: () => true,
+    onStatusChange: (status) => statuses.push(status),
+    onSuccess: (payload) => {
+      appliedPayload = payload;
+      return 'updated-analysis';
+    },
+  });
+
+  assert.deepEqual(statuses, ['loading']);
+  assert.equal(appliedPayload, null);
+  resolveBatch(makeKeywordScoreResponse(['delayed-candidate-1']));
+  assert.equal(await operation, true);
+  assert.deepEqual(statuses, ['loading', 'success']);
+  assert.equal(appliedPayload.results[0].reviewIndex, 0);
+});
+
+test('failed keyword scoring enters error and can retry successfully without partial application', async () => {
+  const candidates = Array.from({ length: 51 }, (_, index) => `candidate-${index}`);
+  const statuses = [];
+  let calls = 0;
+  let appliedPayload = null;
+  const options = {
+    candidates,
+    requestBatch: async (batch) => {
+      calls += 1;
+      if (calls === 2) {
+        throw Object.assign(new Error('Keyword worker unavailable.'), {
+          httpStatus: 503,
+          code: 'TOPIC_WORKER_UNAVAILABLE',
+        });
+      }
+      return makeKeywordScoreResponse(batch);
+    },
+    isCurrent: () => true,
+    onStatusChange: (status) => statuses.push(status),
+    onSuccess: (payload) => { appliedPayload = payload; },
+  };
+
+  await assert.rejects(runTopicKeywordScoring(options), {
+    httpStatus: 503,
+    code: 'TOPIC_WORKER_UNAVAILABLE',
+  });
+  assert.deepEqual(statuses, ['loading', 'error']);
+  assert.equal(appliedPayload, null);
+  options.requestBatch = async (batch) => makeKeywordScoreResponse(batch);
+  assert.equal(await runTopicKeywordScoring(options), true);
+  assert.deepEqual(statuses, ['loading', 'error', 'loading', 'success']);
+  assert.equal(appliedPayload.results.length, candidates.length);
+});
+
+test('stale keyword scoring does not apply scores or update lifecycle state after review-set change', async () => {
+  let resolveBatch;
+  let isCurrent = true;
+  let applied = false;
+  const statuses = [];
+  const operation = runTopicKeywordScoring({
+    candidates: ['candidate-0'],
+    requestBatch: () => new Promise((resolve) => { resolveBatch = resolve; }),
+    isCurrent: () => isCurrent,
+    onStatusChange: (status) => statuses.push(status),
+    onSuccess: () => { applied = true; },
+  });
+
+  assert.deepEqual(statuses, ['loading']);
+  isCurrent = false;
+  resolveBatch(makeKeywordScoreResponse(['candidate-0']));
+  assert.equal(await operation, false);
+  assert.equal(applied, false);
+  assert.deepEqual(statuses, ['loading']);
+});
+
+test('reports HTTP 413 topic input limits without logging candidate text', async () => {
+  const originalWarn = console.warn;
+  let warning;
+  console.warn = (...args) => { warning = args; };
+  try {
+    await assert.rejects(
+      requestTopicAnalysis(['Private keyword candidate.'], 'steam', {
+        clientRequestId: 'steam-keyword-limit',
+        operation: 'keyword-scores',
+        requestContext: 'topic-keyword-scoring',
+        fetchImpl: async () => ({
+          ok: false,
+          status: 413,
+          json: async () => ({
+            success: false,
+            code: 'TOPIC_INPUT_LIMIT_EXCEEDED',
+            error: 'Topic request count exceeds the configured maximum.',
+          }),
+        }),
+      }),
+      (error) => error.httpStatus === 413 && error.code === 'TOPIC_INPUT_LIMIT_EXCEEDED',
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warning[1].status, 413);
+  assert.equal(warning[1].code, 'TOPIC_INPUT_LIMIT_EXCEEDED');
+  assert.equal(warning[1].operation, 'keyword-scores');
+  assert.equal(JSON.stringify(warning).includes('Private keyword candidate.'), false);
+});
+
 test('an explicit forced refresh is forwarded to the backend cache boundary', async () => {
   let requestHeaders;
   await requestTopicAnalysis(['review'], 'shopee', {
@@ -348,10 +667,37 @@ test('reports a failed HTTP status without logging request review text', async (
   assert.equal(warning[1].status, 503);
   assert.equal(warning[1].requestId, 'steam-topic-503');
   assert.equal(warning[1].operation, 'classify');
+  assert.equal(warning[1].platform, 'steam');
   assert.equal(warning[1].failureReason, 'worker_unavailable');
   assert.equal(warning[1].details, 'http_error');
   assert.equal(warning[1].code, 'TOPIC_WORKER_UNAVAILABLE');
+  assert.equal(warning[1].errorMessage, 'The service is unavailable.');
+  assert.equal(warning[1].endpoint, 'https://vox-review-production.up.railway.app/api/nlp/topics/predict');
   assert.equal(JSON.stringify(warning).includes('Private review text'), false);
+});
+
+test('logs and rethrows the original topic transport error', async () => {
+  const originalWarn = console.warn;
+  const transportError = new TypeError('Failed to fetch');
+  let warning;
+  console.warn = (...args) => { warning = args; };
+
+  try {
+    await assert.rejects(
+      requestTopicAnalysis(['A Steam review.'], 'steam', {
+        fetchImpl: async () => { throw transportError; },
+      }),
+      (error) => error === transportError,
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warning[0], 'VoxReview: Topic analysis request failed.');
+  assert.equal(warning[1].details, 'network_error');
+  assert.equal(warning[1].platform, 'steam');
+  assert.equal(warning[1].errorName, 'TypeError');
+  assert.equal(warning[1].errorMessage, 'Failed to fetch');
 });
 
 test('reports worker timeouts and response-shape mismatches as distinct failures', async () => {
@@ -465,4 +811,148 @@ test('reports request deadline expiry distinctly from intentional cancellation',
   assert.equal(warning[1].abortSource, 'request_timeout');
   assert.equal(warning[1].details, 'timeout');
   assert.equal(warning[1].httpStatus, null);
+});
+
+test('classifies TOPIC_WORKER_TERMINATED with HTTP 503 as worker_terminated in request and pool diagnostics', async () => {
+  const originalWarn = console.warn;
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args);
+
+  const fetchImpl = async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({
+      success: false,
+      code: 'TOPIC_WORKER_TERMINATED',
+      error: 'Topic worker terminated by SIGKILL',
+    }),
+  });
+
+  try {
+    await assert.rejects(
+      requestTopicAnalysis(['A crash-triggering review.'], 'steam', {
+        clientRequestId: 'topic-terminated-direct',
+        fetchImpl,
+      }),
+      (error) => error.httpStatus === 503 && error.code === 'TOPIC_WORKER_TERMINATED',
+    );
+
+    const coordinator = createTopicAnalysisRequestCoordinator({
+      request: (reviews, platform, options) => requestTopicAnalysis(reviews, platform, {
+        ...options,
+        fetchImpl,
+      }),
+    });
+
+    await assert.rejects(
+      coordinator.request(['A crash-triggering review.'], 'steam', {
+        pageKey: 'steam:app/4001890',
+        requestContext: 'active-analysis-retry',
+      }),
+      (error) => error.httpStatus === 503 && error.code === 'TOPIC_WORKER_TERMINATED',
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  const directWarning = warnings.find(([, d]) => d?.requestId === 'topic-terminated-direct');
+  assert.ok(directWarning);
+  assert.equal(directWarning[1].httpStatus, 503);
+  assert.equal(directWarning[1].code, 'TOPIC_WORKER_TERMINATED');
+  assert.equal(directWarning[1].failureReason, 'worker_terminated');
+  assert.equal(directWarning[1].details, 'http_error');
+
+  const poolWarning = warnings.find(([, d]) => d?.pageKey === 'steam:app/4001890');
+  assert.ok(poolWarning);
+  assert.equal(poolWarning[1].httpStatus, 503);
+  assert.equal(poolWarning[1].code, 'TOPIC_WORKER_TERMINATED');
+  assert.equal(poolWarning[1].failureReason, 'worker_terminated');
+  assert.notEqual(poolWarning[1].failureReason, 'network_error');
+});
+
+test('classifies TOPIC_WORKER_EXITED as worker_exited', async () => {
+  const originalWarn = console.warn;
+  let warning;
+  console.warn = (...args) => { warning = args; };
+
+  try {
+    await assert.rejects(
+      requestTopicAnalysis(['A normal review.'], 'steam', {
+        clientRequestId: 'topic-exited-direct',
+        fetchImpl: async () => ({
+          ok: false,
+          status: 503,
+          json: async () => ({
+            success: false,
+            code: 'TOPIC_WORKER_EXITED',
+            error: 'Topic worker exited with code 1',
+          }),
+        }),
+      }),
+      (error) => error.httpStatus === 503 && error.code === 'TOPIC_WORKER_EXITED',
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warning[1].httpStatus, 503);
+  assert.equal(warning[1].code, 'TOPIC_WORKER_EXITED');
+  assert.equal(warning[1].failureReason, 'worker_exited');
+});
+
+test('classifies genuine network failure without HTTP response as network_error', async () => {
+  const originalWarn = console.warn;
+  let requestWarning;
+  let poolWarning;
+  const networkError = new TypeError('Failed to fetch');
+
+  console.warn = (...args) => {
+    if (args[1]?.pageKey) {
+      poolWarning = args;
+    } else {
+      requestWarning = args;
+    }
+  };
+
+  try {
+    const coordinator = createTopicAnalysisRequestCoordinator({
+      request: (reviews, platform, options) => requestTopicAnalysis(reviews, platform, {
+        ...options,
+        fetchImpl: async () => { throw networkError; },
+      }),
+    });
+
+    await assert.rejects(
+      coordinator.request(['Offline review.'], 'steam', {
+        pageKey: 'steam:app/network-fail',
+      }),
+      (error) => error === networkError,
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(requestWarning[1].httpStatus, null);
+  assert.equal(requestWarning[1].failureReason, 'network_error');
+  assert.equal(requestWarning[1].details, 'network_error');
+
+  assert.equal(poolWarning[1].httpStatus, null);
+  assert.equal(poolWarning[1].failureReason, 'network_error');
+});
+
+test('preserves existing failureReason mappings for timeout, cancellation, shape mismatch, and generic HTTP error', () => {
+  const timeoutErr = Object.assign(new Error('timed out'), { name: 'TimeoutError' });
+  assert.equal(getTopicFailureReason(timeoutErr), 'request_timeout');
+
+  const abortErr = Object.assign(new Error('aborted'), { name: 'AbortError' });
+  assert.equal(getTopicFailureReason(abortErr), 'caller_cancelled');
+
+  const workerTimeoutErr = Object.assign(new Error('worker timeout'), { code: 'TOPIC_WORKER_TIMEOUT' });
+  assert.equal(getTopicFailureReason(workerTimeoutErr), 'worker_timeout');
+
+  const shapeMismatchErr = Object.assign(new Error('shape mismatch'), { code: 'TOPIC_RESPONSE_SHAPE_MISMATCH' });
+  assert.equal(getTopicFailureReason(shapeMismatchErr), 'response_shape_mismatch');
+
+  const genericHttpErr = Object.assign(new Error('Service Unavailable'), { httpStatus: 503 });
+  assert.equal(getTopicFailureReason(genericHttpErr), 'http_error');
 });

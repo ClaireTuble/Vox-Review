@@ -75,11 +75,11 @@ export function filterSavedAnalyses(items, {
     selectedEmotionKeys.size >= SAVED_EMOTION_OPTIONS.length;
 
   return items.filter((item) => {
-    const title = [item?.targetTitle, item?.productTitle, item?.name, item?.title]
+    const searchableText = [item?.label, item?.targetTitle, item?.productTitle, item?.name, item?.title, item?.notes]
       .filter((value) => typeof value === 'string')
       .join(' ')
       .toLocaleLowerCase();
-    const matchesSearch = !query || title.includes(query);
+    const matchesSearch = !query || searchableText.includes(query);
     const matchesPlatform = noPlatformRestriction || selectedPlatformKeys.has(normalizePlatform(item?.platform));
     const itemEmotions = getSavedEmotionKeys(item);
     const matchesEmotion = noEmotionRestriction || [...selectedEmotionKeys].some((emotion) => itemEmotions.has(emotion));

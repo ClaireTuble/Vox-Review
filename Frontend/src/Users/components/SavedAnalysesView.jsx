@@ -1,6 +1,13 @@
-import { useState, useEffect } from 'react';
-import { Lock, Globe, Trash2, RefreshCw, Search, Filter, ChevronDown } from 'lucide-react';
-import { clearAllPageAnalyses, getPageAnalyses, getPageKey, deleteAnalysisForPage } from '../../services/pageAnalysisStorage.js';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { Lock, Globe, Trash2, RefreshCw, Search, Filter, ChevronDown, MoreVertical, Edit3, StickyNote } from 'lucide-react';
+import {
+  clearAllPageAnalyses,
+  deleteAnalysisForPage,
+  getPageAnalyses,
+  getPageKey,
+  updateSnapshotMetadata,
+} from '../../services/pageAnalysisStorage.js';
+import { supabaseConfigurationError } from '../../lib/supabase.js';
 import {
   filterSavedAnalyses,
   SAVED_EMOTION_OPTIONS,
@@ -8,13 +15,17 @@ import {
   toggleSavedFilterSelection,
 } from '../utils/savedAnalysisFilters.js';
 import { getSavedAnalysisSummary } from '../utils/savedAnalysisSummary.js';
+import {
+  createSavedAnalysesRequestGuard,
+  getSavedAnalysesForUser,
+} from '../utils/savedAnalysesRequestGuard.js';
 import '../css/SavedAnalysesView.css';
 import '../css/ExtensionConfirmationModal.css';
 
 const ALL_PLATFORMS = SAVED_PLATFORM_OPTIONS;
 const ALL_EMOTIONS = SAVED_EMOTION_OPTIONS;
 
-export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, onSelectSaved, onRefreshSaved, onOpenSavedPage, onAnalyzeNewReviews, onSavedCountChange }) {
+export default function SavedAnalysesView({ isLoggedIn = false, currentUserId = null, onLoginClick, onSelectSaved, onRefreshSaved, onOpenSavedPage, onAnalyzeNewReviews, onSavedCountChange }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPlatforms, setSelectedPlatforms] = useState([...ALL_PLATFORMS]);
   const [selectedEmotions, setSelectedEmotions] = useState([...ALL_EMOTIONS]);
@@ -33,27 +44,121 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
   const [clearAllError, setClearAllError] = useState('');
   const [showClearAllConfirmation, setShowClearAllConfirmation] = useState(false);
   const [isClearingAll, setIsClearingAll] = useState(false);
-  const [savedItems, setSavedItems] = useState([]);
+  const [savedItemsState, setSavedItemsState] = useState({ userId: null, items: [] });
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const [editingItem, setEditingItem] = useState(null);
+  const [editLabelValue, setEditLabelValue] = useState('');
+  const [editNotesValue, setEditNotesValue] = useState('');
+  const [isSavingDetails, setIsSavingDetails] = useState(false);
+  const [editDetailsError, setEditDetailsError] = useState('');
+  const [loadState, setLoadState] = useState({ userId: null, isLoading: true, error: '' });
+  const requestGuardRef = useRef(null);
+  if (!requestGuardRef.current) requestGuardRef.current = createSavedAnalysesRequestGuard();
 
-  const reloadSavedItems = async () => {
-    const storedMap = await getPageAnalyses();
-    const storedItems = Object.values(storedMap);
-    setSavedItems(storedItems);
-    onSavedCountChange?.(Object.keys(storedMap).length);
+  const savedUserId = isLoggedIn ? currentUserId : null;
+  const savedItems = getSavedAnalysesForUser(savedItemsState, savedUserId);
+  const isLoadingSaved = savedUserId
+    ? loadState.userId !== savedUserId || loadState.isLoading
+    : false;
+  const loadError = loadState.userId === savedUserId ? loadState.error : '';
+
+  useLayoutEffect(() => {
+    requestGuardRef.current.setActiveUser(savedUserId);
+  }, [savedUserId]);
+
+  const reloadSavedItems = useCallback(async (requestedUserId = savedUserId) => {
+    if (!requestedUserId || requestedUserId !== savedUserId) return;
+    const request = requestGuardRef.current.begin(requestedUserId);
+    setLoadState({ userId: requestedUserId, isLoading: true, error: '' });
+    try {
+      const storedMap = await getPageAnalyses();
+      const storedItems = Object.values(storedMap);
+      storedItems.sort((a, b) => {
+        const timeA = Number(a.updated_at || a.timestamp || a.last_refreshed_at || 0);
+        const timeB = Number(b.updated_at || b.timestamp || b.last_refreshed_at || 0);
+        return timeB - timeA;
+      });
+      if (request.isCurrent()) {
+        setSavedItemsState({ userId: requestedUserId, items: storedItems });
+        setLoadState({ userId: requestedUserId, isLoading: false, error: '' });
+        onSavedCountChange?.(storedItems.length);
+      }
+    } catch (error) {
+      if (request.isCurrent()) {
+        setSavedItemsState({ userId: requestedUserId, items: [] });
+        setLoadState({
+          userId: requestedUserId,
+          isLoading: false,
+          error: 'Could not connect to cloud Saved Analyses. Check your connection and retry.',
+        });
+      }
+      throw error;
+    }
+  }, [onSavedCountChange, savedUserId]);
+
+  const handleOpenEditDetails = (item) => {
+    setOpenMenuId(null);
+    setEditingItem(item);
+    setEditLabelValue(item.label || '');
+    setEditNotesValue(item.notes || '');
+    setEditDetailsError('');
+  };
+
+  const handleSaveDetails = async (e) => {
+    e?.preventDefault?.();
+    if (!editingItem || isSavingDetails) return;
+    setIsSavingDetails(true);
+    setEditDetailsError('');
+    try {
+      const updatedItem = await updateSnapshotMetadata(editingItem.id, {
+        label: editLabelValue,
+        notes: editNotesValue,
+      });
+      if (!updatedItem) {
+        throw new Error('Saved analysis snapshot was not found.');
+      }
+      await reloadSavedItems();
+      setEditingItem(null);
+    } catch (err) {
+      if (import.meta.env.DEV) console.error('VoxReview: Could not save details:', err);
+      setEditDetailsError('Unable to save snapshot details. Please try again.');
+    } finally {
+      setIsSavingDetails(false);
+    }
   };
 
   useEffect(() => {
-    let isMounted = true;
-    getPageAnalyses().then((storedMap) => {
-      if (!isMounted) return;
-      const storedItems = Object.values(storedMap);
-      setSavedItems(storedItems);
-      onSavedCountChange?.(Object.keys(storedMap).length);
-    }).catch((error) => {
+    setSavedItemsState({ userId: null, items: [] });
+    setLoadState({
+      userId: savedUserId,
+      isLoading: Boolean(savedUserId),
+      error: '',
+    });
+    onSavedCountChange?.(0);
+    setItemToDelete(null);
+    setEditingItem(null);
+    setDeleteError('');
+    setClearAllError('');
+    setEditDetailsError('');
+    setOpenMenuId(null);
+    setRefreshingId(null);
+    setRefreshErrorMap({});
+    setRefreshMessageMap({});
+    setPendingReviewMap({});
+    setLastCheckedMap({});
+    setOpeningId(null);
+    setAnalyzingNewId(null);
+    setOpenPromptId(null);
+    if (!savedUserId || supabaseConfigurationError) {
+      return undefined;
+    }
+    reloadSavedItems().catch((error) => {
       if (import.meta.env.DEV) console.error('VoxReview: Could not load saved analyses:', error);
     });
-    return () => { isMounted = false; };
-  }, [onSavedCountChange]);
+    return () => {
+      requestGuardRef.current.invalidateAll();
+    };
+  }, [savedUserId, onSavedCountChange, reloadSavedItems]);
 
   const togglePlatform = (plat) => {
     setSelectedPlatforms((current) => toggleSavedFilterSelection(current, plat, ALL_PLATFORMS));
@@ -92,7 +197,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
 
   const confirmDelete = async () => {
     if (!itemToDelete) return;
-    const targetKey = getPageKey(itemToDelete.platform, itemToDelete.page_url) || itemToDelete.pageKey;
+    const targetKey = itemToDelete.id || getPageKey(itemToDelete.platform, itemToDelete.page_url) || itemToDelete.pageKey;
     try {
       await deleteAnalysisForPage(targetKey);
       await reloadSavedItems();
@@ -123,7 +228,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
   const handleRefreshItem = async (e, item) => {
     e.stopPropagation();
     if (refreshingId) return;
-    const itemKey = getPageKey(item.platform, item.page_url) || item.pageKey;
+    const itemKey = item.id || getPageKey(item.platform, item.page_url) || item.pageKey;
 
     setRefreshingId(itemKey);
     setRefreshErrorMap((prev) => ({ ...prev, [itemKey]: null }));
@@ -147,7 +252,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
       if (import.meta.env.DEV) console.error('VoxReview: Could not rescan saved page:', err);
       setRefreshErrorMap((prev) => ({
         ...prev,
-        [itemKey]: 'Unable to refresh this analysis. Please check that the original page is available.'
+        [itemKey]: err.message || 'Unable to refresh this analysis. Please check that the original page is available.'
       }));
     } finally {
       setRefreshingId(null);
@@ -155,7 +260,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
   };
 
   const handleOpenProductPage = async (item) => {
-    const itemKey = getPageKey(item.platform, item.page_url) || item.pageKey;
+    const itemKey = item.id || getPageKey(item.platform, item.page_url) || item.pageKey;
     setOpeningId(itemKey);
     setOpenPromptId(null);
     setRefreshErrorMap((prev) => ({ ...prev, [itemKey]: null }));
@@ -177,7 +282,7 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
   };
 
   const handleAnalyzeNewReviews = async (item) => {
-    const itemKey = getPageKey(item.platform, item.page_url) || item.pageKey;
+    const itemKey = item.id || getPageKey(item.platform, item.page_url) || item.pageKey;
     const pendingReviews = pendingReviewMap[itemKey] || [];
     if (pendingReviews.length === 0 || analyzingNewId) return;
     setAnalyzingNewId(itemKey);
@@ -187,7 +292,10 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
       if (!result?.success) throw new Error(result?.error || 'Unable to analyze the new reviews.');
       setPendingReviewMap((prev) => ({ ...prev, [itemKey]: [] }));
       await reloadSavedItems();
-      setRefreshMessageMap((prev) => ({ ...prev, [itemKey]: `${pendingReviews.length} new reviews analyzed` }));
+      setRefreshMessageMap((prev) => ({
+        ...prev,
+        [itemKey]: result.message || `${result.newReviewCount || 0} new reviews analyzed`,
+      }));
     } catch (error) {
       setRefreshErrorMap((prev) => ({
         ...prev,
@@ -209,7 +317,22 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
     return `${elapsedDays} ${elapsedDays === 1 ? 'day' : 'days'} ago`;
   };
 
-  if (!isLoggedIn) {
+  if (supabaseConfigurationError) {
+    return (
+      <div className="saved-view-container">
+        <div className="saved-card" role="alert" style={{ flexDirection: 'column', textAlign: 'center', padding: '24px 16px', gap: '12px' }}>
+          <h3 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+            Saved Analyses configuration error
+          </h3>
+          <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.4, maxWidth: '280px' }}>
+            {supabaseConfigurationError}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!savedUserId) {
     return (
       <div className="saved-view-container">
         <div className="saved-card" style={{ flexDirection: 'column', textAlign: 'center', padding: '24px 16px', gap: '12px' }}>
@@ -262,6 +385,12 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
 
       {deleteError && <p role="alert" className="saved-refresh-error-msg">{deleteError}</p>}
       {clearAllError && <p role="alert" className="saved-refresh-error-msg">{clearAllError}</p>}
+      {loadError && (
+        <div className="saved-cloud-status saved-cloud-status-error" role="alert">
+          <span>{loadError}</span>
+          <button type="button" onClick={() => reloadSavedItems().catch(() => {})}>Retry</button>
+        </div>
+      )}
 
       <div className="saved-controls-container">
         <div className="saved-search-wrap">
@@ -393,65 +522,93 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
       )}
 
       <div className="saved-list">
-        {filteredItems.length === 0 ? (
+        {isLoadingSaved ? (
+          <div className="saved-empty-state">
+            <span>Loading saved analyses...</span>
+          </div>
+        ) : filteredItems.length === 0 ? (
           <div className="saved-empty-state">
             <span>No saved analyses found.</span>
           </div>
         ) : (
           filteredItems.map((item) => {
             const summary = getSavedAnalysisSummary(item);
+            const itemKey = item.id || getPageKey(item.platform, item.page_url) || item.pageKey;
+            const snapshotLabel = item.label || 'Analysis 1';
+            const lastCheckedTime = lastCheckedMap[itemKey] || item.last_refreshed_at;
+            const reviewCount = Number(item.reviewCount ?? (Array.isArray(item.reviews) ? item.reviews.length : 0));
+            const reviewCountText = `${reviewCount} ${reviewCount === 1 ? 'review' : 'reviews'}`;
+            const lastUpdatedText = item.date === 'Just now' ? 'Just now' : (item.date || 'Saved');
             return (
-            <div key={getPageKey(item.platform, item.page_url) || item.pageKey || item.id} className="saved-card" onClick={() => onSelectSaved(item)}>
+            <div
+              key={itemKey}
+              className={`saved-card${openMenuId === itemKey ? ' saved-card--menu-open' : ''}`}
+              onClick={() => onSelectSaved(item)}
+            >
               <div className="saved-card-info">
                 <span className="saved-card-title">{item.targetTitle}</span>
                 <div className="saved-card-meta">
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                  <span className="saved-snapshot-badge" title={snapshotLabel}>
+                    {snapshotLabel}
+                  </span>
+                  <span className="saved-meta-item">
                     <Globe size={11} /> {item.platform}
                   </span>
-                  <span>• {item.date === 'Just now' ? 'Last updated Just now' : `Last updated ${item.date}`}</span>
+                  <span className="saved-meta-item">
+                    • {reviewCountText}
+                  </span>
+                  <span className="saved-meta-item">
+                    • {lastUpdatedText}
+                  </span>
                 </div>
-                {(lastCheckedMap[getPageKey(item.platform, item.page_url) || item.pageKey] || item.last_refreshed_at) && (
+                {item.notes && item.notes.trim() ? (
+                  <div className="saved-card-notes-preview" title={item.notes}>
+                    <StickyNote size={10} className="saved-notes-icon" />
+                    <span className="saved-notes-text">{item.notes}</span>
+                  </div>
+                ) : null}
+                {lastCheckedTime && (
                   <div className="saved-card-last-checked">
-                    Last checked: {formatLastChecked(lastCheckedMap[getPageKey(item.platform, item.page_url) || item.pageKey] || item.last_refreshed_at)}
+                    Last checked: {formatLastChecked(lastCheckedTime)}
                   </div>
                 )}
 
                 <div className="saved-card-actions-bottom">
                   <button
                     type="button"
-                    className={`saved-refresh-btn ${refreshingId === (getPageKey(item.platform, item.page_url) || item.pageKey) ? 'refreshing' : ''}`}
+                    className={`saved-refresh-btn ${refreshingId === itemKey ? 'refreshing' : ''}`}
                     onClick={(e) => handleRefreshItem(e, item)}
-                    disabled={refreshingId === (getPageKey(item.platform, item.page_url) || item.pageKey)}
+                    disabled={refreshingId === itemKey}
                     title="Retrieve latest reviews from source page"
                   >
-                    <RefreshCw size={11} className={refreshingId === (getPageKey(item.platform, item.page_url) || item.pageKey) ? 'spin' : ''} />
-                    <span>{refreshingId === (getPageKey(item.platform, item.page_url) || item.pageKey) ? 'Refreshing...' : 'Refresh'}</span>
+                    <RefreshCw size={11} className={refreshingId === itemKey ? 'spin' : ''} />
+                    <span>{refreshingId === itemKey ? 'Refreshing...' : 'Refresh'}</span>
                   </button>
                 </div>
 
-                {refreshErrorMap[getPageKey(item.platform, item.page_url) || item.pageKey] && (
+                {refreshErrorMap[itemKey] && (
                   <div className="saved-refresh-error-msg">
-                    {refreshErrorMap[getPageKey(item.platform, item.page_url) || item.pageKey]}
+                    {refreshErrorMap[itemKey]}
                   </div>
                 )}
-                {refreshMessageMap[getPageKey(item.platform, item.page_url) || item.pageKey] && (
+                {refreshMessageMap[itemKey] && (
                   <div className="saved-refresh-status-msg" role="status">
-                    {refreshMessageMap[getPageKey(item.platform, item.page_url) || item.pageKey]}
+                    {refreshMessageMap[itemKey]}
                   </div>
                 )}
-                {pendingReviewMap[getPageKey(item.platform, item.page_url) || item.pageKey]?.length > 0 && (
+                {pendingReviewMap[itemKey]?.length > 0 && (
                   <button
                     type="button"
                     className="saved-analyze-new-btn"
                     onClick={(event) => { event.stopPropagation(); void handleAnalyzeNewReviews(item); }}
-                    disabled={analyzingNewId === (getPageKey(item.platform, item.page_url) || item.pageKey)}
+                    disabled={analyzingNewId === itemKey}
                   >
-                    {analyzingNewId === (getPageKey(item.platform, item.page_url) || item.pageKey)
+                    {analyzingNewId === itemKey
                       ? 'Analyzing new reviews...'
-                      : `Analyze ${pendingReviewMap[getPageKey(item.platform, item.page_url) || item.pageKey].length} New Reviews`}
+                      : `Analyze ${pendingReviewMap[itemKey].length} New Reviews`}
                   </button>
                 )}
-                {openPromptId === (getPageKey(item.platform, item.page_url) || item.pageKey) && (
+                {openPromptId === itemKey && (
                   <div className="saved-open-page-prompt" role="group" aria-label="Open original product page">
                     <span>The original product page needs to be opened to refresh reviews.</span>
                     <div className="saved-open-page-actions">
@@ -459,15 +616,15 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                         type="button"
                         className="saved-analyze-new-btn"
                         onClick={(event) => { event.stopPropagation(); void handleOpenProductPage(item); }}
-                        disabled={openingId === (getPageKey(item.platform, item.page_url) || item.pageKey)}
+                        disabled={openingId === itemKey}
                       >
-                        {openingId === (getPageKey(item.platform, item.page_url) || item.pageKey) ? 'Opening...' : 'Open Product Page'}
+                        {openingId === itemKey ? 'Opening...' : 'Open Product Page'}
                       </button>
                       <button
                         type="button"
                         className="saved-prompt-cancel-btn"
                         onClick={(event) => { event.stopPropagation(); setOpenPromptId(null); }}
-                        disabled={openingId === (getPageKey(item.platform, item.page_url) || item.pageKey)}
+                        disabled={openingId === itemKey}
                       >
                         Cancel
                       </button>
@@ -476,15 +633,47 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                 )}
               </div>
               <div className="saved-card-right">
-                <button
-                  type="button"
-                  className="saved-trash-btn"
-                  title="Delete Saved Analysis"
-                  onClick={(e) => handleTrashClick(e, item)}
-                  aria-label={`Delete ${item.targetTitle}`}
-                >
-                  <Trash2 size={13} />
-                </button>
+                <div className="saved-card-actions-top">
+                  <div className="saved-menu-anchor">
+                    <button
+                      type="button"
+                      className="saved-action-btn saved-menu-btn"
+                      title="More options"
+                      aria-label={`Options for ${item.targetTitle}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenMenuId(openMenuId === itemKey ? null : itemKey);
+                      }}
+                    >
+                      <MoreVertical size={13} />
+                    </button>
+                    {openMenuId === itemKey && (
+                      <div className="saved-card-menu-dropdown" role="menu" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="saved-card-menu-item"
+                          role="menuitem"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditDetails(item);
+                          }}
+                        >
+                          <Edit3 size={11} />
+                          <span>Edit Details</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="saved-action-btn saved-trash-btn"
+                    title="Delete Saved Analysis"
+                    onClick={(e) => handleTrashClick(e, item)}
+                    aria-label={`Delete ${item.targetTitle}`}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
                 <span className="saved-emotion-summary">
                   {summary
                     ? `${summary.dominantEmotion} (${summary.percentage})`
@@ -557,6 +746,103 @@ export default function SavedAnalysesView({ isLoggedIn = false, onLoginClick, on
                 {isClearingAll ? 'Deleting…' : 'Delete All'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {openMenuId && (
+        <div
+          className="saved-menu-backdrop"
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpenMenuId(null);
+          }}
+        />
+      )}
+
+      {editingItem && (
+        <div className="extension-modal-backdrop" role="presentation" onClick={() => !isSavingDetails && setEditingItem(null)}>
+          <div
+            className="extension-modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-details-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="edit-details-title">Edit Details</h2>
+            <p style={{ margin: '0 0 12px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+              {editingItem.targetTitle}
+            </p>
+            <form onSubmit={handleSaveDetails}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' }}>
+                <div>
+                  <label
+                    htmlFor="edit-snapshot-label"
+                    style={{ display: 'block', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', marginBottom: '4px' }}
+                  >
+                    Snapshot Label
+                  </label>
+                  <input
+                    id="edit-snapshot-label"
+                    type="text"
+                    className="extension-label-input"
+                    value={editLabelValue}
+                    onChange={(e) => setEditLabelValue(e.target.value)}
+                    placeholder="e.g. Initial Analysis, October Update"
+                    maxLength={60}
+                    autoFocus
+                  />
+                  <span style={{ display: 'block', fontSize: '9.5px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                    Leave blank to keep or auto-generate default (e.g. Analysis 1, Analysis 2).
+                  </span>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="edit-snapshot-notes"
+                    style={{ display: 'block', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', marginBottom: '4px' }}
+                  >
+                    Personal Notes (Optional)
+                  </label>
+                  <textarea
+                    id="edit-snapshot-notes"
+                    className="extension-notes-textarea"
+                    value={editNotesValue}
+                    onChange={(e) => setEditNotesValue(e.target.value)}
+                    placeholder="Add personal notes, reminders, or context for this snapshot..."
+                    rows={3}
+                    maxLength={500}
+                  />
+                  <span style={{ display: 'block', fontSize: '9.5px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                    Notes are saved with your cloud snapshot. Avoid personal or sensitive information; notes are not automatically screened.
+                  </span>
+                </div>
+              </div>
+
+              {editDetailsError && (
+                <div style={{ color: '#ef4444', fontSize: '10.5px', marginBottom: '10px' }}>
+                  {editDetailsError}
+                </div>
+              )}
+
+              <div className="extension-modal-actions">
+                <button
+                  type="button"
+                  className="extension-modal-button extension-modal-button-secondary"
+                  onClick={() => setEditingItem(null)}
+                  disabled={isSavingDetails}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="extension-modal-button extension-modal-button-primary"
+                  disabled={isSavingDetails}
+                >
+                  {isSavingDetails ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

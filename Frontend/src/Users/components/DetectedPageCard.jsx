@@ -1,4 +1,5 @@
-import { CheckCircle2, Globe, Star, MessageSquare } from 'lucide-react';
+import { CheckCircle2, Gamepad2, Globe, ShoppingBag, Star, Store, Video } from 'lucide-react';
+import { useState } from 'react';
 import '../css/DetectedPageCard.css';
 
 const PLATFORM_LABELS = {
@@ -11,12 +12,56 @@ const PLATFORM_LABELS = {
   default: { label: 'Current Source', cls: 'default' },
 };
 
+function getSafeImageUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function ProductThumbnail({ platform, pageTitle, productImage, productMediaType }) {
+  const [failedUrl, setFailedUrl] = useState(null);
+  const imageUrl = getSafeImageUrl(productImage);
+  const FallbackIcon = productMediaType === 'video'
+    ? Video
+    : platform === 'steam'
+      ? Gamepad2
+      : ['shopee', 'lazada', 'agoda'].includes(platform)
+        ? ShoppingBag
+        : platform === 'googleplay'
+          ? Store
+          : Globe;
+
+  return (
+    <div className="page-img-wrapper">
+      {imageUrl && failedUrl !== imageUrl ? (
+        <img
+          src={imageUrl}
+          alt={pageTitle}
+          className="page-img-src"
+          onError={() => setFailedUrl(imageUrl)}
+        />
+      ) : (
+        <div className="page-img-placeholder" aria-hidden="true">
+          <FallbackIcon size={24} strokeWidth={1.6} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DetectedPageCard({
   platform = '',
   pageTitle = 'Detecting Product...',
   category = 'Product Reviews',
   rating = '--',
   productImage = null,
+  productMediaType = null,
   reviewsCount = '0',
   reviewSource = 'Product Reviews',
   status = 'idle',             // 'idle' | 'analyzing' | 'completed'
@@ -42,21 +87,12 @@ export default function DetectedPageCard({
         </div>
 
         <div className="page-main-info" style={{ marginTop: '6px' }}>
-          {/* Product Image */}
-          <div className="page-img-wrapper">
-            {productImage ? (
-              <img src={productImage} alt={pageTitle} className="page-img-src" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }} />
-            ) : (
-              <div className="page-img-placeholder">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                  <line x1="8" y1="21" x2="16" y2="21" />
-                  <line x1="12" y1="17" x2="12" y2="21" />
-                </svg>
-                <span className="img-subtext">Product Image</span>
-              </div>
-            )}
-          </div>
+          <ProductThumbnail
+            platform={normalizedPlatform}
+            pageTitle={pageTitle}
+            productImage={productImage}
+            productMediaType={productMediaType}
+          />
 
           {/* Product Details */}
           <div className="page-details">
@@ -92,21 +128,12 @@ export default function DetectedPageCard({
   return (
     <div className="detected-page-card-container">
       <div className="page-main-info">
-        {/* Product Image Placeholder or Image */}
-        <div className="page-img-wrapper">
-          {productImage ? (
-            <img src={productImage} alt={pageTitle} className="page-img-src" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }} />
-          ) : (
-            <div className="page-img-placeholder">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                <line x1="8" y1="21" x2="16" y2="21" />
-                <line x1="12" y1="17" x2="12" y2="21" />
-              </svg>
-              <span className="img-subtext">Product Image</span>
-            </div>
-          )}
-        </div>
+        <ProductThumbnail
+          platform={normalizedPlatform}
+          pageTitle={pageTitle}
+          productImage={productImage}
+          productMediaType={productMediaType}
+        />
 
         {/* Product Details */}
         <div className="page-details">
