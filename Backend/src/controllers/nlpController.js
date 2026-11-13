@@ -19,11 +19,18 @@ import {
 
 const controllerDirectory = path.dirname(fileURLToPath(import.meta.url));
 const nlpDirectory = path.resolve(controllerDirectory, "../../../Frontend/nlp");
-const svmWorkerScript = path.join(nlpDirectory, "svm_worker.py");
+const hybridEmotionWorkerScript = path.join(nlpDirectory, "hybrid_emotion_worker.py");
 const topicWorkerScript = path.join(nlpDirectory, "topic_worker.py");
 const pythonExecutable = process.env.PYTHON_EXECUTABLE || "python";
 const svmWorkerTimeoutMs = Number(process.env.SVM_WORKER_TIMEOUT_MS || 60000);
+export const emotionModelMode = "hybrid_oof_stacking";
+const expectedHybridArtifactSha256 =
+  "7bb99751451f878083d2c8da615dc4f0f230f7684dc92fd82f9e71806d6d2861";
+const expectedHybridSpecialists = new Set(["Disgust", "Fear", "Sarcastic"]);
+const expectedHybridArchitecture = "word_char_tfidf_oof_stacking";
+const MAX_EMOTION_REVIEWS_PER_REQUEST = 100;
 const validCategories = new Set([1, 2, 3, 4, 5, 6]);
+const emotionLabels = ["Happy", "Sad", "Anger", "Disgust", "Fear", "Sarcastic"];
 const validTopicLabels = new Set([
   "Quality", "Performance / Functionality", "Features / Content", "Service / Support",
   "Delivery / Transaction", "Price / Value", "Usability / Experience",
@@ -44,13 +51,13 @@ const topicWorkerRequestIds = new WeakMap();
 const topicResultCache = createTopicAnalysisResultCache();
 const inFlightTopicComputations = new Map();
 const TOPIC_KEYWORD_QUEUE_BATCH_SIZE = 32;
-const svmWorker = new PersistentJsonWorker({
+const emotionWorker = new PersistentJsonWorker({
   command: pythonExecutable,
-  args: [svmWorkerScript],
+  args: [hybridEmotionWorkerScript],
   cwd: nlpDirectory,
   timeoutMs: svmWorkerTimeoutMs,
 });
-process.once("exit", () => svmWorker.dispose());
+process.once("exit", () => emotionWorker.dispose());
 function safeTopicDiagnosticText(value, reviews) {
   let text = String(value ?? "");
   reviews.forEach((review) => {
@@ -62,6 +69,45 @@ function safeTopicDiagnosticText(value, reviews) {
     .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi, "$1[redacted]")
     .replace(/\b(password|token|api[_ -]?key|secret)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi, "$1$2[redacted]")
     .slice(-2000);
+}
+
+function redactTextForNlp(text) {
+  if (typeof text !== "string") return "";
+  let sanitized = text.trim();
+  if (!sanitized) return "";
+
+  sanitized = sanitized.replace(/\b[A-Z0-9._%+\-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[EMAIL]");
+  sanitized = sanitized.replace(/(?:\+?\d{1,3}[\s().-]?)?(?:\(?\d{2,4}\)?[\s().-]?){2,5}\d{3,4}/g, (match) => {
+    const digits = String(match).replace(/\D+/g, "");
+    return digits.length >= 7 && digits.length <= 15 && /(?:\+|^09|^63|^0)/.test(match.replace(/\s+/g, ""))
+      ? "[PHONE]"
+      : match;
+  });
+  sanitized = sanitized.replace(/\b(?:order|invoice|tracking|ref(?:erence)?|awb|shipment|parcel|receipt|delivery|package)(?:\s*(?:no|num(?:ber)?|number|id))?(?:[\s:;#.-]+)([A-Z0-9-]{4,32})\b/gi, (match, orderId) => {
+    const label = match.slice(0, match.length - orderId.length).trim().replace(/[.:;#-]+$/, '');
+    return `${label} [ORDER_ID]`;
+  });
+  const addressPattern = /\b(?:\d{1,6}\s+[A-Za-z0-9.\- ]{2,40}\s+(?:Street|St|Road|Rd|Avenue|Ave|Boulevard|Blvd|Lane|Ln|Drive|Dr|Barangay|Brgy|Block|Blk|Lot|Unit|Bldg|Building|Subdivision|Subd|Sitio|City|Municipality|Province))\b/gi;
+  const reverseAddressPattern = /\b(?:Blk|Blg|Lot|Unit|Bldg|Building|Street|St|Road|Rd|Avenue|Ave|Boulevard|Blvd|Lane|Ln|Drive|Dr|Barangay|Brgy|Sitio|Subdivision|Subd)\s+\d{1,6}[A-Za-z0-9.\- ]{0,40}\b/gi;
+  sanitized = sanitized.replace(addressPattern, "[ADDRESS]").replace(reverseAddressPattern, "[ADDRESS]");
+  sanitized = sanitized.replace(/\b(?:Mr|Mrs|Ms|Dr|Sir|Madam|Ma'am|Maam)\.?\s+(?:[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b/g, "[NAME]");
+  sanitized = sanitized.replace(/\b(Salamat\s+Kay|Para kay|Hi|Hello|Thanks|Thank you|Salamat|Kay|From)\s+(?:[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b/gi, "$1 [NAME]");
+  return sanitized.replace(/\s+/gu, " ").trim();
+}
+
+function sanitizeIncomingReviews(reviews) {
+  if (!Array.isArray(reviews)) return [];
+  return reviews.map((review) => {
+    if (typeof review !== "string") return "";
+    return redactTextForNlp(review);
+  }).filter((review) => typeof review === "string" && review.trim().length > 0);
+}
+
+function getInvalidReviewIndices(reviews) {
+  return reviews.reduce((indices, review, index) => {
+    if (typeof review !== "string" || !review.trim()) indices.push(index);
+    return indices;
+  }, []);
 }
 
 function getTopicResultCounts(response) {
@@ -115,10 +161,75 @@ function logTopicWorkerResult(diagnostics, response = null) {
   });
 }
 
-function validateSvmResponse(response, reviewCount) {
+export function validateEmotionResponse(response, reviewCount) {
   const predictions = response?.predictions;
   const results = response?.results;
   const categoryDrivers = response?.categoryDrivers;
+  const hasProbabilityDetails = [
+    "totalReviews",
+    "dominantEmotion",
+    "distribution",
+    "predictedCounts",
+    "perReview",
+  ].some((key) => response?.[key] !== undefined);
+  const expectedCounts = Object.fromEntries(
+    emotionLabels.map((emotion) => [emotion, 0]),
+  );
+  if (Array.isArray(predictions)) {
+    predictions.forEach((category) => {
+      const label = emotionLabels[category - 1];
+      if (label) expectedCounts[label] += 1;
+    });
+  }
+  const expectedDominantEmotion = Object.keys(expectedCounts).reduce(
+    (best, emotion) => (
+      expectedCounts[emotion] > expectedCounts[best] ? emotion : best
+    ),
+    "Happy",
+  );
+  const validPercentages = (percentages) => (
+    percentages &&
+    typeof percentages === "object" &&
+    Object.keys(percentages).length === 6 &&
+    emotionLabels.every((emotion) => (
+      Number.isFinite(percentages[emotion]) && percentages[emotion] > 0
+    )) &&
+    Math.abs(
+      Object.values(percentages).reduce((total, value) => total + value, 0) - 100,
+    ) <= 0.02
+  );
+  const validProbabilityDetails = !hasProbabilityDetails || (
+    Array.isArray(predictions) &&
+    predictions.length === reviewCount &&
+    response?.totalReviews === reviewCount &&
+    response?.dominantEmotion === expectedDominantEmotion &&
+    response?.predictedCounts &&
+    Object.keys(response.predictedCounts).length === 6 &&
+    Object.keys(expectedCounts).every((emotion) => (
+      response.predictedCounts[emotion] === expectedCounts[emotion]
+    )) &&
+    response?.distribution &&
+    Object.keys(response.distribution).length === 6 &&
+    Object.keys(expectedCounts).every((emotion) => (
+      response.distribution[emotion]?.count === expectedCounts[emotion] &&
+      Number.isFinite(response.distribution[emotion]?.percentage) &&
+      response.distribution[emotion].percentage > 0
+    )) &&
+    Math.abs(
+      Object.values(response.distribution).reduce(
+        (total, row) => total + row.percentage,
+        0,
+      ) - 100,
+    ) <= 0.02 &&
+    Array.isArray(response.perReview) &&
+    response.perReview.length === reviewCount &&
+    response.perReview.every((row, index) => (
+      row?.reviewIndex === index &&
+      row?.category === predictions[index] &&
+      row?.dominantEmotion === emotionLabels[predictions[index] - 1] &&
+      validPercentages(row?.probabilities)
+    ))
+  );
   if (
     !Array.isArray(predictions) ||
     predictions.length !== reviewCount ||
@@ -129,82 +240,207 @@ function validateSvmResponse(response, reviewCount) {
       results.some((result, index) => (
         result?.category !== predictions[index] ||
         !Array.isArray(result?.emotionDrivers) ||
-        result.emotionDrivers.some((driver) => typeof driver !== "string")
+        result.emotionDrivers.some((driver) => typeof driver !== "string") ||
+        (result.mode !== undefined &&
+          result.mode !== "baseline") ||
+        (result.routing_mode !== undefined &&
+          result.routing_mode !== "baseline_default") ||
+        (result.mode !== undefined &&
+          result.routing_mode !== undefined &&
+          result.routing_mode !== "baseline_default")
       ))
     )) ||
     (categoryDrivers !== undefined && (
+      categoryDrivers === null ||
       typeof categoryDrivers !== "object" ||
       Object.values(categoryDrivers).some((drivers) => (
         !Array.isArray(drivers) || drivers.some((driver) => typeof driver !== "string")
       ))
-    ))
+    )) ||
+    !validProbabilityDetails
   ) {
-    throw new Error("SVM returned an invalid prediction explanation payload");
+    throw new Error("Emotion worker returned an invalid prediction explanation payload");
   }
 
   return {
     predictions,
     results: Array.isArray(results)
-      ? results
+      ? results.map((result) => ({
+          category: result.category,
+          emotionDrivers: result.emotionDrivers,
+          ...(result.mode === undefined ? {} : { mode: result.mode }),
+          ...(result.routing_mode === undefined
+            ? {}
+            : { routing_mode: result.routing_mode }),
+        }))
       : predictions.map((category) => ({ category, emotionDrivers: [] })),
     categoryDrivers: categoryDrivers && typeof categoryDrivers === "object"
       ? categoryDrivers
       : {},
+    ...(hasProbabilityDetails
+      ? {
+          totalReviews: response.totalReviews,
+          dominantEmotion: response.dominantEmotion,
+          distribution: response.distribution,
+          predictedCounts: response.predictedCounts,
+          perReview: response.perReview,
+        }
+      : {}),
   };
 }
 
-export async function predictSvm(req, res) {
-  const reviews = req.body?.reviews;
-  if (!Array.isArray(reviews) || reviews.length === 0 || reviews.length > 500) {
-    return res.status(400).json({
-      success: false,
-      error: "reviews must contain between 1 and 500 items",
-    });
-  }
+const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
 
-  if (reviews.some((review) => typeof review !== "string" || !review.trim())) {
-    return res.status(400).json({
-      success: false,
-      error: "each review must be a non-empty string",
-    });
-  }
+export function getEmotionModelProvenance(workerResponse, {
+  configuredValue = process.env.VOXREVIEW_EMOTION_MODEL ?? null,
+  selectedWorker = emotionModelMode,
+  reviewOffset = 0,
+} = {}) {
+  const workerProvenance = workerResponse?.modelProvenance;
+  const modelIdentifier = workerProvenance?.modelIdentifier === emotionModelMode
+    ? emotionModelMode
+    : null;
+  const artifactSha256 = typeof workerProvenance?.artifactSha256 === "string" &&
+    SHA256_PATTERN.test(workerProvenance.artifactSha256) &&
+    workerProvenance.artifactSha256.toLowerCase() === expectedHybridArtifactSha256
+    ? workerProvenance.artifactSha256.toLowerCase()
+    : null;
+  const inferencePolicy = workerProvenance?.inferencePolicy === emotionModelMode
+    ? emotionModelMode
+    : null;
 
-  const workerAbortController = new AbortController();
-  const abortWorkerRequest = () => workerAbortController.abort();
-  const abortWorkerOnResponseClose = () => {
-    if (!res.writableEnded) abortWorkerRequest();
+  return {
+    modelIdentifier,
+    artifactSha256,
+    inferencePolicy,
+    selectionConfiguration: {
+      inferencePolicy,
+      configuredValue,
+      selectedWorker,
+    },
+    ...(workerProvenance?.architecture === expectedHybridArchitecture
+      ? { architecture: expectedHybridArchitecture }
+      : {}),
+    ...(workerProvenance?.specialistThresholds &&
+      typeof workerProvenance.specialistThresholds === "object"
+      ? { specialistThresholds: workerProvenance.specialistThresholds }
+      : {}),
+    reviewPredictions: Array.isArray(workerResponse?.predictions)
+      ? workerResponse.predictions.map((prediction, reviewIndex) => ({
+          reviewIndex: reviewOffset + reviewIndex,
+          prediction,
+        }))
+      : [],
   };
-  req.once("aborted", abortWorkerRequest);
-  res.once("close", abortWorkerOnResponseClose);
+}
 
-  try {
-    const workerResponse = await svmWorker.request(
-      { reviews },
-      { signal: workerAbortController.signal },
-    );
-    if (workerResponse.success !== true) {
-      throw new Error("SVM worker returned an unsuccessful response");
-    }
-    const predictionResponse = validateSvmResponse(workerResponse, reviews.length);
-    return res.json({ success: true, ...predictionResponse });
-  } catch (error) {
-    if (req.aborted || res.destroyed) return;
-    if (error.code === "ETIMEDOUT") {
-      return res.status(504).json({
+export function createEmotionPredictionHandler(worker = emotionWorker, modelSelection = {}) {
+  return async function predictSvm(req, res) {
+    const submittedReviews = req.body?.reviews;
+    const reviewOffset = req.body?.reviewOffset ?? 0;
+    if (!Number.isSafeInteger(reviewOffset) || reviewOffset < 0) {
+      return res.status(400).json({
         success: false,
-        error: "SVM prediction timed out. Please retry.",
+        error: "reviewOffset must be a non-negative integer",
       });
     }
-    console.error("VoxReview SVM prediction error:", error);
-    return res.status(503).json({
-      success: false,
-      error: "SVM prediction service unavailable",
-    });
-  } finally {
-    req.removeListener("aborted", abortWorkerRequest);
-    res.removeListener("close", abortWorkerOnResponseClose);
-  }
+    if (!Array.isArray(submittedReviews) || submittedReviews.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: `reviews must contain between 1 and ${MAX_EMOTION_REVIEWS_PER_REQUEST} items`,
+      });
+    }
+
+    const invalidIndices = getInvalidReviewIndices(submittedReviews);
+    if (invalidIndices.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: "reviews must contain only non-empty strings",
+        invalidIndices,
+      });
+    }
+
+    if (submittedReviews.length > MAX_EMOTION_REVIEWS_PER_REQUEST) {
+      return res.status(400).json({
+        success: false,
+        error: `reviews must contain between 1 and ${MAX_EMOTION_REVIEWS_PER_REQUEST} items`,
+      });
+    }
+
+    const reviews = sanitizeIncomingReviews(submittedReviews);
+
+    const workerAbortController = new AbortController();
+    const abortWorkerRequest = () => workerAbortController.abort();
+    const abortWorkerOnResponseClose = () => {
+      if (!res.writableEnded) abortWorkerRequest();
+    };
+    req.once("aborted", abortWorkerRequest);
+    res.once("close", abortWorkerOnResponseClose);
+
+    try {
+      const workerResponse = await worker.request(
+        { reviews },
+        { signal: workerAbortController.signal },
+      );
+      if (workerResponse.success !== true) {
+        throw new Error("Emotion worker returned an unsuccessful response");
+      }
+      if (
+        workerResponse.modelProvenance?.modelIdentifier !== emotionModelMode ||
+        workerResponse.modelProvenance?.inferencePolicy !== emotionModelMode ||
+        workerResponse.modelProvenance?.architecture !== expectedHybridArchitecture ||
+        typeof workerResponse.modelProvenance?.artifactSha256 !== "string" ||
+        !SHA256_PATTERN.test(workerResponse.modelProvenance.artifactSha256) ||
+        workerResponse.modelProvenance.artifactSha256.toLowerCase() !==
+          expectedHybridArtifactSha256 ||
+        !workerResponse.modelProvenance?.specialistThresholds ||
+        Object.keys(workerResponse.modelProvenance.specialistThresholds).length !==
+          expectedHybridSpecialists.size ||
+        [...expectedHybridSpecialists].some((emotion) => (
+          !workerResponse.modelProvenance.specialistThresholds[emotion] ||
+          !["selected", "disabled_fallback"].includes(
+            workerResponse.modelProvenance.specialistThresholds[emotion].status,
+          )
+        ))
+      ) {
+        throw new Error("Emotion worker did not load the pinned hybrid OOF-stacking artifact");
+      }
+      const predictionResponse = validateEmotionResponse(workerResponse, reviews.length);
+      if (Array.isArray(predictionResponse.perReview)) {
+        predictionResponse.perReview = predictionResponse.perReview.map((row) => ({
+          ...row,
+          reviewIndex: row.reviewIndex + reviewOffset,
+        }));
+      }
+      return res.json({
+        success: true,
+        ...predictionResponse,
+        modelProvenance: getEmotionModelProvenance(workerResponse, {
+          ...modelSelection,
+          reviewOffset,
+        }),
+      });
+    } catch (error) {
+      if (req.aborted || res.destroyed) return;
+      if (error.code === "ETIMEDOUT") {
+        return res.status(504).json({
+          success: false,
+          error: "Emotion prediction timed out. Please retry.",
+        });
+      }
+      console.error("VoxReview emotion prediction error:", error);
+      return res.status(503).json({
+        success: false,
+        error: "Emotion prediction service unavailable",
+      });
+    } finally {
+      req.removeListener("aborted", abortWorkerRequest);
+      res.removeListener("close", abortWorkerOnResponseClose);
+    }
+  };
 }
+
+export const predictSvm = createEmotionPredictionHandler();
 
 function stopTopicWorker(error, workerExitCode = topicWorker?.exitCode ?? null) {
   const worker = topicWorker;

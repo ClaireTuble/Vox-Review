@@ -8,3 +8,4 @@ tokenizers==0.23.2
 huggingface-hub==1.30.0
 safetensors==0.8.0
 sentencepiece==0.2.2
+sentence-transformers==6.3.0

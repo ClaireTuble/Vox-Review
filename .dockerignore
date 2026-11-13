@@ -14,6 +14,7 @@ Frontend/nlp/priority_validation/
 Frontend/nlp/tests/
 Frontend/nlp/models/*.pt
 Frontend/nlp/models/*.joblib
+!Frontend/nlp/models/hybrid_emotion_model.joblib
 !Frontend/nlp/models/svm_model.joblib
 Frontend/nlp/models/*.safetensors
 Frontend/nlp/models/*.bin
