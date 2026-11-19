@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VoxReview",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI-powered review analysis extension",
   "action": {
     "default_title": "VoxReview",
@@ -123,12 +123,19 @@
     },
     {
       "matches": [
-        "https://vox-review.vercel.app/*"
+        "https://vox-review.vercel.app/*",
+        "http://localhost/*"
       ],
       "js": [
         "assets/authSync.js"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
-  ]
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://vox-review.vercel.app/*",
+      "http://localhost:*/*"
+    ]
+  }
 }

@@ -70,6 +70,69 @@ function isSupportedAppOrigin(origin) {
     || origin === "http://127.0.0.1:5173";
 }
 
+function isAllowedExternalPingOrigin(origin) {
+  if (origin === "https://vox-review.vercel.app") return true;
+  try {
+    const url = new URL(origin);
+    return url.origin === origin &&
+      url.protocol === "http:" &&
+      url.hostname === "localhost";
+  } catch {
+    return false;
+  }
+}
+
+function getConfiguredAppContentScripts(tabUrl) {
+  let url;
+  try {
+    url = new URL(tabUrl);
+  } catch {
+    return [];
+  }
+
+  const manifest = chrome.runtime.getManifest();
+  return (manifest.content_scripts || [])
+    .filter(({ matches = [] }) => matches.some((pattern) => {
+      if (pattern === "https://vox-review.vercel.app/*") {
+        return url.origin === "https://vox-review.vercel.app";
+      }
+      return pattern === "http://localhost/*" &&
+        url.protocol === "http:" &&
+        url.hostname === "localhost";
+    }))
+    .flatMap(({ js = [] }) => js);
+}
+
+async function injectConfiguredAppContentScript(tab) {
+  if (!Number.isInteger(tab?.id) || typeof tab.url !== "string") return;
+  const files = getConfiguredAppContentScripts(tab.url);
+  if (files.length === 0) return;
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    files,
+  });
+}
+
+async function injectIntoOpenAppTabs() {
+  const tabs = await chrome.tabs.query({
+    url: [
+      "https://vox-review.vercel.app/*",
+      "http://localhost/*",
+    ],
+  });
+  const results = await Promise.allSettled(
+    tabs.map((tab) => injectConfiguredAppContentScript(tab)),
+  );
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.warn("VoxReview: Could not initialize the extension in an open app tab.", {
+        tabId: tabs[index]?.id || null,
+        message: result.reason?.message || null,
+      });
+    }
+  });
+}
+
 function getSenderOrigin(sender) {
   try {
     return sender.tab?.url ? new URL(sender.tab.url).origin : null;
@@ -353,11 +416,29 @@ const activityReporter = createActivityReporter({
   ),
 });
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   console.log("VoxReview installed");
   if (typeof chrome !== "undefined" && chrome.sidePanel) {
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
   }
+  if (details?.reason === "install") {
+    void injectIntoOpenAppTabs().catch((error) => {
+      console.warn("VoxReview: Could not initialize the extension in open app tabs.", {
+        message: error?.message || null,
+      });
+    });
+  }
+});
+
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  if (
+    !isAllowedExternalPingOrigin(sender?.origin) ||
+    message?.type !== "voxreview_extension_ping"
+  ) {
+    return false;
+  }
+
+  sendResponse({ ok: true, type: "voxreview_extension_pong" });
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

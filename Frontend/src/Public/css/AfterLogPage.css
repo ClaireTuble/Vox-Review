@@ -48,6 +48,13 @@
   box-shadow: 0 2px 8px rgba(16, 185, 129, 0.06);
 }
 
+.afterlog-pill-badge.extension-required {
+  background: rgba(99, 102, 241, 0.05);
+  border-color: rgba(99, 102, 241, 0.18);
+  color: #4F46E5;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.04);
+}
+
 .afterlog-main-heading {
   font-size: 46px;
   font-weight: 800;
@@ -73,6 +80,33 @@
 }
 
 /* ── Common Section Structure ─────────────────────────────── */
+.afterlog-install-cta {
+  margin-top: 20px;
+}
+
+.extension-recheck-button {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  color: #64748B;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.extension-recheck-button:hover:not(:disabled) {
+  color: #2563EB;
+  text-decoration: underline;
+}
+
+.extension-recheck-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .afterlog-section {
   position: relative;
   z-index: 1;
