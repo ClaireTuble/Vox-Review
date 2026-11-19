@@ -36,15 +36,15 @@ export default function LandingPage() {
           </p>
 
           <div className="hero-cta-group">
-            <button
-              type="button"
+            <a
+              href="https://chromewebstore.google.com/detail/docdbeejbfkoidffligmldaebhammafa"
+              target="_blank"
+              rel="noopener noreferrer"
               className="cta-primary"
-              style={{ border: 'none', fontFamily: 'inherit', cursor: 'pointer' }}
-              onClick={(e) => e.preventDefault()}
             >
               <Download size={16} />
               <span>Add to Chrome</span>
-            </button>
+            </a>
             <a href="#features" className="cta-secondary">
               <span>Learn More</span>
             </a>
