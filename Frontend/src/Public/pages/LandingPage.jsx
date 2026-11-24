@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
-import { Sparkles, Download, ArrowRight, Brain, Globe, BookmarkCheck, BarChart3, Store, Lock, CheckCircle2, Smartphone, Gamepad2 } from 'lucide-react';
+import { Sparkles, Download, ArrowRight, Brain, Globe, BookmarkCheck, BarChart3, Store, Lock, CheckCircle2, Smartphone, Gamepad2, ShoppingBag, Tag } from 'lucide-react';
 import Navigation from '../components/Navigation.jsx';
-import { useVoxLogo, logoDark } from '../../utils/useVoxLogo.js';
+import { useVoxLogo, logoLight } from '../../utils/useVoxLogo.js';
 import '../css/LandingPage.css';
 
 export default function LandingPage() {
@@ -23,7 +23,7 @@ export default function LandingPage() {
         <div className="hero-content">
           <div className="hero-pill-badge">
             <Sparkles size={13} className="badge-icon" />
-            <span>Review Analysis Platform</span>
+            <span>Customer Feedback Intelligence</span>
           </div>
           
           <h1 className="hero-heading">
@@ -32,7 +32,7 @@ export default function LandingPage() {
           </h1>
           
           <p className="hero-subtext">
-            VoxReview is a customer feedback analysis platform that helps users understand large amounts of online reviews more efficiently. It analyzes customer feedback, identifies emotions and discussion topics, and helps users prioritize reviews that may require attention.
+            VoxReview is an automated customer feedback analysis platform that helps users understand large amounts of online reviews more efficiently. Utilizing Natural Language Processing and Machine Learning for Taglish customer reviews, it identifies emotions and discussion topics, and helps users prioritize reviews that may require attention.
           </p>
 
           <div className="hero-cta-group">
@@ -88,9 +88,9 @@ export default function LandingPage() {
             <div className="why-card-icon-wrapper purple">
               <Brain size={22} />
             </div>
-            <h3 className="why-card-title">Review &amp; Emotion Analysis</h3>
+            <h3 className="why-card-title">Automated Feedback Analysis</h3>
             <p className="why-card-desc">
-              Analyze customer reviews and understand the emotions expressed in customer feedback.
+              Analyze customer reviews and understand the emotions expressed in customer feedback with data-driven accuracy.
             </p>
           </div>
 
@@ -142,26 +142,48 @@ export default function LandingPage() {
             </div>
             <div className="browser-address-bar">
               <Lock size={10} className="lock-icon" />
-              <span className="url-text">shopee.ph/product/123456789</span>
+              <span className="url-text">marketplace.ph/product/123456789</span>
             </div>
             <div className="browser-actions-placeholder"></div>
           </div>
 
           {/* Mockup Body Content */}
           <div className="browser-body">
-            {/* Background Page Content Placeholder */}
+            {/* Background Page Content - Mini Product & Taglish Review Preview Card */}
             <div className="mock-ecommerce-page">
-              <div className="mock-product-image-box">
-                <div className="mock-img-placeholder" />
+              <div className="mock-product-card">
+                <div className="mock-product-image-box">
+                  <ShoppingBag size={34} className="mock-product-icon" aria-hidden="true" />
+                </div>
+                <div className="mock-product-details">
+                  <div className="mock-product-badge">Preferred Seller</div>
+                  <div className="mock-product-title">Wireless ANC Bluetooth Earbuds Pro</div>
+                  <div className="mock-product-price-row">
+                    <span className="mock-product-price">₱1,299</span>
+                    <span className="mock-product-sold">4.8k sold</span>
+                  </div>
+                </div>
               </div>
-              <div className="mock-product-details">
-                <div className="mock-line title" />
-                <div className="mock-line price" />
-                <div className="mock-line paragraph" />
-                <div className="mock-line paragraph short" />
-                <div className="mock-reviews-list">
-                  <div className="mock-review-item" />
-                  <div className="mock-review-item" />
+
+              <div className="mock-review-preview-card">
+                <div className="mock-review-header">
+                  <div className="mock-review-user-info">
+                    <div className="mock-review-avatar">M</div>
+                    <div>
+                      <div className="mock-review-author">maria_c***</div>
+                      <div className="mock-review-meta">Verified Purchase • 2 days ago</div>
+                    </div>
+                  </div>
+                  <div className="mock-review-stars" aria-label="5 out of 5 stars">
+                    ★★★★★
+                  </div>
+                </div>
+                <p className="mock-review-snippet">
+                  "Ang bilis dumating at solid yung quality, sulit na sulit!"
+                </p>
+                <div className="mock-review-footer">
+                  <span className="mock-review-tag">Variation: Matte Black</span>
+                  <span className="mock-review-helpful">👍 Helpful (28)</span>
                 </div>
               </div>
             </div>
@@ -170,7 +192,7 @@ export default function LandingPage() {
             <div className="vox-widget-overlay">
               <div className="widget-header">
                 <div className="widget-brand">
-                  <img src={logoDark} alt="VoxReview" className="widget-logo" />
+                  <img src={logoLight} alt="VoxReview" className="widget-logo" />
                   <span className="widget-name">VoxReview</span>
                 </div>
                 <div className="widget-user-icon">
@@ -219,6 +241,18 @@ export default function LandingPage() {
                   <span className="em-name">Sarcastic</span>
                   <span className="em-val">2%</span>
                 </div>
+              </div>
+
+              {/* Compact Status Pills: Topic & Priority */}
+              <div className="widget-status-pills">
+                <span className="widget-status-pill widget-status-pill--topic" title="Dominant Discussion Topic">
+                  <Tag size={11} className="widget-pill-icon" aria-hidden="true" />
+                  <span>Topic: Quality</span>
+                </span>
+                <span className="widget-status-pill widget-status-pill--priority" title="Action Priority Level">
+                  <span className="priority-dot priority-dot--low" aria-hidden="true" />
+                  <span>Low Priority</span>
+                </span>
               </div>
             </div>
           </div>
